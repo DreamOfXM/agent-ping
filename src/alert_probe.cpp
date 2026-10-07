@@ -1,0 +1,248 @@
+// 提醒层的取证工具：不渲染任何像素，只把「该不该响、响过没有、通道是什么状态」摊开。
+// 存在的理由：菜单栏 App 最常见的失效方式是「系统没给通知权限」，而它表现出来只是不响 ——
+// 没有这条，用户只能靠「没弹」来猜，而没弹的成因可能是权限、签名、免打扰、也可能是判据。
+//
+// 退出码与闸门同规矩：0 通过 / 1 测了且不合格 / 2 根本没跑成。
+#include "alert.h"
+#include "platform/notify.h"
+#include "scan.h"
+
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
+#include <string>
+#include <vector>
+
+namespace {
+
+int g_pass = 0, g_fail = 0;
+
+void expect(const char* what, long got, long want) {
+    bool ok = got == want;
+    printf("%s %-46s 期望 %ld｜实得 %ld\n", ok ? "[通过]" : "[不符]", what, want, got);
+    ok ? g_pass++ : g_fail++;
+}
+void expect_true(const char* what, bool got) {
+    printf("%s %-46s 期望 真｜实得 %s\n", got ? "[通过]" : "[不符]", what, got ? "真" : "假");
+    got ? g_pass++ : g_fail++;
+}
+
+ap::Session ses(const char* id, const char* title, ap::State st, bool inferred = false) {
+    ap::Session s;
+    s.id = id; s.title = title; s.project = "probe"; s.state = st; s.inferred_wait = inferred;
+    return s;
+}
+ap::Snapshot snap_with(std::initializer_list<ap::Session> qoder,
+                       std::initializer_list<ap::Session> claude = {}) {
+    ap::Snapshot s;
+    s.scanned_at = 1;
+    ap::AgentSnap a; a.id = "qoder"; a.name = "Qoder CLI"; a.available = true;
+    for (auto& x : qoder) a.sessions.push_back(x);
+    s.agents.push_back(a);
+    if (claude.size()) {
+        ap::AgentSnap b; b.id = "claude"; b.name = "Claude Code"; b.available = true;
+        for (auto& x : claude) b.sessions.push_back(x);
+        s.agents.push_back(b);
+    }
+    return s;
+}
+
+int selftest() {
+    const char* dir = getenv("AGENTPING_STATE_DIR");
+    if (!dir || !*dir) {
+        fprintf(stderr, "[自检] 拒绝跑：AGENTPING_STATE_DIR 没设。\n"
+                        "       这条会把测试身份写进账本文件，不许落进你正在用的「%s」。\n",
+                ap::state_dir().c_str());
+        return 2;
+    }
+    printf("[自检] 状态目录＝%s\n", dir);
+
+    // ① 判据表：逐条对齐 Swift Engine.swift:285-294
+    expect_true("判据：失败中断要响", ap::should_alert(ap::ST_FAILED, false));
+    expect_true("判据：等你回复要响", ap::should_alert(ap::ST_NEEDS_USER, false));
+    expect_true("判据：真卡在授权上要响", ap::should_alert(ap::ST_AWAIT, false));
+    expect_true("判据：疑似等授权不响（误报）", !ap::should_alert(ap::ST_AWAIT, true));
+    expect_true("判据：排队中不响", !ap::should_alert(ap::ST_QUEUED, false));
+    expect_true("判据：运行中/已结束不响",
+                !ap::should_alert(ap::ST_WORKING, false) && !ap::should_alert(ap::ST_RESTING, false));
+
+    // ② 首轮：三响（含一条 inferred、一条 queued 必须被排除）
+    auto s = snap_with({ ses("a", "第一条等你", ap::ST_NEEDS_USER),
+                         ses("b", "第二条失败", ap::ST_FAILED),
+                         ses("c", "第三条等授权", ap::ST_AWAIT),
+                         ses("d", "疑似等授权", ap::ST_AWAIT, true),
+                         ses("e", "排队里", ap::ST_QUEUED) });
+    std::set<std::string> led;
+    std::set<std::string> out;
+    ap::AlertRound r1 = ap::select_alerts(s, led, false, &out);
+    expect("首轮：判据命中条数", r1.hits, 3);
+    expect("首轮：其中首次出现", r1.fresh, 3);
+    expect("首轮：待发出", (long)r1.to_post.size(), 3);
+    expect("首轮：被上限压掉", r1.capped, 0);
+    expect("首轮：账本条数", (long)out.size(), 3);
+    led = out;
+
+    // ③ 第二轮同一份数据：一条都不许多响（去重是真的，不是靠运气）
+    ap::AlertRound r2 = ap::select_alerts(s, led, false, &out);
+    expect("次轮：判据仍命中", r2.hits, 3);
+    expect("次轮：首次出现归零", r2.fresh, 0);
+    expect("次轮：待发出归零", (long)r2.to_post.size(), 0);
+    expect("次轮：账本不增长", (long)out.size(), 3);
+    led = out;
+
+    // ④ 会话从待处理里消失 → 必须摘账；再回来 → 必须还能响（不然第二次问就不吵你了）
+    auto s2 = snap_with({ ses("a", "第一条等你", ap::ST_NEEDS_USER),
+                          ses("b", "答完了", ap::ST_RESTING),
+                          ses("c", "第三条等授权", ap::ST_AWAIT),
+                          ses("d", "疑似等授权", ap::ST_AWAIT, true) });
+    ap::AlertRound r3 = ap::select_alerts(s2, led, false, &out);
+    expect("摘账：命中", r3.hits, 2);
+    expect("摘账：摘掉条数", r3.retired, 1);
+    expect("摘账：账本剩", (long)out.size(), 2);
+    led = out;
+    ap::AlertRound r4 = ap::select_alerts(s, led, false, &out);
+    expect("回到待处理：还能响", (long)r4.to_post.size(), 1);
+    expect("回到待处理：账本补回", (long)out.size(), 3);
+    led = out;
+
+    // ⑤ 上限：六条只发四条。Swift 侧把六条全部记进账本，于是第五、六条永远不会有横幅
+    //    （Engine.swift:315 formUnion 用的是整个 pending 而不是 prefix(4) 的）——
+    //    这里明写为「被压掉的不下轮就忘掉」，是与 Swift 的一处有意分歧，不是抄错。
+    auto big = snap_with({ ses("1", "一", ap::ST_FAILED), ses("2", "二", ap::ST_FAILED),
+                           ses("3", "三", ap::ST_FAILED), ses("4", "四", ap::ST_FAILED),
+                           ses("5", "五", ap::ST_FAILED), ses("6", "六", ap::ST_FAILED) });
+    std::set<std::string> blank;
+    ap::AlertRound r5 = ap::select_alerts(big, blank, false, &out);
+    expect("上限：本轮发出", (long)r5.to_post.size(), ap::kMaxPerRound);
+    expect("上限：被压掉", r5.capped, 2);
+    expect("上限：账本只记发出的", (long)out.size(), (long)ap::kMaxPerRound);
+    ap::AlertRound r6 = ap::select_alerts(big, out, false, &out);
+    expect("上限：压掉的下轮仍是首次", r6.fresh, 2);
+
+    // ⑥ 免打扰：整轮跳过且不清账。先落一份已知账本，两条断言才有真内容可比
+    //    （空账本 vs 空账本相等是永远成立的废话）。
+    std::string err;
+    std::set<std::string> seed = { ap::alert_key("qoder", "a"), ap::alert_key("qoder", "b") };
+    expect_true("落盘：先写两份已知身份", ap::save_alerted(seed, &err));
+    std::set<std::string> before = ap::load_alerted();
+    expect("落盘：读回条数", (long)before.size(), 2);
+    led = before;
+    ap::AlertRound r7 = ap::select_alerts(s, led, true, &out);
+    expect("免打扰：不发", (long)r7.to_post.size(), 0);
+    expect("免打扰：命中数不统计（整轮跳过）", r7.hits, 0);
+    expect("免打扰：摘账数不统计", r7.retired, 0);
+    expect_true("免打扰：账本原样不动（不清账）", out == before);
+
+    // ⑦ 落盘往返：整份账本写进去读出来必须逐键相等；跨重启留住是这条承诺的全部内容
+    expect_true("落盘：整份回写成功", ap::save_alerted(led, &err));
+    if (!err.empty()) printf("        %s\n", err.c_str());
+    expect_true("落盘：读回逐键相等", ap::load_alerted() == led);
+    expect("落盘：文件行数＝条数", (long)ap::load_alerted().size(), (long)led.size());
+
+    // ⑧ 设置：sound/dnd 写入读回，env 覆盖只在取证时生效
+    ap::AlertCfg cfg; cfg.sound = false; cfg.dnd = true;
+    expect_true("设置：写成功", ap::save_alert_cfg(cfg, &err));
+    unsetenv("AGENTPING_SOUND"); unsetenv("AGENTPING_DND");
+    ap::AlertCfg back = ap::load_alert_cfg();
+    expect_true("设置：提示音关着读回来还是关", !back.sound);
+    expect_true("设置：免打扰开着读回来还是开", back.dnd);
+    setenv("AGENTPING_DND", "0", 1);
+    expect_true("设置：env 能压过文件（取证专用）", !ap::load_alert_cfg().dnd);
+    unsetenv("AGENTPING_DND");
+
+    printf("[自检] 断言 %d 条，通过 %d，不符 %d\n", g_pass + g_fail, g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
+const char* WordOf(ap::State st) {
+    switch (st) {
+    case ap::ST_FAILED: return "失败中断";
+    case ap::ST_AWAIT:  return "等你授权";
+    default:            return "已完成";   // 与面板同一说法（Swift Theme:10-01 拍板：答完了不是要你介入）
+    }
+}
+
+int live_round(bool do_post) {
+    ap::Snapshot s = ap::scan_all((double)time(nullptr));
+    ap::AlertCfg cfg = ap::load_alert_cfg();
+    std::set<std::string> led = ap::load_alerted();
+    printf("[实况] 状态目录＝%s\n", ap::state_dir().c_str());
+    printf("[实况] 设置＝提示音%s 免打扰%s（env 覆盖：%s / %s）\n",
+           cfg.sound ? "开" : "关", cfg.dnd ? "开" : "关",
+           getenv("AGENTPING_SOUND") ? getenv("AGENTPING_SOUND") : "未设",
+           getenv("AGENTPING_DND") ? getenv("AGENTPING_DND") : "未设");
+    printf("[实况] 进账本的条数＝%zu\n", led.size());
+
+    char why[512] = {0};
+    int ch = ap_notify_channel(why, (int)sizeof why);
+    printf("[通道] %s：%s\n", ch == 0 ? "横幅可用" : ch == 1 ? "横幅不可用" : "问不出来", why);
+
+    std::set<std::string> out;
+    ap::AlertRound r = ap::select_alerts(s, led, cfg.dnd, &out);
+    printf("[判据] 命中 %d｜首次 %d｜待发 %zu｜压掉 %d｜摘账 %d｜免打扰%s\n",
+           r.hits, r.fresh, r.to_post.size(), r.capped, r.retired, r.dnd ? "开（整轮跳过）" : "关");
+    for (const auto& p : r.to_post) {
+        std::string title = p.agent_name + " · " + WordOf(p.state);
+        if (!do_post) { printf("  → %s｜%s｜只算不发（--post 才真发）\n", title.c_str(), p.title.c_str()); continue; }
+        char rc_w[512] = {0};
+        int rc = ap_notify_post(title.c_str(), p.title.c_str(), p.agent_id.c_str(),
+                                p.session_id.c_str(), cfg.sound ? 1 : 0, rc_w, (int)sizeof rc_w);
+        const char* kind = rc == 0 ? "横幅已投" : rc == 1 ? "兜底出声"
+                       : rc == 3 ? "没回执，下轮再试" : "两边都不通";
+        printf("  → %s｜%s｜%s：%s\n", title.c_str(), p.title.c_str(), kind, rc_w);
+        // rc==3 不记账：这条发没发出去不知道，记了就等于静默丢掉一次「该吵你」
+        if (rc == 3) out.erase(ap::alert_key(p.agent_id, p.session_id));
+    }
+    if (do_post) {
+        std::string err;
+        if (!ap::save_alerted(out, &err)) {
+            printf("[账本] 写失败：%s —— 去重失效，下一轮会重发同一批\n", err.c_str());
+            return 1;
+        }
+        printf("[账本] 已回写，条数 %zu（原 %zu）\n", out.size(), led.size());
+    }
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    bool selftest_ = false, post_ = false, channel_ = false;
+    int burst_n = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--selftest")) selftest_ = true;
+        else if (!strcmp(argv[i], "--post")) post_ = true;
+        else if (!strcmp(argv[i], "--check")) post_ = false;
+        else if (!strcmp(argv[i], "--channel")) channel_ = true;
+        else if (!strncmp(argv[i], "--burst=", 8)) burst_n = atoi(argv[i] + 8);
+        else { fprintf(stderr, "未知参数 %s\n用法：alert_probe [--selftest|--check|--post|--channel|--burst=N]\n", argv[i]); return 2; }
+    }
+    if (burst_n > 0) {
+        // 合成身份连发：不读真会话、不碰账本，只验平台那一层送不送得出去。
+        // 存在的理由：Linux 侧要走真数据得先造一整套假日志，而这里要测的只有 notify 后端与出声器。
+        int ok = 0;
+        const int want_sound = ap::load_alert_cfg().sound ? 1 : 0;   // 与 App 同一口径：设置里关着就不许响
+        for (int i = 0; i < burst_n; i++) {
+            char ident[32]; snprintf(ident, sizeof ident, "burst-%d", i);
+            // 正文必须逐条不同：dunst 会把「同标题 + 同正文」并成一叠并在角上写 (3)，
+            // 四条连发在屏幕上就只剩两格 —— 那时截图说不出「四条各自到了」。
+            char text[96]; snprintf(text, sizeof text, "取证合成的第 %d 条，不是真会话", i + 1);
+            char why[512] = {0};
+            int rc = ap_notify_post("Agent Ping 取证", text,
+                                    "probe", ident, want_sound, why, (int)sizeof why);
+            printf("  → %s｜rc=%d｜%s\n", ident, rc, why);
+            if (rc == 0 || rc == 1) ok++;
+        }
+        printf("[连发] %d/%d 条真送出去了（rc0＝横幅投递，rc1＝兜底出声）\n", ok, burst_n);
+        return ok == burst_n ? 0 : 1;
+    }
+    if (channel_) {
+        char why[512] = {0};
+        int rc = ap_notify_channel(why, (int)sizeof why);
+        printf("[通道] %s｜%s\n", rc == 0 ? "可用" : rc == 1 ? "不可用" : "问不出来（没在时限内回执）", why);
+        return rc == 0 ? 0 : (rc == 1 ? 1 : 2);
+    }
+    if (selftest_) return selftest();
+    return live_round(post_);
+}

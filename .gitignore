@@ -1,0 +1,20 @@
+# 构建产物
+build/
+build-linux/
+cmake-build-*/
+*.o *.obj *.a
+
+# 取证与过程稿：里面是真实会话标题、项目名、本机路径。
+# 只留本机，不进仓库——公开出去等于把作者的日常工作目录广播一遍。
+evidence/
+FINDINGS-*.md
+/*.png
+/*.ppm
+.DS_Store
+
+# 出包时由脚本生成
+assets/AppIcon.iconset/
+
+# 只对作者本机有意义的取证脚本：它们引用仓库之外的稿子目录
+Tools/compose_side.py
+Tools/render_draft_tall.py

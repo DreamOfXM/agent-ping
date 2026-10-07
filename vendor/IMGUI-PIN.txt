@@ -1,0 +1,12 @@
+Dear ImGui 1.93.0 WIP, vendored as a full upstream tree (no submodule, so `git clone`
+alone builds). 304 files, 8.5 MB; only imgui*.cpp plus the GLFW and OpenGL 3 backend
+are compiled — the rest is upstream's own examples/docs, kept verbatim so the pin is
+auditable.
+
+Upstream: https://github.com/ocornut/imgui
+Pinned at commit 4989b4c75491f2908aa3072ed3041245e6f98c09 (2026-10-05).
+License: MIT, see vendor/imgui/LICENSE.txt.
+
+To update: re-clone upstream at the new commit, replace this tree, then re-run
+`sh Tools/make_bundle.sh` and one `./build/pin_imgui_shell --dump` round to confirm
+the panel still renders.

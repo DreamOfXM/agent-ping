@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleExecutable</key>
+	<string>AgentPing</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.dreamofxm.agentping</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Agent Ping</string>
+	<key>CFBundleDisplayName</key>
+	<string>Agent Ping</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 DreamOfXM · Apache-2.0
+Menu-bar panel + alert layer. Reads the session logs each CLI writes on this machine to tell who is running and who is waiting; no network, no upload, no credentials read. Falls back to a sound when the banner channel is unavailable. Ledger and settings live in AgentPing's state dir (macOS: ~/Library/Application Support/AgentPing; Linux: $XDG_CONFIG_HOME/AgentPing).
+读本机各 CLI 自己写的会话日志判状态；不联网、不上传、不读凭据。横幅不可用时退化成提示音。去重账本与设置落在 AgentPing 的状态目录。</string>
+</dict>
+</plist>
