@@ -108,7 +108,20 @@ def failed(ts):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", required=True, help="要写入的假 HOME（必须是空目录或专用目录）")
+    ap.add_argument("--counts", help="覆盖 PLAN 的条数，形如 await=8,working=12,queued=4,failed=3,resting=3"
+                                    "（只给出要改的档，其余按 PLAN）。摆不下的那条缺陷要灌到 30 条才撞得出来）")
     a = ap.parse_args()
+
+    plan = dict(PLAN)
+    names = {k for k, _ in PLAN}
+    for pair in (a.counts or "").split(","):
+        if not pair.strip():
+            continue
+        k, _, v = pair.partition("=")
+        k = k.strip()
+        if k not in names:
+            raise SystemExit("拒绝：--counts 里的「%s」不是已知档位（可选：%s）" % (k, " ".join(sorted(names))))
+        plan[k] = int(v)
 
     real = os.path.expanduser("~")
     seed = os.path.abspath(a.home)
@@ -121,7 +134,7 @@ def main():
     made = 0
     counts = {}
     exp_today = exp_yday = 0.0
-    for kind, n in PLAN:
+    for kind, n in [(k, plan[k]) for k, _ in PLAN]:
         counts[kind] = n
         for i in range(1, n + 1):
             cid, recs = records(kind, now, i)

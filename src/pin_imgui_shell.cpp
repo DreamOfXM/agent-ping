@@ -94,6 +94,10 @@ static const Key kStr[] = {
     {"segs",           {"段", "Spans", "Abschnitte", "Intervalli", "区間", "구간"}},
     {"last_seen",      {"最近一次", "Last seen", "Zuletzt", "Ultima volta", "最終確認", "마지막 확인"}},
     {"more",           {"还有 %d 条", "+%d more", "+%d weitere", "+%d altri", "他 %d 件", "+%d건"}},
+    // 点名某一组之后唯一那条回路。六语都自带「←」：屏幕上认出它是返回靠的是这个箭头＋动词，
+    // 只把返回挂在别处（上级名/悬停）＝他明确否过的糊弄形状。
+    {"back_overview",  {"← 返回总览", "← Back to all", "← Zurück zur Übersicht",
+                        "← Torna a tutti", "← 全体に戻る", "← 전체로 돌아가기"}},
     // await 行专属的三颗（稿子 SessionRow.tsx:190 / 状态胶囊「等待确认」）
     {"await_confirm",  {"等待确认", "Waiting to confirm", "Warten auf Zusage", "In attesa di conferma", "確認待ち", "확인 대기"}},
     {"ask_confirm",    {"需要你确认", "needs your confirmation", "braucht deine Bestätigung", "richiede la tua conferma", "確認が必要です", "확인 필요"}},
@@ -842,7 +846,8 @@ static float PingK(double tn, float period, const float* ez) {
 // 比稿子自己那条 150ms 过渡短一个数量级，看不出来。
 // ─────────────────────────────────────────────────────────────────────────────
 enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
-              HIT_SET = 4, HIT_SETTINGS = 5, HIT_BACK = 6 };
+              HIT_SET = 4, HIT_SETTINGS = 5, HIT_BACK = 6, HIT_MORE = 7,
+              HIT_BACKOV = 8 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
@@ -858,6 +863,22 @@ struct Hit {
 };
 static std::vector<Hit> g_hits;                  // 本帧登记、下一帧消费
 static std::set<std::string> g_ack;              // 「已读」：只在内存，与 Swift 的 acknowledged 同一口径
+// 组号枚举在 DoAction（点入口时认是哪一组）与绘制两处都要用，定义提到这里；
+// 原来只在下半部分，DoAction 够不着（第一次编译就是这么报的 G_N 未声明）。
+enum { G_AWAIT, G_RUN, G_QUEUE, G_FAIL, G_DONE, G_N };
+/// 面板没有滚动条（挂的是 NoScrollbar），屏幕高度就是硬上限，所以「还有 N 条」不能只是句说明：
+/// 点它＝把版面换给那一组（被点名那组之外的组只留「标题＋入口」，点它们各自的入口就换过去），
+/// 在同一组里连着点＝往后翻页。翻页步长取上一帧这组真摆出来的条数（g_shown）。
+/// 点名那一屏顶部另有一条「返回总览」（HIT_BACKOV，row＝kFoldRow＋G_N）把 focus 清回 -1——
+/// 除「那组自己清空」之外，那是回平铺的唯一一条路，所以它必须常驻屏面而不是挤不下就不画。
+/// 都只在内存，与 g_ack 同一口径。
+static int g_focus = -1;      // 点名要看的那一组，-1＝按稿子顺序平铺
+static int g_page = 0;        // 这一组已经翻过去几条
+static int g_shown[G_N];      // 上一帧每组真摆了几条（翻页步长）
+// 取证口径：「收起来的条数 == 总数 − 摆出来的」这句话外部只能靠命中区表反推，而入口那条
+// 的文案只有数字（两组都收 3 条时「还有 3 条」长得一样，钉坐标就分不清点的是哪一组）。
+// 所以每帧把这组账写成一行诊断，配合 AGENTPING_HITS 的命中区表一起读。
+static char g_fold_diag[256];
 static std::map<std::string, double> g_later;    // 「稍后提醒」：会话键 → 恢复时刻（epoch 秒）
 
 /// Tailwind 的 transition-* 默认曲线 cubic-bezier(.4,0,.2,1) + duration-150。
@@ -950,6 +971,7 @@ static bool Inside(const Hit& h, const ImVec2& p) {
 //    代价是这屏比稿子少四处表面，且「数据源」从三列变成两列。
 // ─────────────────────────────────────────────────────────────────────────────
 static const int kNavRow = 90;    // 屏头那两颗导航胶囊占的 row 位：不挤 SetCtl 的 0..7，Zid 才不撞号
+static const int kFoldRow = 80;   // 「还有 N 条」占 80..84（一组一颗），85＝返回总览，与 kNavRow=90 错开
 
 struct SecBox { float x0, y0, x1, y1; };   // 一节「rounded-xl border bg-surface-1 p-3」占的方框
 
@@ -1308,6 +1330,8 @@ static const char* ActName(int act) {
         case HIT_SET:      return "设置项";
         case HIT_SETTINGS: return "设置";
         case HIT_BACK:     return "返回";
+        case HIT_MORE:     return "展开";
+        case HIT_BACKOV:   return "收起";
         default:           return "选项";
     }
 }
@@ -1407,6 +1431,19 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_view = 0;
             g_relayout = true;
             return;
+        case HIT_MORE: {                        // 「还有 N 条」：把版面换给这一组；在同一组上连着点＝翻页
+            int g = h.row - kFoldRow;
+            if (g < 0 || g >= G_N) return;
+            if (g_focus == g) g_page += g_shown[g] > 0 ? g_shown[g] : 1;
+            else { g_focus = g; g_page = 0; }
+            g_relayout = true;
+            return;
+        }
+        case HIT_BACKOV:                       // 「返回总览」：把版面从这一组换回平铺
+            g_focus = -1;
+            g_page = 0;
+            g_relayout = true;
+            return;
         case HIT_SET:                          // 设置屏的一颗：改档 + 落盘 + 该生效的立刻生效
             FlipSet(h.row, h.opt);
             return;
@@ -1431,6 +1468,15 @@ static bool ResolveZone(const char* want, ImVec2& out) {
             if (h.act == HIT_OPTION && ++seen == nth) { out = ImVec2((h.x0 + h.x1) * 0.5f, (h.y0 + h.y1) * 0.5f); return true; }
         return false;
     }
+    // 「展开N」＝按组号钉第 N 组那条入口（0 介入 1 运行 2 排队 3 失败 4 已结束）。
+    // 为什么非要有这一形：坐标钉法在点第二颗时会失效——第一颗已经把版面换了，那颗入口跟着
+    // 挪位置，"170,847;170,847" 的第二颗实测钉到了别的行上。组号是唯一跟着语义走的地址。
+    int grp = -1;
+    if (sscanf(want, "展开%d", &grp) == 1 && grp >= 0 && grp < G_N) {
+        for (const auto& h : g_hits)
+            if (h.act == HIT_MORE && h.row == kFoldRow + grp) { out = ImVec2((h.x0 + h.x1) * 0.5f, (h.y0 + h.y1) * 0.5f); return true; }
+        return false;
+    }
     for (const auto& h : g_hits)
         if (!strcmp(want, ActName(h.act)) || h.label == want) {
             out = ImVec2((h.x0 + h.x1) * 0.5f, (h.y0 + h.y1) * 0.5f);
@@ -1444,19 +1490,43 @@ static bool ResolveZone(const char* want, ImVec2& out) {
 /// active:scale-95 那一帧——没有抬起就不算一次点击，所以它不会跳走）；AGENTPING_CLICK=… 走完整
 /// 「按下→抬起」，动作真发生。三条都钉在真命中区上，不另搭假状态。
 ///
+/// AGENTPING_CLICK 还吃 ';' 分隔的序列（"170,847;170,847"），一颗点完空 8 帧（≈130ms，
+/// 够重摆行＋150ms 过渡落定）再点下一颗。为什么要序列：折叠入口的「同一组连着点＝往后翻页」
+/// 这条，一颗点完就退出的进程根本答不了；而 g_focus/g_page 只在内存，第二次启动又回到平铺，
+/// 于是那句主张永远只是设计意图而不是验过的事。
+static std::vector<std::string> g_click_seq = []() {
+    std::vector<std::string> out;
+    const char* e = getenv("AGENTPING_CLICK");
+    if (!e) return out;
+    for (const char* p = e; *p;) {
+        const char* q = strchr(p, ';');
+        if (!q) q = p + strlen(p);
+        if (q > p) out.emplace_back(p, (size_t)(q - p));
+        p = (*q == ';') ? q + 1 : q;
+    }
+    return out;
+}();
+static int g_click_at = 0;      // 序列走到第几颗
+static int g_click_gap = 0;     // 当前这颗已经占了几帧
+
 /// 真实指针为什么不取 io.MousePos：这块面板是系统浮层，指针在它上面时窗口往往不是 key，
 /// GLFW 的 motion 回调只在窗口收到事件时才更新，浮层上实测会漏。Apple 侧直接问系统要全局
 /// 指针位置再换算进窗口内容框——ImGui 的坐标系就是窗口的「点」尺寸（DisplaySize 取
 /// glfwGetWindowSize，Retina 倍率走 DisplayFramebufferScale），而 CG 给的也是点，所以直接减。
 /// 非 Apple 分支退回 io.MousePos（Linux 侧本机还没实机跑过，这条只是不阻断编译）。
 static ImVec2 MousePos(const ImGuiIO& io) {
+    ImVec2 p;
+    // 序列还没走完就钉在当前这颗上；走完了钉在最后一颗（与单颗点击原本的行为一致：
+    // 点完之后合成指针就留在那儿，出图轮的真指针另外被 g_shot_to 关掉）。
+    if (!g_click_seq.empty()) {
+        size_t i = g_click_at < (int)g_click_seq.size() ? (size_t)g_click_at : g_click_seq.size() - 1;
+        if (ResolveZone(g_click_seq[i].c_str(), p)) return p;
+    }
     static const char* env = []() {
         const char* e = getenv("AGENTPING_HOVER");
-        if (!e) e = getenv("AGENTPING_CLICK");
         if (!e) e = getenv("AGENTPING_DOWN");
         return e;
     }();
-    ImVec2 p;
     if (env && ResolveZone(env, p)) return p;
     if (g_shot_to) return ImVec2(-1.0e6f, -1.0e6f);   // 出图轮不许被真指针带跑，见 HandleInput 里那条
 #ifdef __APPLE__
@@ -1478,15 +1548,20 @@ static ImVec2 MousePos(const ImGuiIO& io) {
 /// 顺带判一次点击。命中区是上一帧的几何，滞后一帧＝16ms，比 150ms 的过渡短一个数量级。
 static void HandleInput(const ImGuiIO& io, double now) {
     ImVec2 mp = MousePos(io);
-    static const char* kClick = getenv("AGENTPING_CLICK");
     static const char* kDown = getenv("AGENTPING_DOWN");
-    static int stage = 0;               // 0=还没按 1=按下了 2=已抬起，本进程不再按
     bool down = g_shot_to ? false : io.MouseDown[0];
     // 出图轮只认合成输入：实测他人在桌面上的真点击会落在面板上（这块是系统浮层，340×993 占着
     // 右上角），一张「悬停」证据就这么被串成了「已读之后」。真指针照常驱动，只在拍图那一轮关掉。
-    if (kClick && stage < 2) {          // 走过一次合成就把指针控制权还给真鼠标
-        if (stage == 0) { if (!g_hits.empty()) { down = true; stage = 1; } }
-        else { down = false; stage = 2; }
+    //
+    // 一颗点击占 8 帧：第 1 帧按下，第 2 帧抬起，DoAction 在抬起之后的第 3 帧真发生
+    // （见下面 g_was_down 那段），第 4~8 帧空转，让重摆行和 150ms 过渡都走完，
+    // 下一颗才钉得到新版面而不是旧几何。
+    if (!g_click_seq.empty() && g_click_at < (int)g_click_seq.size()) {
+        if (!g_hits.empty()) {
+            down = (g_click_gap == 0);
+            if (g_click_gap == 7) { g_click_at++; g_click_gap = 0; }
+            else g_click_gap++;
+        }
     } else if (kDown && !g_hits.empty()) {
         down = true;                    // 一直按着：稿子里这就是 :active，抬起才是一次点击
     }
@@ -1590,7 +1665,7 @@ static const char* StateKey(int st) {
 }
 
 // 稿子 render.mjs 的 PIN_GROUPS：五组、按这个顺序，空组不摆。
-enum { G_AWAIT, G_RUN, G_QUEUE, G_FAIL, G_DONE, G_N };
+// 组号枚举本身定义在 g_focus/g_shown 旁边（DoAction 也要用），这里只留取名的键表与映射。
 static const char* const kGrpKey[G_N] = {"grp_await", "grp_run", "grp_queue", "grp_fail", "grp_done"};
 static int GroupOf(int st) {
     switch (st) {
@@ -2509,22 +2584,153 @@ int main(int argc, char** argv) {
             cy = lineY + chipH + kSectionGap;
         }
 
-        // ── 卡脚三块先占预算，分组只能填剩下的。这三块（今天没活动／读不通／口径脚注）排在
-        //    分组循环之后且不受 maxBot 约束：实测内容涨到 773.7pt 而窗口按预算收到 760，
-        //    底部整条口径脚注被 ImGui 的裁剪矩形切掉——不是没画，是画到窗口外了。
+        // ── 预算先扣干净，分组只能填剩下的。三笔账都要在账上：卡脚那三块（今天没活动／
+        //    读不通／口径脚注）、每一组的组头、每一条「还有 N 条」。修前只扣了第一块和一组
+        //    间距（grpBot = maxBot - tail - kGroupGap），组头和入口都不算：容器灌 13 条假会话
+        //    实测 g_panelH=1098.8pt 而窗口被 WantedWindowH() 按屏高压到 1054pt ⇒ 底部整条
+        //    口径脚注画在窗口外、被 ImGui 的裁剪矩形切掉，超预算的会话行既不摆也不报。
+        //    窗口挂的是 NoScrollbar（浮层没有第二条路），所以「摆不下的必须报，报了的必须有出路」。
         const float kFootLine = kTierPx[T_SM] * 1.5f;
         float tail = 0.0f;
         if (!g_pd.quiet.empty()) tail += kFootLine + 8.0f;
         tail += (float)g_pd.errors.size() * (kFootLine + 8.0f);
         if (g_pd.credits > 0) tail += kTierPx[T_MICRO] + 8.0f;
-        const float grpBot = maxBot - tail - kGroupGap;
-        // 「还有 N 条」也是组内后加的：决定跳过某行那一刻就得给它留落点，
-        // 否则它自己就成了新的越界来源（一行 ≈ 23.5pt）。
+        // 入口那一行＝正文 1.5 倍行框 + 4pt 落点 + 前面那 6pt 行距。
         const float kMoreH = kFootLine + 4.0f + kRowGap;
+        const float kGrpHdrH = kTierPx[T_MICRO] + kLabelRowGap;   // 组头是 leading-none 的一行 + 6
+        // 「一组跑不掉的最低开销」kMoreH＝一条带组名的行（19）＋它下面那档行距（6）。每组都按这一份
+        // 预留，轮到自己就不再预留自己那份；余额线量的是「从已画到的位置 cy 往下还留给后面几组」，
+        // 所以组头、入口、组间距这些真实开销不用另记一笔——cy 走到哪儿，余额线就在哪儿起算。
+        // 为什么不能按最大开销（组头 15＋间距 16＋入口 25＝56.5）预留：10:1x 那轮 mac40 点名帧实测
+        // 运行组被后面三组那 169.5pt 的预扣挤成 '!'（并进一条没组名的折行入口），而它后面那几组轮到
+        // 自己时又把额度拿了回去，屏幕底部还空着 59pt——预扣按组序退，中间那组替后面所有组受罚。
+        // 为什么「每组一条」这份必须含那 6pt 分隔：10:3x 复算同一帧，被点名那组摆到余额线后加的是
+        // 16pt 组间距，下一组只剩 9.5pt 摆它那 19pt 的名字行 ⇒ 又走成 '!'。分隔算进份内之后，
+        // 每组轮到时恰好拿到 25pt，紧凑一行（19＋6）刚好装得下，'!' 只在屏面连一行都放不下时才走。
+        int grp_n = 0, last_grp = -1;
+        for (int i = 0; i < G_N; i++) if (cnt[i]) { last_grp = i; grp_n++; }
+        // 另有两笔扣死、不参与退还：① 点名那屏顶部那条「返回总览」是这块版面唯一那条回路，不能
+        // 是「预算不够就不画」的装饰；② 尾部那条折行入口画在循环之外，可能替两组以上收账。
+        const int extra_lines = (g_focus >= 0 ? 1 : 0) + (grp_n > 1 ? 1 : 0);
+        float grpBot = 0.0f;      // 余额线，每轮重算，见循环开头
+
+        //    一条可点的「还有 N 条」：整行是命中区，悬停给与会话行同一层过渡底色（稿子的
+        //    hover:bg-menu-accent）。row 位＝kFoldRow＋组号；点下去把版面换给那一组，在同一组上
+        //    连着点＝往后翻一页（改的是 g_focus/g_page，重画由下一帧的 g_relayout 走）。
+        auto MoreLine = [&](int grp, int n) {
+            const long z = Zid(loc, kFoldRow + grp, HIT_MORE, 0);
+            const float k = TxPeek(z);
+            if (k > 0.001f)
+                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
+                                  MixA(kBg, kHoverRow, k), 7.0f);
+            char buf[48]; snprintf(buf, sizeof buf, T("more", loc), n);
+            DrawTextRun(dl, L + kRowPl + kAvatarD + kColGap, TextTop(cy, kFootLine, T_SM, loc),
+                        buf, loc, MixA(kTime, kFg, k), T_SM);
+            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_MORE, kFoldRow + grp, 0, loc, buf, 0);
+            cy += kFootLine + 4.0f;
+        };
+
+        // ── 预算紧到连组头都摆不下时的紧凑一行：「组名 · 还有 N 条」合成一行、同一个命中区。
+        //    为什么非要带组名：03:25 的 mac40 平铺帧实拍里，尾部三组（排队·失败·已结束）被并成
+        //    一条没有名字的「还有 5 条」，点下去只换到排队那 2 条——屏面上没有任何地方写着
+        //    「这 5 条其实来自三组」，等于把截断从「看不见」改成了「看得见但对不上账」。
+        auto CompactLine = [&](int grp, int n) {
+            const long z = Zid(loc, kFoldRow + grp, HIT_MORE, 0);
+            const float k = TxPeek(z);
+            if (k > 0.001f)
+                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
+                                  MixA(kBg, kHoverRow, k), 7.0f);
+            float ex = DrawTextRun(dl, L, TextTop(cy, kFootLine, T_MICRO, loc),
+                                   UpAscii(T(kGrpKey[grp], loc)), loc, kMicro, T_MICRO, track) + 6.0f;
+            ex = DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_MICRO, loc), "·", loc, W(44),
+                             T_MICRO, track) + 6.0f;
+            char buf[48]; snprintf(buf, sizeof buf, T("more", loc), n);
+            DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_SM, loc), buf, loc, MixA(kTime, kFg, k), T_SM);
+            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_MORE, kFoldRow + grp, 0, loc, buf, 0);
+            cy += kFootLine + 4.0f;
+        };
+
+        // ── 一组在这一帧摆不出组头时的出路，两条分支只此一处（两条都要在诊断账上留痕）：
+        //    摆得下紧凑一行就自己带组名，连一行都摆不下才并进尾部那条折行入口（'!'，无名）。
+        //    无名那条是最后手段：条数还在账上、点下去只换到宿主组，其它组在屏面上没有名字。
+        int fold_grp = -1, fold_n = 0, fold_mask = 0, agg_mask = 0;
+        auto FallbackLine = [&](int i) {
+            if (cy + kFootLine + 4.0f <= grpBot) {
+                fold_mask |= 1 << i;
+                CompactLine(i, cnt[i]);
+                if (i != last_grp || fold_n > 0) cy += kRowGap;
+                return;
+            }
+            if (fold_grp < 0) fold_grp = i;
+            agg_mask |= 1 << i;
+            fold_n += cnt[i];
+        };
 
         // ── 按状态分组；空组不渲染（他的空态门：没有真实输出就不摆这个表面）
+        //    平铺时每组装到「每组上限」或「预算」为止，剩下的收进本组那条入口；一旦某组被
+        //    点名，版面整块让给它——其它组只留一行「组名 · 还有 N 条」，点它自己的那行就换回去。
+        //    这样每一颗点下去都有动静：屏幕是硬上限时，出路只能是「换一组看」，不是滚动。
+        if (g_focus >= 0 && (g_focus >= G_N || !cnt[g_focus])) { g_focus = -1; g_page = 0; }
+        if (g_focus >= 0 && g_page >= cnt[g_focus]) g_page = 0;   // 翻到头回到这组的头一页
+        const int focus = g_focus;
+        // 点名＝版面整块换给一组，那就必须留一条明写在屏面上的回路：这块浮层挂 NoScrollbar，
+        // 既没有滚动条也没有返回手势。修前 focus 一旦 ≥0，唯一的复位路是「那一组自己清空」——
+        // 点进 12 条的运行组之后，平铺版面再也回不来（探针 s13 那轮就是这么撞出这个形状的）。
+        if (focus >= 0) {
+            const char* back = T("back_overview", loc);
+            const long z = Zid(loc, kFoldRow + G_N, HIT_BACKOV, 0);
+            const float k = TxPeek(z);
+            if (k > 0.001f)
+                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
+                                  MixA(kBg, kHoverRow, k), 7.0f);
+            DrawTextRun(dl, L, TextTop(cy, kFootLine, T_SM, loc), back, loc, MixA(kTime, kFg, k), T_SM);
+            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_BACKOV, kFoldRow + G_N, 0, loc, back, 0);
+            // 03:25 那轮实拍读图：只留 4pt 时这行与下面那行组头在图上几乎连成一块，而它是面板级
+            // 控件、不属于这一组 ⇒ 再加一档行距（额度本来就按整条 kMoreH 预留的，不会顶掉预算）。
+            cy += kFootLine + 4.0f + kRowGap;
+        }
+        for (int i = 0; i < G_N; i++) g_shown[i] = 0;
         for (int i = 0; i < G_N; i++) {
             if (!cnt[i]) continue;
+            // 余额线每轮重算：这条线以下才许摆下一组的名字行，量的是「从线到屏幕底还留着后面
+            // 每组一条（25pt）加那两条扣死的线」。后面每走过一组就放回一份，所以这条线只会下移，
+            // 不会把已经摆下去的行重新变成被裁掉。
+            int later = 0;
+            for (int j = i + 1; j < G_N; j++) if (cnt[j]) later++;
+            grpBot = maxBot - tail - (float)(extra_lines + later) * kMoreH;
+            // 点名那一屏上其它组的唯一职责是「点我换到这组」，不需要组头（版面整块已让给被点名那组）
+            // ⇒ 一律走紧凑一行。修前它们走「组头 15 ＋ 入口 19 ＋ 间距 16」那 50pt：mac40 的 click1
+            // 帧实测 运行＋排队 两组挤成一条没有组名的「还有 7 条」（点下去只换到运行，另外 2 条在账上
+            // 看得见、在屏上对不上是谁），而窗口底部还空着 44pt。按每组一行算只要 4×25＝100pt。
+            if (focus >= 0 && i != focus) { FallbackLine(i); continue; }
+            // 这组画完后面还要不要留分隔：后面还有组就必须留（16pt 组间距）；最后一组且没有
+            // 折行入口要收账就不留（那 16pt 谁都不挨着，是纯空额，单组平铺时 extra_lines＝0、
+            // 没有余额冲抵，它正好把脚注整块挤出窗口）。分隔放不放，额度就按放不放来算。
+            const float tail_sep = (i != last_grp || fold_n > 0) ? kGroupGap : 0.0f;
+            // 连「组头＋一条带组名的入口」都摆不下的组不摆半截标题：退成紧凑一行（组名＋条数
+            // 同一个命中区，19pt），再塞不下才走 FallbackLine 那条无名出路。
+            if (cy + kGrpHdrH + kFootLine + 4.0f + tail_sep > grpBot) { FallbackLine(i); continue; }
+            // 上一道闸只保证「组头＋入口」摆得下，不保证中间真能塞进一行会话。10-08 复算平铺帧
+            // 读到过这种形状：mac13 的排队／失败／已结束三组各画了一条组头，下面一行会话都没有，
+            // 紧跟一条「还有 N 条」——组头报的数与入口报的数是同一个数，等于用 40pt 说了紧凑一行
+            // 19pt 就能说完的话。所以先按行循环里同一道闸量一次第一颗候选行（DrawSessionRow 末参
+            // false 是干跑，只量高不落笔），量出摆不下就直接退紧凑一行。
+            const bool paged = (focus == i);      // 被点名那组不受「每组上限」管：整屏都是它的额度
+            float first_need = 0.0f;
+            {
+                int sk = paged ? g_page : 0;
+                for (size_t ri = 0; ri < g_pd.rows.size(); ri++) {
+                    const UIRow& r = g_pd.rows[ri];
+                    if (GroupOf(r.state) != i) continue;
+                    if (sk > 0) { sk--; continue; }
+                    first_need = DrawSessionRow(dl, L, R, cy, r, loc, tn, false, (int)ri);
+                    break;
+                }
+            }
+            if (first_need <= 0.0f ||
+                cy + kGrpHdrH + first_need + (kRowGap + kFootLine + 4.0f + tail_sep) > grpBot) {
+                FallbackLine(i); continue;
+            }
             // 组头 = .micro-label 一行：标签 ·（opacity .45 叠在 white/38 上＝alpha 44） 计数，
             // 三段共用 9px mono + .16em 字距（计数也在同一个 div 里，不是更亮的独立样式）。
             float mh = kTierPx[T_MICRO];   // .micro-label 是 leading-none，行框＝字号
@@ -2533,26 +2739,49 @@ int main(int argc, char** argv) {
             char nb[8]; snprintf(nb, sizeof nb, "%d", cnt[i]);
             endX = DrawTextRun(dl, endX, TextTop(cy, mh, T_MICRO, loc), "·", loc, W(44), T_MICRO, track) + 6.0f;
             DrawTextRun(dl, endX, TextTop(cy, mh, T_MICRO, loc), nb, loc, kMicro, T_MICRO, track);
-            cy += mh + kLabelRowGap;
-            int shown = 0, rest = 0;
+            cy += kGrpHdrH;
+            int sk = g_page, shown = 0, rest = 0;
             for (size_t ri = 0; ri < g_pd.rows.size(); ri++) {
                 const UIRow& r = g_pd.rows[ri];
                 if (GroupOf(r.state) != i) continue;
+                if (sk > 0) { sk--; rest++; continue; }
                 float need = DrawSessionRow(dl, L, R, cy, r, loc, tn, false, (int)ri);
-                if (shown >= g_cfg.max_rows || cy + need + (rest ? 0.0f : kMoreH) > grpBot) { rest++; continue; }
+                // 放行之前要扣三笔：这行自己前面的行距、这行的高、以及它之后那条入口加尾部分隔
+                // （6＋19＋tail_sep）。第三笔在「已经拒过一行」之后照样要扣——行高是不等的
+                // （带待回答块的比别的高），拒掉高的之后还会放进矮的，不扣这几行就把本组那条入口
+                // 的位置吃干净：10:5x 复算 mac40 的 click1，介入组 r10 被拒之后 r11 仍摆到 y 794..846、
+                // 入口 852..867，画完组间距后 cy 已在余额线下方，于是运行和排队两组一起掉进 '!'，
+                // 而屏幕底部还空着 44pt。
+                if ((!paged && shown >= g_cfg.max_rows) ||
+                    cy + (shown ? kRowGap : 0.0f) + need +
+                        (kRowGap + kFootLine + 4.0f + tail_sep) > grpBot) { rest++; continue; }
                 if (shown) cy += kRowGap;               // 稿子里每组是 space-y-1.5
                 DrawSessionRow(dl, L, R, cy, r, loc, tn, true, (int)ri);
                 cy += need; shown++;
             }
-            if (rest > 0 && cy + kMoreH <= maxBot) {
-                char buf[48]; snprintf(buf, sizeof buf, T("more", loc), rest);
-                if (shown) cy += kRowGap;
-                float lh = kTierPx[T_SM] * 1.5f;
-                DrawTextRun(dl, L + kRowPl + kAvatarD + kColGap, TextTop(cy, lh, T_SM, loc),
-                            buf, loc, kTime, T_SM);
-                cy += lh + 4.0f;
+            g_shown[i] = shown;
+            if (rest > 0) { if (shown) cy += kRowGap; MoreLine(i, rest); }
+            if (tail_sep > 0.0f) cy += tail_sep;
+        }
+        if (fold_n > 0) MoreLine(fold_grp, fold_n);
+
+        // 每组一行「总数/摆出/收起」，供外部把三条判据算成数字而不是看图猜。尾巴上的标记
+        // 说的是这组这一帧是怎么摆的：'~'＝退成了紧凑一行（组名＋条数同一行），'!'＝连那一行
+        // 都塞不下、条数并进了最后那条折行入口。两种都是「没摆组头」，命中区表里看不出区别，
+        // 所以必须在账上留痕，否则外部只能靠数行数猜版面走的是哪条路。
+        // 每一组被并进来都要打点，不只打那条入口的宿主组：03:25 那轮尾部三组里只有第一组有标记，
+        // 另外两组在账上跟「静默丢掉」长得一模一样——数得出总和少了、数不出是谁少了。
+        // 收在这一帧而不是点击那帧：入口点下去之后版面整块换人，账要能对上新旧两帧。
+        {
+            int off = 0;
+            g_fold_diag[0] = 0;
+            for (int i = 0; i < G_N; i++) if (cnt[i]) {
+                char mk = 0;
+                if (fold_mask & (1 << i)) mk = '~';
+                else if (agg_mask & (1 << i)) mk = '!';
+                off += snprintf(g_fold_diag + off, sizeof g_fold_diag - off, " %s=%d/%d/%d%c",
+                                kGrpKey[i], cnt[i], g_shown[i], cnt[i] - g_shown[i], mk ? mk : ' ');
             }
-            cy += kGroupGap;
         }
 
         // 今天没活动的采集器收成一行；读不通的源单独一条 —— 两者长得不一样，混报就是骗他
@@ -2703,17 +2932,32 @@ int main(int argc, char** argv) {
                 RebuildPanel(g_snap);
             }
             drawPanel(0, 0, (float)WantedWindowW(), g_loc, g_view);
-            // AGENTPING_HITS=1：把这一帧真登记出来的命中区打到 stderr，只报一次。
+            // AGENTPING_HITS=1：把这一帧真登记出来的命中区打到 stderr。
             // 取证要按坐标钉悬停/点击，而坐标只有绘制那一趟算得准——手按着稿子估一份，
             // 估错就会「钉在按钮旁边的空白上」然后判成命中失效。
+            // 触发条件是「内容变了就打」而不是「只打第一帧」：点击发生在第 2~3 帧，
+            // 只报首帧的话日志里根本没有点击后的版面，「点一下到底换了什么」就只能靠脑补。
+            // 3 秒一轮的重扫数据相同 ⇒ 文本相同 ⇒ 不重复刷屏。
             if (getenv("AGENTPING_HITS") && !g_hits.empty()) {
-                static bool dumped = false;
-                if (!dumped) {
-                    dumped = true;
-                    for (const auto& h : g_hits)
-                        fprintf(stderr, "[命中区] %s %s %s x %.0f..%.0f y %.0f..%.0f 「%s」\n",
-                                ActName(h.act), h.agent_id.c_str(), h.native_id.c_str(),
-                                h.x0, h.x1, h.y0, h.y1, h.label.c_str());
+                static const char* prev = nullptr;
+                std::string dump;
+                char line[256];
+                // row 位对会话行是行号，对入口是 kFoldRow＋组号（80=介入…84=今日已结束，85=返回总览）：
+                // 光看文案分不出两组都收 3 条时点的是哪一条，坐标钉法要靠这个数。
+                for (const auto& h : g_hits) {
+                    snprintf(line, sizeof line, "[命中区] %s r%d %s %s x %.0f..%.0f y %.0f..%.0f 「%s」\n",
+                             ActName(h.act), h.row, h.agent_id.c_str(), h.native_id.c_str(),
+                             h.x0, h.x1, h.y0, h.y1, h.label.c_str());
+                    dump += line;
+                }
+                snprintf(line, sizeof line, "[版面] focus=%d page=%d 预算=%.1fpt 折叠账:%s\n",
+                         g_focus, g_page, (double)g_budgetH, g_fold_diag);
+                dump += line;
+                if (prev == nullptr || strcmp(prev, dump.c_str()) != 0) {
+                    static std::string keep;
+                    keep = dump;
+                    prev = keep.c_str();
+                    fputs(dump.c_str(), stderr);
                     fflush(stderr);
                 }
             }
