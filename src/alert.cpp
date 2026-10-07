@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -22,24 +23,37 @@ bool should_alert(State st, bool inferred) {
     return false;
 }
 
+bool alertable(const AlertCfg& cfg, State st, bool inferred, bool just_finished) {
+    if (st == ST_RESTING) return cfg.done && just_finished;
+    if (!should_alert(st, inferred)) return false;
+    switch (st) {
+    case ST_NEEDS_USER:   return cfg.needs_user;
+    case ST_AWAIT:        return cfg.await_perm;
+    case ST_FAILED:       return cfg.failed;
+    default:              return false;   // 排队中/运行中：should_alert 就不给，开关也不许开这一档
+    }
+}
+
 std::string alert_key(const std::string& agent_id, const std::string& session_id) {
     return agent_id + "\x1f" + session_id;   // 0x1f：分隔符不可能出现在路径或 uuid 里
 }
 
 AlertRound select_alerts(const Snapshot& snap, const std::set<std::string>& ledger,
-                         bool dnd, std::set<std::string>* out_ledger) {
+                         const AlertCfg& cfg, std::set<std::string>* out_ledger,
+                         const std::set<std::string>* just_finished) {
     AlertRound r;
-    r.dnd = dnd;
+    r.dnd = cfg.dnd;
     std::set<std::string> next = ledger;
     // dnd 只压我们这一侧的投递，且**不清账**：清了他哪天把通知打开，
     // 几天前那些早已处理完的会话会一起涌出来。
-    if (dnd) { if (out_ledger) *out_ledger = next; return r; }
+    if (cfg.dnd) { if (out_ledger) *out_ledger = next; return r; }
 
     std::set<std::string> live;
     for (const auto& ag : snap.agents) {
         for (const auto& se : ag.sessions) {
-            if (!should_alert(se.state, se.inferred_wait)) continue;
             const std::string k = alert_key(ag.id, se.id);
+            const bool jumped = just_finished && just_finished->count(k) > 0;
+            if (!alertable(cfg, se.state, se.inferred_wait, jumped)) continue;
             live.insert(k);
             r.hits++;
             if (ledger.count(k)) continue;
@@ -129,9 +143,25 @@ AlertCfg load_alert_cfg() {
     AlertCfg c;
     std::ifstream f(alert_settings_path(), std::ios::binary);
     std::string line;
+    // 一行一个 key=值，读不认识的键直接跳过：设置文件是用户会用手改的东西，
+    // 一个错键不许把其它七档一起吞掉。
     while (std::getline(f, line)) {
-        if (line == "sound=0") c.sound = false;
-        else if (line == "dnd=1") c.dnd = true;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+        const int b = (v == "1") ? 1 : (v == "0") ? 0 : -1;
+        if (k == "sound") { if (b >= 0) c.sound = b; }
+        else if (k == "dnd") { if (b >= 0) c.dnd = b; }
+        else if (k == "alert_needs") { if (b >= 0) c.needs_user = b; }
+        else if (k == "alert_await") { if (b >= 0) c.await_perm = b; }
+        else if (k == "alert_failed") { if (b >= 0) c.failed = b; }
+        else if (k == "alert_done") { if (b >= 0) c.done = b; }
+        else if (k == "on_top") { if (b >= 0) c.on_top = b; }
+        else if (k == "max_rows") {
+            int n = atoi(v.c_str());
+            if (n >= 1 && n <= 40) c.max_rows = n;      // 0 或负数＝整组摆不出来，那是失效不是设置
+        }
     }
     // 环境变量只用于取证：同一份判据要能在不碰他真实设置文件的前提下验出「免打扰确实压住了」。
     if (const char* e = getenv("AGENTPING_DND")) c.dnd = (*e == '1');
@@ -144,7 +174,14 @@ bool save_alert_cfg(const AlertCfg& cfg, std::string* err) {
     const std::string p = alert_settings_path();
     std::ofstream f(p, std::ios::binary | std::ios::trunc);
     if (!f) { if (err) *err = "写不了「" + p + "」"; return false; }
-    f << "sound=" << (cfg.sound ? 1 : 0) << "\n" << "dnd=" << (cfg.dnd ? 1 : 0) << "\n";
+    f << "sound=" << (cfg.sound ? 1 : 0) << "\n"
+      << "dnd=" << (cfg.dnd ? 1 : 0) << "\n"
+      << "alert_needs=" << (cfg.needs_user ? 1 : 0) << "\n"
+      << "alert_await=" << (cfg.await_perm ? 1 : 0) << "\n"
+      << "alert_failed=" << (cfg.failed ? 1 : 0) << "\n"
+      << "alert_done=" << (cfg.done ? 1 : 0) << "\n"
+      << "on_top=" << (cfg.on_top ? 1 : 0) << "\n"
+      << "max_rows=" << cfg.max_rows << "\n";
     f.flush();
     if (!f) { if (err) *err = "写到一半失败（" + p + "）"; return false; }
     return true;

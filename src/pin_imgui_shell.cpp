@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -90,6 +91,49 @@ static const Key kStr[] = {
                         "cr = contatore crediti di Qoder CLI, non denaro",
                         "cr＝Qoder CLI が自記する credits 計数。金額ではない",
                         "cr = Qoder CLI가 직접 기록하는 credits 값, 금액 아님"}},
+    // ── 设置屏（r14/settings.html）。节头/开关行/数据源格/脚注各一条，六语齐全，
+    //    缺一门语言就会在屏幕上露出「??」。
+    {"set_title",      {"设置", "Settings", "Einstellungen", "Impostazioni", "設定", "설정"}},
+    {"back",           {"返回", "Back", "Zurück", "Indietro", "戻る", "돌아가기"}},
+    {"sec_tools",      {"监听工具", "Monitored tools", "Beobachtete Tools", "Strumenti monitorati",
+                        "監視ツール", "모니터링 도구"}},
+    {"sec_alerts",     {"提醒规则", "Alert rules", "Hinweisregeln", "Regole di avviso",
+                        "通知ルール", "알림 규칙"}},
+    {"sec_window",     {"小窗行为", "Popover behaviour", "Mini-Panel-Verhalten",
+                        "Comportamento pannello", "小窓の挙動", "창 동작"}},
+    {"sec_sources",    {"数据源", "Data sources", "Datenquellen", "Origini dati",
+                        "データソース", "데이터 소스"}},
+    {"alert_states",   {"需要提醒的状态", "Alert on these states", "Diese Zustände melden",
+                        "Questi stati segnalati", "通知する状態", "다음 상태 알림"}},
+    {"sound",          {"提示音", "Alert sound", "Hinweiston", "Suono di avviso",
+                        "通知音", "알림 소리"}},
+    {"sys_notify",     {"系统通知", "System notifications", "Systemmitteilungen",
+                        "Notifiche di sistema", "システム通知", "시스템 알림"}},
+    {"on_top",         {"常驻置顶", "Keep on top", "Immer oben halten", "Sempre in primo piano",
+                        "常に手前に表示", "항상 최상단"}},
+    {"max_rows",       {"每组最多显示", "Rows per group", "Zeilen pro Gruppe", "Righe per gruppo",
+                        "グループ別最大件数", "그룹당 최대 표시"}},
+    {"src_scan",       {"本地日志扫描", "Local log scan", "Lokaler Log-Scan", "Scansione log locale",
+                        "ローカルログ走査", "로컬 로그 스캔"}},
+    {"src_hook",       {"Hook 收件箱", "Hook inbox", "Hook-Postfach", "Casella hook",
+                        "Hook 受信箱", "훅 수신함"}},
+    // 稿子这一格写的是「新增的工具会立即出现在导航与分组中」——我们按内置采集器编译，
+    // 没有增删这条路，所以脚注说的是真话而不是稿子那句。
+    {"note_tools",     {"工具由内置采集器决定，这里不能增删",
+                        "Collectors are built in — tools can't be added here",
+                        "Sammler sind fest eingebaut, hier nicht ergänzbar",
+                        "I raccoglitori sono integrati, qui non si aggiungono",
+                        "ツールは内蔵収集器で決まり、ここでは追加不可",
+                        "도구는 내장 수집기가 결정, 여기서 추가 불가"}},
+    {"note_snooze",    {"稍后提醒默认 20 分钟后恢复", "Snoozed rows come back after 20 min",
+                        "Zurückgestellte Meldungen nach 20 Min", "Righe rimandate dopo 20 min",
+                        "後で通知は 20 分後に復帰", "잠시 미룸은 20분 후 복구"}},
+    {"absent",         {"本机没有", "Not installed", "Nicht installiert", "Non installato",
+                        "未インストール", "미설치"}},
+    {"more_sec",       {"屏幕不够高，还有 %d 组没摆", "%d sections hidden (window too short)",
+                        "%d Bereiche verdeckt (Fenster zu niedrig)",
+                        "%d sezioni nascoste (finestra bassa)", "画面が低く %d 項目未表示",
+                        "창이 낮아 %d 섹션 미표시"}},
     // 相对时间：数字由外面填，所以这四条是格式串
     {"just_now",       {"刚刚", "just now", "gerade eben", "adesso", "たった今", "방금"}},
     {"min_ago",        {"%d 分钟前", "%d min ago", "vor %d Min", "%d min fa", "%d 分前", "%d분 전"}},
@@ -140,16 +184,25 @@ static const char* kFace[FACE_N] = {"NotoSans.ttf", "NotoSansSC.ttf", "NotoSansJ
 // 于是同尺寸拆成两档，谁 mono 直接照 SessionRow.trim.mjs / render.mjs 的 className 抄。
 // JetBrains Mono 的 cmap 只有拉丁，mono 档里的中文照样按 run 回退到 SC —— 它只决定拉丁那半截。
 enum Tier { T_NUM, T_TITLE, T_CHIP, T_TURNS, T_FAIL, T_BTN, T_GLYPH, T_GLYPH_SM, T_SM, T_PILL,
-            T_TIME, T_MICRO, TIER_N };
+            T_TIME, T_MICRO,
+            // 设置屏（r14/settings.html）另有的四处字号声明，逐条对着稿子的 class 抄：
+            // T_MLBL 节头/chips/数据源格/脚注的 mono 10；T_SEG 分段控件的 mono 11；
+            // T_LABEL 开关行文案的 sans 11.5；T_TOOL 工具名的 sans 12；
+            // T_GLYPH9 20pt 头像里的首字母 9（稿子 font-size:9px;font-weight:600 ——
+            // NotoSans 系只有常规字重，这一档按常规画，与 T_GLYPH 同一笔已知差异）。
+            T_MLBL, T_SEG, T_LABEL, T_TOOL, T_GLYPH9, TIER_N };
 static const float kTierPx[TIER_N]   = {26.0f, 12.5f, 11.0f, 11.0f, 10.5f, 10.5f, 10.0f, 6.0f,
-                                        10.0f, 9.5f, 9.5f, 9.0f};
+                                        10.0f, 9.5f, 9.5f, 9.0f,
+                                        10.0f, 11.0f, 11.5f, 12.0f, 9.0f};
 static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false, false, false,
-                                        true,  false, true,  true};
+                                        true,  false, true,  true,
+                                        true,  true,  false, false, false};
 // 稿子里的粗体只有两处落在 mono 上（num-xl 600、「N 轮」semibold），本机有
 // JetBrainsMono-SemiBold 可以直接对应。头像首字母（ToolGlyph）也是 600，但它的 family
 // 走 --font-sans，而 NotoSans 系只有常规字重 —— 那两档只能按常规画，差异记在 RESULT.md。
 static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false, false, false,
-                                        false, false, false, false};
+                                        false, false, false, false,
+                                        false, false, false, false, false};
 static bool MonoTier(int t) { return kTierMono[t]; }
 static int  MonoFace(int t) { return kTierBold[t] ? MONO_SB : MONO_R; }
 // 这张脸在这一档有没有可能被选中：mono 档只可能用到「它那一号等宽脸 + 四张正文脸」
@@ -302,6 +355,16 @@ static const ImU32 kStFail    = IM_COL32(255, 81, 90, 255);   // --st-fail   .68
 static const ImU32 kStDone    = IM_COL32(62, 212, 120, 255);  // --st-done   .77 .18 152
 static const ImU32 kInk       = IM_COL32(11, 13, 18, 255);    // #0b0d12，选中胶囊上的反色字
 static const ImU32 kHair      = IM_COL32(229, 240, 252, 23);  // --hairline oklch(.95 .02 250 / 9%)
+// 设置屏（r14/settings.html）另用的五支：全部由 evidence/1007-settings/colors-chrome.txt
+// 里那条「Chrome 无头 canvas 逐支涂 1×1 读回设备像素」的量法落数，不是按公式手推。
+// 同一条量法对 --background / --hairline / --st-await 三个已上线的值复算全等，才敢用在这里。
+static const ImU32 kSurface1  = IM_COL32(16, 22, 31, 255);    // --surface-1  .2 .02 258，节的底
+static const ImU32 kSurface2  = IM_COL32(28, 35, 45, 255);    // --surface-2  .255 .022 255，工具行/关轨的底
+static const ImU32 kPrimary   = IM_COL32(0, 209, 218, 255);   // --primary    .78 .14 200，开关与选中段
+static const ImU32 kPrimaryFg = IM_COL32(14, 20, 29, 255);    // --primary-foreground .19 .02 258
+static const ImU32 kStIdle    = IM_COL32(92, 100, 111, 255);  // --st-idle    .5 .02 258，节头与未启用
+static const ImU32 kBorder    = IM_COL32(229, 240, 252, 28);  // --border   同色 11%
+static const ImU32 kInput     = IM_COL32(229, 240, 252, 41);  // --input    同色 16%
 // 白墨分档（draft 用 white/xx 表达层级）
 static ImU32 W(int a255) { return IM_COL32(255, 255, 255, a255); }
 static const ImU32 kTitle      = W(235);   // white/92
@@ -407,7 +470,6 @@ static void AddChromeText(ImFontGlyphRangesBuilder& rb);
 // 扫描会读几十上百个文件（本机实测冷扫 0.54s），绝不能放在渲染帧里。
 // ─────────────────────────────────────────────────────────────────────────────
 static const int kPanelW = 340;                 // #win{width:340px}
-static const int kMaxRowsPerGroup = 8;          // 稿子的「今日已结束」一档就摆了 8 行
 static const double kScanEvery = 3.0;
 
 // 几何逐条抄 r14/pin.html：main padding 12/12/16、区块 gap 12、行 py-8 pl-11 pr-8、
@@ -426,6 +488,29 @@ static const float kMetaLine = kTierPx[T_SM] * 1.5f;                       // 15
 static const float kDetailLine = kTierPx[T_CHIP] * 1.375f, kDetailPadY = 4.0f, kDetailGap = 6.0f;
 static const float kBarH = 6.0f;
 static const float kCanvasH = 760.0f;   // #win{height:760px}：画布按稿子，窗口随后收到内容高
+
+// 设置屏的几何，逐条抄 r14/settings.html 里 SettingsPopover.tsx 跑出来的 DOM class：
+//   section = rounded-xl(12px 圆角) + border 1 + bg-surface-1 + p-3(12)
+//   节头    = mono 10px + .16em + uppercase + text-st-idle，行框＝10×1.5＝15
+//   节头到内容 mt-2＝8；内容行之间 space-y-1.5＝6；脚注 mt-2＝8 + 10px leading-snug(1.375)
+//   开关行  = flex items-center：左 label 11.5px（行框 17.25）、右轨 18×32 → 行高取 18
+//   工具行  = li flex items-center gap-2 px-2 py-1.5 + 20px 头像 → 20+12+2border＝34
+//   胶囊    = mono 10px px-1.5 py-0.5 + 未选中那两条各 1px 边 → 15+4+2＝21
+//   分段    = mono 11px px-2 py-0.5 + 边 1 → 16.5+4+2＝22.5
+//   格子    = mono 10px leading-tight px-1.5 py-1.5 + 边 1 → 12.5+12+2＝26.5
+// 稿子 #win 是 420×660，正文区＝420-2(卡边)-24(main padding)＝394，节内＝394-2-24＝368。
+static const float kSecPad = 12.0f, kSecR = 12.0f, kSecHeadGap = 8.0f, kSecRowGap = 6.0f;
+static const float kHead10Line = kTierPx[T_MLBL] * 1.5f;        // 15
+static const float kNoteLine   = kTierPx[T_MLBL] * 1.375f;      // 13.75
+static const float kLabelLine  = kTierPx[T_LABEL] * 1.5f;       // 17.25
+static const float kToolNameLine = kTierPx[T_TOOL] * 1.5f;      // 18
+static const float kToggleH = 18.0f, kToggleW = 32.0f, kKnobD = 12.0f;
+static const float kChipH = kHead10Line + 2 * 2.0f + 2 * 1.0f;  // 21
+static const float kSegLine = kTierPx[T_SEG] * 1.5f;            // 16.5
+static const float kSegH = kSegLine + 2 * 2.0f + 2 * 1.0f;      // 22.5
+static const float kTileLine = kTierPx[T_MLBL] * 1.25f;         // 12.5（leading-tight）
+static const float kTileH = kTileLine + 2 * 6.0f + 2 * 1.0f;    // 26.5
+static const float kToolLiH = 20.0f + 2 * 6.0f + 2 * 1.0f;      // 34
 
 static std::mutex g_mtx;
 static ap::Snapshot g_snap;          // 只在 g_mtx 下读写
@@ -464,11 +549,21 @@ struct UIRow {
     bool muted() const { return acked || snoozed; }
 };
 struct Chip { std::string name, initial; int n; ImU32 hue; };
+/// 设置屏「监听工具」一行的数据源：本轮 scan 真返回的采集器，一个不多一个不少。
+/// 三个布尔互斥（本机没有／读不通／今天没动静），全 false 才是「正常在听」。
+struct Tool {
+    std::string name, initial;
+    bool available = false, unreadable = false, quiet = false;
+    int rows = 0;
+    ImU32 hue;
+};
 struct PanelData {
     std::vector<UIRow> rows;
     std::vector<Chip> chips;             // 每个采集器一格（数字＝本轮真摆出来的行）
+    std::vector<Tool> tools;             // 全部采集器，含本机没有的那几路
     std::vector<std::string> quiet;      // 今天没活动的采集器名
     std::vector<std::string> errors;     // 「某采集器：读失败原因」
+    int hook_live = 0;                   // Hook 收件箱里这轮真数得到的信号文件数（数据源那一格）
     int needs = 0, run = 0;              // 顶栏两个数（needs＝介入+失败，run＝运行+排队）
     double credits = 0;
     double yday_credits = 0;             // 昨天同窗用量，只为第三格的「较昨日」环比
@@ -481,6 +576,19 @@ static bool g_panelVisible = true;
 static GLFWwindow* g_win = nullptr;      // 点击要跳走时得先把这块面板收起来
 /// 出图模式：这一轮是给取证的，点完不许真把窗口藏了（那样拍不到点击后的状态），也不许跳走。
 static const char* g_shot_to = getenv("AGENTPING_SHOT");
+
+// ── 设置屏接的三个活口子 ────────────────────────────────────────────────────
+// g_cfg 是「屏幕上那一屏」与 alert.cpp 的持久化之间唯一的桥：启动时 load、每次点击 save。
+// 面板不再每轮 load（原来 RunAlertRound 每 3s 读一次盘）——那样设置屏上刚点下去的档
+// 会被下一轮读盘盖掉，屏幕上亮着、账上却没改，是最难查的一种分叉。
+static ap::AlertCfg g_cfg;
+/// 0＝pin 列表，1＝设置屏。同一块窗口换内容，不另开窗口（另开就得多块卡框、多处收窗）。
+static int g_view = 0;
+/// 上一轮「还在动」（非静置）的会话身份键。设置屏打开「已完成」那一档后，只有
+/// 从这条集合里掉出来的会话才允许响 —— 没有它，第一次打开就会把几十条几天前静置的
+/// 会话当成跳变，连吵十几轮（alert.h 里同一条门）。
+static std::set<std::string> g_active;
+static const int kSetW = 420;            // settings.html #win{width:420px}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 画原子：全部是 r14/pin.html 里那一套（胶囊 / 头像环 / 左侧状态条 / 引用块）
@@ -503,6 +611,15 @@ static ImU32 MixA(ImU32 a, ImU32 b, float t) {
         return (int)(av + (bv - av) * t + 0.5f);
     };
     return IM_COL32(ch(0), ch(1), ch(2), ch(3));
+}
+
+// 把带 alpha 的 CSS 色合成到不透明底上，拿回一个不透明色。设置屏满屏都是
+// 「bg-primary/25」「border-hairline」这类半支，而两端的过渡（transition-colors）要按
+// 颜色插值：直接 MixA 两支带 alpha 的色会把透明度也从 9% 插到 50%，Chrome 不是这么算的
+// —— 它先把两支各自拍到底上，再在拍好的结果之间插。底取节的 kSurface1，与屏幕上真叠的那层一致。
+static ImU32 Over(ImU32 base, ImU32 src) {
+    const float a = (float)(src >> 24) / 255.0f;
+    return MixA(base, (src & 0x00FFFFFFu) | (255u << 24), a);
 }
 
 static void GradRound(ImDrawList* dl, float x, float y, float w, float h, float r,
@@ -701,10 +818,18 @@ static float PingK(double tn, float period, const float* ez) {
 // 测量那趟不许另算一套（否则量出来的行框与点下去的框会分叉）。代价是悬停滞后一帧＝16ms，
 // 比稿子自己那条 150ms 过渡短一个数量级，看不出来。
 // ─────────────────────────────────────────────────────────────────────────────
-enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3 };
+enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
+              HIT_SET = 4, HIT_SETTINGS = 5, HIT_BACK = 6 };
+/// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
+/// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
+enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
+              SC_TOP, SC_ROWS };
 struct Hit {
     float x0, y0, x1, y1;
     int act = 0, row = 0, opt = 0;
+    /// 这一颗当前是不是「开着」：开关/胶囊/分段都靠它驱动 150ms 的状态过渡（稿子的
+    /// transition-colors / transition-all）。命中区是绘制那一趟登记的，状态也在那一趟给出。
+    int state = 0;
     long zid = 0;
     std::string key, agent_id, native_id, label, title;
 };
@@ -744,6 +869,17 @@ static const int kOptScaleDown = 95;   // active:scale-95
 static long Zid(int loc, int row, int act, int opt) {
     return (long)loc * 1000000L + (long)row * 1000L + (long)act * 100L + (long)opt;
 }
+/// 设置屏的零件没有 UIRow（一行开关不对应任何会话），所以命中区另走这条：身份字段留空，
+/// 只带 label 供 AGENTPING_CLICK 按名字钉。
+static void AddHit(std::vector<Hit>& v, float x0, float y0, float x1, float y1,
+                   int act, int row, int opt, int loc, const std::string& label, int state) {
+    Hit h;
+    h.x0 = x0; h.y0 = y0; h.x1 = x1; h.y1 = y1;
+    h.act = act; h.row = row; h.opt = opt; h.state = state;
+    h.zid = Zid(loc, row, act, opt);
+    h.label = label;
+    v.push_back(h);
+}
 static void AddHit(std::vector<Hit>& v, float x0, float y0, float x1, float y1,
                    int act, int row, int opt, const UIRow& r, int loc, const std::string& label) {
     Hit h;
@@ -759,6 +895,12 @@ static float TxPeek(long zid) {
     auto it = g_tx.find(zid);
     return it == g_tx.end() ? 0.0f : it->second.cur;
 }
+/// 命中区刚出现（切屏、重扫后新增的行）时 g_tx 里还没有这条过渡，TxPeek 回 0 ——
+/// 那会让一颗本来就开着的开关入场时从「关」补一段动画，看着像刚被谁点开。给它当前真值。
+static float TxPeekNew(long zid, float fresh) {
+    auto it = g_tx.find(zid);
+    return it == g_tx.end() ? fresh : it->second.cur;
+}
 /// 过渡的**目标**（0/1）：稿子里有些属性不参与 transition —— 竖轨的 group-hover:opacity-0
 /// 那颗 span 只有 pointer-events/absolute/w/rounded，没有 transition-*，行一悬停它就当帧消失。
 /// 拿 cur 会跟着行的 150ms 底色一起淡，那是我给一个「瞬时开关」凭空加的过渡。
@@ -771,6 +913,363 @@ static bool Inside(const Hit& h, const ImVec2& p) {
     return p.x >= h.x0 && p.x < h.x1 && p.y >= h.y0 && p.y < h.y1;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 设置屏（r14/settings.html 那一屏，DOM 由稿子组件 SettingsPopover.tsx 在 Node 里跑出来）。
+// 五个原子各对应稿子里一节 DOM，class 逐条抄在上面的几何常量里：
+//   toolRow = :38 的采集器 <li>（20px 头像 + truncate 名字 + 右侧那颗图标按钮）
+//   chipRow = :82 的「需要提醒的状态」一排胶囊        toggle = :146/:148/:149 的开关行
+//   segRow  = :99 的 3/5/8 分段                      tile   = :113 的「数据源」网格
+// 两处方向相反的动作，都记在这里：
+// ① 稿子那些开关是 React 的本地 state，刷新就回默认档 —— 这里每一颗都真写进
+//    ap::AlertCfg 并落盘（settings.txt），下一轮重扫、下一次重启都按屏幕上亮着的那样生效。
+// ② 稿子里我们没有对应通路的东西一律不画：自定义工具名 + 色卡 + 「添加」、「模拟断开连接」、
+//    「模拟事件流」、「插件上报 · 未启用」、「Webhook · 未启用」。摆上去就是一格假的。
+//    代价是这屏比稿子少四处表面，且「数据源」从三列变成两列。
+// ─────────────────────────────────────────────────────────────────────────────
+static const int kNavRow = 90;    // 屏头那两颗导航胶囊占的 row 位：不挤 SetCtl 的 0..7，Zid 才不撞号
+
+struct SecBox { float x0, y0, x1, y1; };   // 一节「rounded-xl border bg-surface-1 p-3」占的方框
+
+/// 卡框 + 节底，全部提交到 background 层（它在所有窗口之前合成，所以末尾补画也盖不住字）。
+/// 叠的顺序是「卡底 → 每一节的底与边 → 卡描边」；反过来节底会把卡边抹掉。
+static void CardFrame(float x, float y, float w, float h, const std::vector<SecBox>* secs = nullptr) {
+    ImDrawList* bg = ImGui::GetBackgroundDrawList();
+    bg->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), kBg, kCardR);
+    if (secs)
+        for (const auto& s : *secs) {
+            bg->AddRectFilled(ImVec2(s.x0, s.y0), ImVec2(s.x1, s.y1), kSurface1, kSecR);
+            bg->AddRect(ImVec2(s.x0 + 0.5f, s.y0 + 0.5f), ImVec2(s.x1 - 0.5f, s.y1 - 0.5f),
+                        kHair, kSecR, 0, 1.0f);
+        }
+    bg->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f), kHair, kCardR, 0, 1.0f);
+}
+
+/// 一行里 items-center 的落笔点：先把 CSS 行框（lineH）在行高（rowH）里居中，再把字在行框里居中。
+/// 直接 TextTop(y, rowH) 等于把「行框高」当成「字形高」，差出来是 0.4~1.6pt 的下坠。
+static float CellTop(float y, float rowH, float lineH, int tier, int loc) {
+    return TextTop(y + (rowH - lineH) * 0.5f, lineH, tier, loc);
+}
+
+/// 稿子分段控件里「未选中」那一档（SettingsPopover.tsx:101：rounded px-2 py-0.5 text-[11px]
+/// border border-hairline text-muted-foreground hover:text-foreground）。
+/// 切屏那两颗胶囊（pin 屏的「设置」、设置屏的「返回」）在稿子里不存在——稿子靠页面外层 nav 切屏，
+/// 这块面板没有外层。但也不许凭空造样式，所以复用这一档现成的配方：同圆角、同边色、同字号与同 hover 变色。
+static float GhostPillW(const char* key, int loc) {
+    return 2 * 8.0f + 2 * 1.0f + TextWidth(T(key, loc), loc, T_SEG);
+}
+static void GhostPill(ImDrawList* dl, float x, float y, float w, int loc, const char* key, long z) {
+    dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + kSegH - 0.5f), kHair, 4.0f, 0, 1.0f);
+    DrawTextRun(dl, x + 9.0f, CellTop(y, kSegH, kSegLine, T_SEG, loc), T(key, loc), loc,
+                MixA(kMutedFg, kFg, TxPeek(z)), T_SEG);
+}
+
+/// 点设置屏的一颗：改内存 → 落盘 → 要现场生效的立刻生效。
+/// 落盘失败必须喊出来：屏幕上亮着、盘上没改，重启就回旧档，那是最难查的一种分叉。
+static void FlipSet(int ctl, int opt) {
+    const char* key = "";
+    bool b = false;                       // 「屏上那一颗」改完是不是亮着
+    switch (ctl) {
+        case SC_NEEDS:  g_cfg.needs_user = !g_cfg.needs_user; b = g_cfg.needs_user; key = "needs_you"; break;
+        case SC_AWAIT:  g_cfg.await_perm = !g_cfg.await_perm; b = g_cfg.await_perm; key = "await_confirm"; break;
+        case SC_FAIL:   g_cfg.failed     = !g_cfg.failed;     b = g_cfg.failed;     key = "failed"; break;
+        case SC_DONE:   g_cfg.done       = !g_cfg.done;       b = g_cfg.done;       key = "st_done"; break;
+        case SC_SOUND:  g_cfg.sound      = !g_cfg.sound;      b = g_cfg.sound;      key = "sound"; break;
+        // 屏上那颗叫「系统通知」，账上那项叫 dnd（免打扰）：同一件事的两个方向，所以这里必须取反。
+        // 日志把两边都念出来，对账时才不会把「一个开一个关」误读成 bug。
+        case SC_NOTIFY: g_cfg.dnd        = !g_cfg.dnd;        b = !g_cfg.dnd;       key = "sys_notify"; break;
+        case SC_TOP:    g_cfg.on_top     = !g_cfg.on_top;      b = g_cfg.on_top;    key = "on_top"; break;
+        case SC_ROWS:   g_cfg.max_rows   = opt;               b = true;             key = "max_rows"; break;
+        default: return;
+    }
+    char val[64];
+    if (ctl == SC_ROWS)      snprintf(val, sizeof val, "%d 条", g_cfg.max_rows);
+    else if (ctl == SC_NOTIFY) snprintf(val, sizeof val, "%s（账上 dnd＝%d）", b ? "开" : "关", g_cfg.dnd ? 1 : 0);
+    else                     snprintf(val, sizeof val, "%s", b ? "开" : "关");
+    std::string err;
+    const bool wrote = ap::save_alert_cfg(g_cfg, &err);
+    printf("[设置] %s ＝ %s｜%s\n", T(key, 0), val,
+           wrote ? "已落盘" : (std::string("落盘失败：") + (err.empty() ? "原因未回" : err)).c_str());
+    fflush(stdout);
+    if (ctl == SC_TOP && g_win) {
+        // 「常驻置顶」不是画出来的：GLFW 的 FLOATING 在 Cocoa 落到 NSFloatingWindowLevel，
+        // 在 X11 落到 _NET_WM_STATE_ABOVE。生效与否由 sb_float_window() 直接向系统要窗口层级——
+        // 那是可反驳的读数，不是我们在日志里自己说「我置顶了」。
+        glfwSetWindowAttrib(g_win, GLFW_FLOATING, g_cfg.on_top ? GLFW_TRUE : GLFW_FALSE);
+        sb_float_window();
+    }
+    if (ctl == SC_ROWS) g_relayout = true;      // 每组条数变了，卡高跟着变
+}
+
+/// 画设置屏，返回内容底部 y。每一节先按同一套算法量一遍高度（measure-then-draw，
+/// 与 DrawSessionRow 同口径）：够摆才真画并登记命中区，摆不下的整节收进末行那条读数。
+static float drawSettings(ImDrawList* dl, float L, float R, float maxBot, int loc, float cy,
+                          std::vector<SecBox>* secs) {
+    const float ix0 = L + 13.0f, ix1 = R - 13.0f;      // 节框是 border-box：1px 边在宽内，内容再进 1 + p-3
+    const float track = kTierPx[T_MLBL] * 0.16f;       // 节头那条 tracking-[0.16em]（脚注没有，别顺手加）
+
+    // ── 屏头：标题在左、返回在右（与 pin 屏那侧的「设置」同一个角）──────────────
+    {
+        const long z = Zid(loc, kNavRow, HIT_BACK, 0);
+        const float pw = GhostPillW("back", loc);
+        DrawTextRun(dl, L, CellTop(cy, kSegH, kHead10Line, T_MLBL, loc), UpAscii(T("set_title", loc)),
+                    loc, kStIdle, T_MLBL, track);
+        GhostPill(dl, R - pw, cy, pw, loc, "back", z);
+        AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_BACK, kNavRow, 0, loc, T("back", 0), 0);
+        cy += kSegH + kSectionGap;
+    }
+
+    // ── 采集器行：右那一格在稿子里是「模拟断开连接」的图标按钮。采集器是编译进去的，
+    //    断开这条路不存在，所以同一格换成有真数据源的读数：本机没有／读不到／今天没活动，
+    //    三者都不占的就是今天该采集器真摆出来的会话数。判据与 pin 屏底部那两行同源（RebuildPanel）。
+    auto toolRow = [&](float y, const Tool& t, bool d) -> float {
+        if (d) {
+            dl->AddRectFilled(ImVec2(ix0, y), ImVec2(ix1, y + kToolLiH), kSurface2, 8.0f);
+            dl->AddRect(ImVec2(ix0 + 0.5f, y + 0.5f), ImVec2(ix1 - 0.5f, y + kToolLiH - 0.5f),
+                        Over(kSurface2, kHair), 8.0f, 0, 1.0f);
+            const float acx = ix0 + 1.0f + 8.0f + 10.0f, acy = y + kToolLiH * 0.5f;
+            GradCircle(dl, ImVec2(acx, acy), 10.0f, WithA(t.hue, 66), WithA(t.hue, 20), WithA(t.hue, 140));
+            DrawTextRun(dl, acx - TextWidth(t.initial, loc, T_GLYPH9) * 0.5f,
+                        TextMid(acy, T_GLYPH9, loc), t.initial, loc, t.hue, T_GLYPH9);
+            std::string rs;
+            ImU32 rc = kStIdle;
+            if (!t.available)        rs = T("absent", loc);
+            else if (t.unreadable) { rs = T("unreadable", loc); rc = WithA(kStFail, 210); }
+            else if (t.quiet)        rs = T("quiet_agents", loc);
+            else { char nb[64]; snprintf(nb, sizeof nb, "%s · %d", T("sessions_today", loc), t.rows); rs = nb; }
+            const float rw = TextWidth(rs, loc, T_MLBL);
+            const float nx = ix0 + 1.0f + 8.0f + 20.0f + 8.0f;
+            const float rx = ix1 - 1.0f - 8.0f - rw;
+            DrawTextRun(dl, nx, CellTop(y, kToolLiH, kToolNameLine, T_TOOL, loc),
+                        ClipToWidth(t.name, rx - 8.0f - nx, loc, T_TOOL), loc, kFg, T_TOOL);
+            DrawTextRun(dl, rx, CellTop(y, kToolLiH, kHead10Line, T_MLBL, loc), rs, loc, rc, T_MLBL);
+        }
+        return kToolLiH;
+    };
+
+    // 四档状态：屏上的名目与 alert.cpp 的字段一一对应，顺序就是 SetCtl 的顺序。
+    const int kChipCtl[4] = {SC_NEEDS, SC_AWAIT, SC_FAIL, SC_DONE};
+    const char* kChipKey[4] = {"needs_you", "await_confirm", "failed", "st_done"};
+    auto chipOn = [&](int ctl) {
+        switch (ctl) {
+            case SC_NEEDS: return g_cfg.needs_user;
+            case SC_AWAIT: return g_cfg.await_perm;
+            case SC_FAIL:  return g_cfg.failed;
+            default:       return g_cfg.done;
+        }
+    };
+    // 「需要提醒的状态」那一排：稿子是 <div class="mono flex gap-1"> 里三颗 span，
+    // `rounded px-1.5 py-0.5 text-[10px]`，亮着的＝bg-st-await/14 + text-st-await，灭的＝border-hairline + text-st-idle。
+    // 两条实测细节照抄：① 未选中那颗多了 1px 边，但父 flex 默认 align-items:stretch 把两颗一起
+    // 拉到 21 高，于是文字起笔差 1pt（亮 +2、灭 +3）；② 亮着的四档共用同一支琥珀色，不是一档一色。
+    // 唯一一处「加东西」：稿子里它们是点不动的 span，这里必须是能改档的按钮，
+    // 并把稿子里没有的「等你回复」补成第一档（should_alert 早就认这一档，屏上却没有）。
+    auto chipRow = [&](float y, bool d) -> float {
+        const float labW = TextWidth(T("alert_states", loc), loc, T_LABEL);
+        float cw[4], rowW = 0;
+        for (int i = 0; i < 4; i++) {
+            cw[i] = 2 * 6.0f + TextWidth(T(kChipKey[i], loc), loc, T_MLBL)
+                  + (chipOn(kChipCtl[i]) ? 0.0f : 2.0f);
+            rowW += cw[i];
+        }
+        rowW += 3 * 4.0f;                                     // flex gap-1 ＝ 4
+        const bool wrap = ix0 + labW + 8.0f + rowW > ix1;      // 稿子靠 #win{overflow:hidden} 截掉，我们不截
+        const float rowH = wrap ? kLabelLine + kSecRowGap + kChipH : std::max(kLabelLine, kChipH);
+        if (d) {
+            // 换行时标签占第一行，必须顶到 y；只有单行才按 items-center 与胶囊互居。
+            const float labTop = wrap ? TextTop(y, kLabelLine, T_LABEL, loc)
+                                      : CellTop(y, rowH, kLabelLine, T_LABEL, loc);
+            DrawTextRun(dl, ix0, labTop,
+                        ClipToWidth(T("alert_states", loc), ix1 - ix0, loc, T_LABEL), loc, kMutedFg, T_LABEL);
+            float cx = wrap ? ix0 : ix1 - rowW;
+            const float chy = wrap ? y + kLabelLine + kSecRowGap : y;
+            for (int i = 0; i < 4; i++) {
+                const int ctl = kChipCtl[i];
+                const bool on = chipOn(ctl);
+                const ImU32 fill = on ? Over(kSurface1, WithA(kStAwait, 36)) : kSurface1;   // /14 ＝ 36/255
+                if (fill != kSurface1)
+                    dl->AddRectFilled(ImVec2(cx, chy), ImVec2(cx + cw[i], chy + kChipH), fill, 4.0f);
+                if (!on)
+                    dl->AddRect(ImVec2(cx + 0.5f, chy + 0.5f), ImVec2(cx + cw[i] - 0.5f, chy + kChipH - 0.5f),
+                                Over(kSurface1, kHair), 4.0f, 0, 1.0f);
+                DrawTextRun(dl, cx + 6.0f, TextTop(chy + (on ? 2.0f : 3.0f), kHead10Line, T_MLBL, loc),
+                            T(kChipKey[i], loc), loc,
+                            on ? kStAwait : MixA(kStIdle, kFg, TxPeek(Zid(loc, ctl, HIT_SET, 0))), T_MLBL);
+                AddHit(g_hits, cx, chy, cx + cw[i], chy + kChipH, HIT_SET, ctl, 0, loc,
+                       T(kChipKey[i], 0), on ? 1 : 0);
+                cx += cw[i] + 4.0f;
+            }
+        }
+        return rowH;
+    };
+    // 开关行：整行 <button>（label 与轨在同一个 button 里，点哪儿都算）＋ 18×32 轨 ＋ 12px knob。
+    // knob 的 left 是 2（关）／16（开），相对 padding box，所以圆心＝轨左 +3+6 / +17+6。
+    auto toggle = [&](float y, int ctl, const char* key, bool on, bool d) -> float {
+        const float tx = ix1 - kToggleW;
+        if (d) {
+            const ImU32 f_off = kSurface2, f_on = Over(kSurface1, WithA(kPrimary, 64));   // bg-primary/25
+            const float k = TxPeekNew(Zid(loc, ctl, HIT_SET, 0) | (1L << 41), on ? 1.0f : 0.0f);
+            dl->AddRectFilled(ImVec2(tx, y), ImVec2(tx + kToggleW, y + kToggleH), MixA(f_off, f_on, k),
+                              kToggleH * 0.5f);
+            dl->AddRect(ImVec2(tx + 0.5f, y + 0.5f), ImVec2(tx + kToggleW - 0.5f, y + kToggleH - 0.5f),
+                        MixA(Over(f_off, kHair), Over(f_on, WithA(kPrimary, 128)), k),        // border-primary/50
+                        kToggleH * 0.5f, 0, 1.0f);
+            dl->AddCircleFilled(ImVec2(tx + 9.0f + 14.0f * k, y + kToggleH * 0.5f),
+                                kKnobD * 0.5f, MixA(kStIdle, kPrimary, k));
+            DrawTextRun(dl, ix0, CellTop(y, kToggleH, kLabelLine, T_LABEL, loc),
+                        ClipToWidth(T(key, loc), tx - 8.0f - ix0, loc, T_LABEL), loc, kMutedFg, T_LABEL);
+            AddHit(g_hits, ix0, y, ix1, y + kToggleH, HIT_SET, ctl, 0, loc, T(key, 0), on ? 1 : 0);
+        }
+        return kToggleH;
+    };
+    // 3/5/8 分段：选中那颗 bg-primary + 反色字、没有边；未选中有 1px 边。于是亮着的比灭的窄 2、
+    // 文字起笔 +2 vs +3。几何按当前档硬切（稿子只写了 transition-colors，宽度和边的有无都不在
+    // 过渡名单里），只有背景色与字色插那 150ms。
+    auto segRow = [&](float y, int ctl, const char* key, const int* vals, int n, int cur, bool d) -> float {
+        float bw[4], rowW = 0;
+        char nb[8];
+        for (int i = 0; i < n; i++) {
+            snprintf(nb, sizeof nb, "%d", vals[i]);
+            bw[i] = 2 * 8.0f + TextWidth(nb, loc, T_SEG) + (vals[i] == cur ? 0.0f : 2.0f);
+            rowW += bw[i];
+        }
+        rowW += (n - 1) * 4.0f;
+        const float labW = TextWidth(T(key, loc), loc, T_LABEL);
+        const bool wrap = ix0 + labW + 8.0f + rowW > ix1;
+        const float rowH = wrap ? kLabelLine + kSecRowGap + kSegH : std::max(kLabelLine, kSegH);
+        if (d) {
+            // 同 chipRow：换行时标签顶到 y，单行才与分段按钮互居。
+            const float labTop = wrap ? TextTop(y, kLabelLine, T_LABEL, loc)
+                                      : CellTop(y, rowH, kLabelLine, T_LABEL, loc);
+            DrawTextRun(dl, ix0, labTop,
+                        ClipToWidth(T(key, loc), ix1 - ix0, loc, T_LABEL), loc, kMutedFg, T_LABEL);
+            float cx = wrap ? ix0 : ix1 - rowW;
+            const float by = wrap ? y + kLabelLine + kSecRowGap : y;
+            for (int i = 0; i < n; i++) {
+                const bool on = vals[i] == cur;
+                snprintf(nb, sizeof nb, "%d", vals[i]);
+                const long z = Zid(loc, ctl, HIT_SET, vals[i]);
+                const float k = TxPeekNew(z | (1L << 41), on ? 1.0f : 0.0f);
+                dl->AddRectFilled(ImVec2(cx, by), ImVec2(cx + bw[i], by + kSegH),
+                                  MixA(kSurface1, kPrimary, k), 4.0f);
+                if (!on)
+                    dl->AddRect(ImVec2(cx + 0.5f, by + 0.5f), ImVec2(cx + bw[i] - 0.5f, by + kSegH - 0.5f),
+                                Over(kSurface1, kHair), 4.0f, 0, 1.0f);
+                DrawTextRun(dl, cx + 9.0f, TextTop(by + (on ? 2.0f : 3.0f), kSegLine, T_SEG, loc),
+                            nb, loc, MixA(MixA(kMutedFg, kFg, TxPeek(z)), kPrimaryFg, k), T_SEG);
+                AddHit(g_hits, cx, by, cx + bw[i], by + kSegH, HIT_SET, ctl, vals[i], loc, nb, on ? 1 : 0);
+                cx += bw[i] + 4.0f;
+            }
+        }
+        return rowH;
+    };
+    // 「数据源」那一格：稿子是 grid-cols-3，三格里只有一格本机真有通路。
+    // 另两格（插件上报／Webhook）没有实现，按空态门整格不画，所以这里只剩两格、改成 2 列铺满
+    // ——列数是我改的，格内的配方（10px leading-tight 居中 + px-1.5 py-1.5 + rounded-md）没改。
+    auto tile = [&](float x, float y, float w, const char* key, bool on, bool d) {
+        if (d) {
+            const ImU32 fill = on ? Over(kSurface1, WithA(kPrimary, 26)) : kSurface1;      // bg-primary/10
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + kTileH), fill, 6.0f);
+            dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + kTileH - 0.5f),
+                        on ? Over(fill, WithA(kPrimary, 115)) : Over(kSurface1, kHair),       // border-primary/45
+                        6.0f, 0, 1.0f);
+            const std::string s = ClipToWidth(T(key, loc), w - 12.0f - 2.0f, loc, T_MLBL);
+            DrawTextRun(dl, x + (w - TextWidth(s, loc, T_MLBL)) * 0.5f,
+                        TextTop(y + 7.0f, kTileLine, T_MLBL, loc), s, loc, on ? kPrimary : kStIdle, T_MLBL);
+        }
+    };
+
+    const int kSegVals[3] = {3, 5, 8};
+    auto head = [&](float& iy, const char* key, bool d) {
+        if (d) DrawTextRun(dl, ix0, TextTop(iy, kHead10Line, T_MLBL, loc), UpAscii(T(key, loc)),
+                           loc, kStIdle, T_MLBL, track);
+        iy += kHead10Line + kSecHeadGap;
+    };
+    auto foot = [&](float& iy, const char* key, bool d) {
+        iy += kSecHeadGap;                                    // 稿子里脚注是 mt-2
+        if (d) DrawTextRun(dl, ix0, TextTop(iy, kNoteLine, T_MLBL, loc),
+                           ClipToWidth(T(key, loc), ix1 - ix0, loc, T_MLBL), loc, kStIdle, T_MLBL);
+        iy += kNoteLine;
+    };
+    auto box = [&](float y, float iy, bool d) {
+        const float h = iy - y + kSecPad + 1.0f;              // 内容高 + p-3 + 上下两条 1px 边
+        if (d) secs->push_back({L, y, R, y + h});
+        return h;
+    };
+
+    auto secTools = [&](float y, bool d) -> float {
+        float iy = y + 1.0f + kSecPad;
+        head(iy, "sec_tools", d);
+        for (size_t i = 0; i < g_pd.tools.size(); i++) {
+            if (i) iy += kSecRowGap;                          // space-y-1.5
+            iy += toolRow(iy, g_pd.tools[i], d);
+        }
+        foot(iy, "note_tools", d);
+        return box(y, iy, d);
+    };
+    auto secAlerts = [&](float y, bool d) -> float {
+        float iy = y + 1.0f + kSecPad;
+        head(iy, "sec_alerts", d);
+        iy += chipRow(iy, d) + kSecRowGap;
+        iy += toggle(iy, SC_SOUND, "sound", g_cfg.sound, d) + kSecRowGap;
+        iy += toggle(iy, SC_NOTIFY, "sys_notify", !g_cfg.dnd, d);
+        foot(iy, "note_snooze", d);
+        return box(y, iy, d);
+    };
+    auto secWindow = [&](float y, bool d) -> float {
+        float iy = y + 1.0f + kSecPad;
+        head(iy, "sec_window", d);
+        iy += toggle(iy, SC_TOP, "on_top", g_cfg.on_top, d) + kSecRowGap;
+        iy += segRow(iy, SC_ROWS, "max_rows", kSegVals, 3, g_cfg.max_rows, d);
+        return box(y, iy, d);
+    };
+    auto secSources = [&](float y, bool d) -> float {
+        float iy = y + 1.0f + kSecPad;
+        head(iy, "sec_sources", d);
+        const float gap = 4.0f, tw = (ix1 - ix0 - gap) / 2.0f;   // 两列 gap-1
+        tile(ix0, iy, tw, "src_scan", true, d);                  // 本地日志扫描：这一屏活着就是它在供数
+        tile(ix0 + tw + gap, iy, tw, "src_hook", g_pd.hook_live > 0, d);
+        iy += kTileH;
+        return box(y, iy, d);
+    };
+    auto sec = [&](int i, float y, bool d) -> float {
+        if (i == 0) return secTools(y, d);
+        if (i == 1) return secAlerts(y, d);
+        if (i == 2) return secWindow(y, d);
+        return secSources(y, d);
+    };
+
+    // 「还有 N 组」那一行排在循环之外，不受 maxBot 约束：不预先给它留落点，
+    // 越界就会从「少摆一组」变成「提示行自己画到窗口外」。留不留取决于到底有没有组摆不下，
+    // 所以先纯量一趟定这个_bool，再按预留后的预算真正摆；第二趟只会更少摆，不会反过来。
+    const float kMoreSecH = kSectionGap + kNoteLine;
+    {
+        float ty = cy; int tskip = 0;
+        for (int i = 0; i < 4; i++) {
+            const float h = sec(i, ty, false);
+            if (!tskip && ty + h <= maxBot) { if (i) ty += kSectionGap; ty += h; }
+            else tskip++;
+        }
+        if (tskip) maxBot -= kMoreSecH;
+    }
+    int skip = 0;
+    for (int i = 0; i < 4; i++) {
+        const float h = sec(i, cy, false);
+        if (!skip && cy + h <= maxBot) {
+            if (i) cy += kSectionGap;                           // space-y-3
+            sec(i, cy, true);
+            cy += h;
+        } else skip++;
+    }
+    if (skip) {
+        char buf[128];
+        snprintf(buf, sizeof buf, T("more_sec", loc), skip);
+        cy += kSectionGap;
+        DrawTextRun(dl, ix0, TextTop(cy, kNoteLine, T_MLBL, loc), buf, loc, kStIdle, T_MLBL);
+        cy += kNoteLine;
+    }
+    return cy;
+}
+
 // ── 动作层 ───────────────────────────────────────────────────────────────────
 // 稿子给的语义只有两条能诚实兑现：
 //   已读   → 本进程记住这一行不再催（呼吸环、选项行、已读按钮一起收起，引用块留着）；
@@ -780,10 +1279,13 @@ static bool Inside(const Hit& h, const ImVec2& p) {
 // 所以点选项＝文案进剪贴板 + 跳到那会话，两件事都在稿子的文案里写明白了。
 static const char* ActName(int act) {
     switch (act) {
-        case HIT_OPEN:   return "整行";
-        case HIT_READ:   return "已读";
-        case HIT_LATER:  return "稍后提醒";
-        default:         return "选项";
+        case HIT_OPEN:     return "整行";
+        case HIT_READ:     return "已读";
+        case HIT_LATER:    return "稍后提醒";
+        case HIT_SET:      return "设置项";
+        case HIT_SETTINGS: return "设置";
+        case HIT_BACK:     return "返回";
+        default:           return "选项";
     }
 }
 
@@ -874,6 +1376,17 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             if (!g_shot_to) JumpTo(h);
             return;
         }
+        case HIT_SETTINGS:                    // 换屏：同一块窗口换内容，不另开窗口
+            g_view = 1;
+            g_relayout = true;
+            return;
+        case HIT_BACK:
+            g_view = 0;
+            g_relayout = true;
+            return;
+        case HIT_SET:                          // 设置屏的一颗：改档 + 落盘 + 该生效的立刻生效
+            FlipSet(h.row, h.opt);
+            return;
         default:                        // HIT_OPEN：整行 / 引用块都只负责跳
             if (!g_shot_to) JumpTo(h);
             return;
@@ -966,10 +1479,17 @@ static void HandleInput(const ImGuiIO& io, double now) {
         TxEval(h.zid, hov ? 1.0f : 0.0f, now);
         if (h.act != HIT_LATER)          // 稍后那颗稿子里没有 active 缩放
             TxEval(h.zid | (1L << 40), inside && down ? 1.0f : 0.0f, now);
+        // 开关／胶囊／分段的「开↔关」也走 150ms（稿子的 transition-colors 与 knob 的 transition-all）。
+        // 必须挂另一个位：同一颗的悬停过渡已经占了 zid 本身，active 占了 bit40。
+        if (h.act == HIT_SET)
+            TxEval(h.zid | (1L << 41), h.state ? 1.0f : 0.0f, now);
     }
     // 命中区消失了（行被重扫挤掉、操作区收起了）也得退回 0，不然会亮在那儿不走。
+    // 但「开↔关」那一位不许退：它是数据状态，不是指针状态。切到 pin 屏再切回来时
+    // 设置屏的命中区消失过一轮，若一起归零，回来就会看见满屏开关自己从关补到开。
     for (auto& kv : g_tx)
-        if (kv.second.seen != now && kv.second.target != 0.0f) TxEval(kv.first, 0.0f, now);
+        if (kv.second.seen != now && kv.second.target != 0.0f && !(kv.first & (1L << 41)))
+            TxEval(kv.first, 0.0f, now);
 
     if (down) {
         g_press = -1;
@@ -1442,7 +1962,19 @@ static void RebuildPanel(const ap::Snapshot& s) {
         // 有源、能读、但今天没有任何一条动静 —— 才算「今天没活动」
         if (ag.available && ag.scan_error.empty() && !has_today) pd.quiet.push_back(ag.name);
         if (!ag.scan_error.empty()) pd.errors.push_back(ag.name + "：" + ag.scan_error);
+        // 设置屏那一行：把上面三条判据原样带过去，不再另算一套（否则同一个采集器在
+        // 两块屏上一块说「本机没有」、另一块说「今天没活动」）。
+        Tool tl;
+        tl.name = ag.name;
+        tl.initial = InitialOf(ag.name);
+        tl.available = ag.available;
+        tl.unreadable = !ag.scan_error.empty();
+        tl.quiet = ag.available && ag.scan_error.empty() && !has_today;
+        tl.rows = shown;
+        tl.hue = HueFor(ag.name);
+        pd.tools.push_back(std::move(tl));
     }
+    pd.hook_live = s.hook_live;
     // 组内按「多久以前」升序：稿子 done 组就是 4 分钟前排在 14 小时前前面
     std::sort(pd.rows.begin(), pd.rows.end(), [](const UIRow& a, const UIRow& b) {
         int ga = GroupOf(a.state), gb = GroupOf(b.state);
@@ -1477,10 +2009,22 @@ static long g_alert_seq = -1;
 static bool g_alert_first = true;
 
 static void RunAlertRound(const ap::Snapshot& s) {
-    if (g_alert_first) g_ledger = ap::load_alerted();     // 跨重启留住：昨天响过的今天不许多响
-    ap::AlertCfg cfg = ap::load_alert_cfg();
+    // g_cfg 不在这里读盘：设置屏的每次点击都当场 save_alert_cfg 回写 g_cfg，
+    // 启动时 main 里 load 一次就够；再在这里 load 会把「刚点的那一下」擦回旧值，
+    // 于是关掉的提醒下一轮又响了。
+    if (g_alert_first) g_ledger = ap::load_alerted();   // 跨重启留住：昨天响过的今天不许多响
+    // 「本轮刚开始静置」＝上一轮还在动、这一轮静置。只有这个跳变才允许响「已完成」那一档。
+    // 第一次跑时 g_active 是空的，所以刚启动那一大片静置会话一条都不算跳变 —— 这正是
+    // alert.h 里那条门要防的「第一次打开已完成就连吵十几轮」。
+    std::set<std::string> cur, just_finished;
+    for (const auto& ag : s.agents)
+        for (const auto& se : ag.sessions) {
+            const std::string k = ap::alert_key(ag.id, se.id);
+            if (se.state != ap::ST_RESTING) cur.insert(k);
+            else if (g_active.count(k)) just_finished.insert(k);
+        }
     std::set<std::string> next;
-    ap::AlertRound r = ap::select_alerts(s, g_ledger, cfg.dnd, &next);
+    ap::AlertRound r = ap::select_alerts(s, g_ledger, g_cfg, &next, &just_finished);
 
     // 面板里点过「已读」的行不再吵；点过「稍后」的还没到恢复时刻也不吵。
     // 两条都要**从账本里摘掉**，否则恢复时刻一到它就变成「已提醒过」而永远不再响 ——
@@ -1509,7 +2053,7 @@ static void RunAlertRound(const ap::Snapshot& s) {
         const std::string title = p.agent_name + " · " + word;
         char why[512] = {0};
         int rc = ap_notify_post(title.c_str(), p.title.c_str(), p.agent_id.c_str(),
-                                p.session_id.c_str(), cfg.sound ? 1 : 0, why, (int)sizeof why);
+                                p.session_id.c_str(), g_cfg.sound ? 1 : 0, why, (int)sizeof why);
         // rc==3＝系统没在时限内回执：这条到底发没发出去不知道，所以**从账本里摘掉**，
         // 下轮重扫再试。记进账本就是把它静默丢掉 —— 比多响一次更糟的失效方式。
         if (rc == 3) next.erase(ap::alert_key(p.agent_id, p.session_id));
@@ -1526,11 +2070,14 @@ static void RunAlertRound(const ap::Snapshot& s) {
         fflush(stderr);
     }
     if (g_alert_first || r.posted || r.retired || held) {
-        printf("[提醒] 命中 %d｜首次 %d｜发出 %zu｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜账本 %zu 条｜免打扰%s\n",
+        printf("[提醒] 命中 %d｜首次 %d｜发出 %zu｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜账本 %zu 条｜免打扰%s｜刚静置 %zu 条\n",
                r.hits, r.fresh, keep.size(), r.capped, r.retired, held, g_ledger.size(),
-               cfg.dnd ? "开" : "关");
+               g_cfg.dnd ? "开" : "关", just_finished.size());
         fflush(stdout);
     }
+    // 跳变记忆每轮都要换，与「这一轮响没响」无关：挂着上一轮的旧集合，下一轮打开
+    // 「已完成」就会拿几分钟前的动静的对家来响。
+    g_active = std::move(cur);
     g_alert_first = false;
 }
 
@@ -1548,6 +2095,10 @@ static int WantedWindowH() {
     int cap = (int)(g_budgetH + 0.5f);
     return want > cap ? cap : want;
 }
+
+/// 两屏的宽度不同：pin 是 #win{width:340px}，settings 是 #win{width:420px}。
+/// 换屏必须连着改窗口宽，否则 420 那一屏的内容会被 340 的窗口框裁掉右沿 80pt。
+static int WantedWindowW() { return g_view == 1 ? kSetW : kPanelW; }
 
 static void TogglePanel(void*) {
     if (!g_win) return;
@@ -1598,8 +2149,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // 设置盘的八个开关在窗口建起来之前就要落进 g_cfg：常驻置顶是建窗 hint，
+    // 先开窗再改会让他在启动瞬间看见一次「本该置顶却没置顶」的闪。
+    g_cfg = ap::load_alert_cfg();
+    if (const char* v = getenv("AGENTPING_VIEW")) g_view = atoi(v);
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
+    glfwWindowHint(GLFW_FLOATING, g_cfg.on_top ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_DECORATED, windowed ? GLFW_FALSE : GLFW_TRUE);
     // 稿子的 #win 是 rounded-16 + 1px hairline 的浮层，圆角外必须真透明，
     // 否则圆角处会露出一方底色，macOS 上就是一张贴在桌面上的矩形。
@@ -1607,8 +2163,10 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    const int H = windowed ? (int)kCanvasH : 560;
-    const int offW = windowed ? kPanelW : 2260;
+    const int H = windowed ? (int)kCanvasH : 1620;
+    // 探针改两行：上排 6 张 pin（340＋34 间距＝pitch 374），下排 6 张设置屏（420＋14＝pitch 434）。
+    // 宽度取两行里更宽的那条：6×434＋14＝2618。
+    const int offW = windowed ? kPanelW : 2620;
     GLFWwindow* win = glfwCreateWindow(offW, H, "Agent Ping", nullptr, nullptr);
     if (!win) return 2;
     g_win = win;
@@ -1677,13 +2235,17 @@ int main(int argc, char** argv) {
 
     std::thread scanner(ScanLoop);
 
-    auto drawPanel = [&](float x, float y, float w, int loc) {
+    auto drawPanel = [&](float x, float y, float w, int loc, int view) {
         ImGui::SetNextWindowPos(ImVec2(x, y));
         // ImGui 的裁剪矩形就是窗口尺寸。稿子的 760 是画布高，但 maxBot 允许摆到屏幕预算
         // 高（本机实测 919pt）；只按 760 裁的话，760 之后的行会算进 g_panelH、把窗口撑大，
         // 自己却被裁掉——屏幕上留一段没有任何解释的死白。
         ImGui::SetNextWindowSize(ImVec2(w, g_budgetH > kCanvasH ? g_budgetH : kCanvasH));
-        char wname[32]; snprintf(wname, sizeof wname, "pin##%s", loc == 0 ? L0 : loc == 1 ? L1 : loc == 2 ? L2 : loc == 3 ? L3 : loc == 4 ? L4 : L5);
+        // 名字必须带上屏别：探针一帧里同一语会 Begin 两次（pin + 设置），
+        // 撞了同一个窗口 ID 就是两次 Begin 一个 End，ImGui 会把两屏内容叠进同一块裁剪矩形。
+        static const char* kLocTag[] = {L0, L1, L2, L3, L4, L5};
+        char wname[32]; snprintf(wname, sizeof wname, "%s##%s", view == 1 ? "set" : "pin",
+                                 kLocTag[loc % kLocales]);
         ImGui::Begin(wname, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
@@ -1699,11 +2261,33 @@ int main(int argc, char** argv) {
         const float maxBot = y + g_budgetH - kB - kPadBottom;   // 超出这块就不摆，改用「还有 N 条」
         float cy = y + kB + kPadTop;
 
+        // ── 设置屏（r14/settings.html，420 宽）：整屏自己收口，不走下面 pin 列表那套 ──
+        if (view == 1) {
+            std::vector<SecBox> secs;
+            g_panelH = drawSettings(dl, L, R, maxBot, loc, cy, &secs) - y + kB + kPadBottom;
+            CardFrame(x, y, w, g_panelH, &secs);
+            ImGui::Dummy(ImVec2(w, g_panelH));
+            ImGui::End();
+            return;
+        }
+
         // 稿子 render.mjs 的 PIN_GROUPS：需要你介入 / 运行中 / 排队中 / 失败中断 / 今日已结束。
         int cnt[G_N] = {};
         for (const auto& r : g_pd.rows) cnt[GroupOf(r.state)]++;
         int live_total = 0;
         for (int i = 0; i < G_N; i++) live_total += cnt[i];
+
+        // ── 切到设置屏的入口 ──────────────────────────────────────────────────
+        // 稿子那屏靠页面外层 nav（pin.html 顶上一排链接）切屏，这块面板没有外层，
+        // 所以入口自己占卡顶一行、右沿对齐，与设置屏那侧的「返回」落在同一个角。
+        // 代价：pin 首屏比稿子多一行 34.5pt（22.5 胶囊 + 12 间距），整屏往下挪这么多。
+        {
+            const float pw = GhostPillW("set_title", loc);
+            const long z = Zid(loc, kNavRow, HIT_SETTINGS, 0);
+            GhostPill(dl, R - pw, cy, pw, loc, "set_title", z);
+            AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_SETTINGS, kNavRow, 0, loc, T("set_title", 0), 0);
+            cy += kSegH + kSectionGap;
+        }
 
         // ── 表头（draft: grid gap-2.5 + num-xl 26pt + micro-label + 可选的环比脚行）──
         // 第三格按 render.mjs 的条件式：今天没有任何消耗记录就整格不摆（不是摆个 0）。
@@ -1832,6 +2416,19 @@ int main(int argc, char** argv) {
             cy = lineY + chipH + kSectionGap;
         }
 
+        // ── 卡脚三块先占预算，分组只能填剩下的。这三块（今天没活动／读不通／口径脚注）排在
+        //    分组循环之后且不受 maxBot 约束：实测内容涨到 773.7pt 而窗口按预算收到 760，
+        //    底部整条口径脚注被 ImGui 的裁剪矩形切掉——不是没画，是画到窗口外了。
+        const float kFootLine = kTierPx[T_SM] * 1.5f;
+        float tail = 0.0f;
+        if (!g_pd.quiet.empty()) tail += kFootLine + 8.0f;
+        tail += (float)g_pd.errors.size() * (kFootLine + 8.0f);
+        if (g_pd.credits > 0) tail += kTierPx[T_MICRO] + 8.0f;
+        const float grpBot = maxBot - tail - kGroupGap;
+        // 「还有 N 条」也是组内后加的：决定跳过某行那一刻就得给它留落点，
+        // 否则它自己就成了新的越界来源（一行 ≈ 23.5pt）。
+        const float kMoreH = kFootLine + 4.0f + kRowGap;
+
         // ── 按状态分组；空组不渲染（他的空态门：没有真实输出就不摆这个表面）
         for (int i = 0; i < G_N; i++) {
             if (!cnt[i]) continue;
@@ -1849,12 +2446,12 @@ int main(int argc, char** argv) {
                 const UIRow& r = g_pd.rows[ri];
                 if (GroupOf(r.state) != i) continue;
                 float need = DrawSessionRow(dl, L, R, cy, r, loc, tn, false, (int)ri);
-                if (shown >= kMaxRowsPerGroup || cy + need > maxBot) { rest++; continue; }
+                if (shown >= g_cfg.max_rows || cy + need + (rest ? 0.0f : kMoreH) > grpBot) { rest++; continue; }
                 if (shown) cy += kRowGap;               // 稿子里每组是 space-y-1.5
                 DrawSessionRow(dl, L, R, cy, r, loc, tn, true, (int)ri);
                 cy += need; shown++;
             }
-            if (rest > 0) {
+            if (rest > 0 && cy + kMoreH <= maxBot) {
                 char buf[48]; snprintf(buf, sizeof buf, T("more", loc), rest);
                 if (shown) cy += kRowGap;
                 float lh = kTierPx[T_SM] * 1.5f;
@@ -1867,8 +2464,8 @@ int main(int argc, char** argv) {
 
         // 今天没活动的采集器收成一行；读不通的源单独一条 —— 两者长得不一样，混报就是骗他
         // 这两行稿子里没有对应物（我们的数据比他的样本多），排版按同一套行框模型走：
-        // 行框＝正文 10px×1.5，9px 的 micro-label 在其内居中。
-        const float kFootLine = kTierPx[T_SM] * 1.5f, kFootMicroTop = (kFootLine - kTierPx[T_MICRO]) * 0.5f;
+        // 行框＝正文 10px×1.5，9px 的 micro-label 在其内居中。高度已在 grpBot 之前预留。
+        const float kFootMicroTop = (kFootLine - kTierPx[T_MICRO]) * 0.5f;
         if (!g_pd.quiet.empty()) {
             std::string q;
             for (size_t i = 0; i < g_pd.quiet.size(); i++) { if (i) q += " · "; q += g_pd.quiet[i]; }
@@ -1900,10 +2497,7 @@ int main(int argc, char** argv) {
         // 卡框：#win{border-radius:16px; border:1px solid var(--hairline)}。
         // 画进 background 层——它在所有窗口之前合成，所以末尾补画也不会盖住行内容。
         // --hairline = oklch(.95 .02 250 / 9%) → sRGB(229,240,252) 带 9% 透明度。
-        ImDrawList* bg = ImGui::GetBackgroundDrawList();
-        bg->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + g_panelH), kBg, kCardR);
-        bg->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + g_panelH - 0.5f),
-                    kHair, kCardR, 0, 1.0f);
+        CardFrame(x, y, w, g_panelH);
         ImGui::Dummy(ImVec2(w, g_panelH));
         ImGui::End();
     };
@@ -2003,7 +2597,7 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lk(g_mtx);
                 RebuildPanel(g_snap);
             }
-            drawPanel(0, 0, (float)kPanelW, 0);
+            drawPanel(0, 0, (float)WantedWindowW(), 0, g_view);
             // AGENTPING_HITS=1：把这一帧真登记出来的命中区打到 stderr，只报一次。
             // 取证要按坐标钉悬停/点击，而坐标只有绘制那一趟算得准——手按着稿子估一份，
             // 估错就会「钉在按钮旁边的空白上」然后判成命中失效。
@@ -2023,14 +2617,20 @@ int main(int argc, char** argv) {
             glfwSwapBuffers(win);
             if (g_relayout && g_panelH > 0) {   // 内容行数变了就把窗口收到刚好包住
                 int cw, ch; glfwGetWindowSize(win, &cw, &ch);
-                int want = WantedWindowH();
-                if (ch != want) {
-                    glfwSetWindowSize(win, kPanelW, want);
+                int px0, py0; glfwGetWindowPos(win, &px0, &py0);
+                int want = WantedWindowH(), wantW = WantedWindowW();
+                if (ch != want || cw != wantW) {
+                    glfwSetWindowSize(win, wantW, want);
+                    // 换屏把窗口从 340 撑到 420：右沿必须钉住。Cocoa 的 setContentSize 钉的是
+                    // 左上角，于是整块面板会往右挪 80pt 并越过屏幕右沿——日志里那条内容框坐标
+                    // 和真实指针的落点就全对不上了。所以改完尺寸立刻按「右沿不动」回写位置。
+                    if (cw != wantW) glfwSetWindowPos(win, px0 + cw - wantW, py0);
                     lastResize = glfwGetTime();
                     // 每次真收/放都报一次屏幕坐标，供外部按矩形实拍（无边框，内容框＝窗口框）。
                     // 只在尺寸变了时报，不然 3 秒一轮的重扫会把日志刷满。
                     int px, py; glfwGetWindowPos(win, &px, &py);
-                    printf("[窗口] 内容 %dx%d @ (%d,%d)\n", kPanelW, want, px, py);
+                    printf("[窗口] 内容 %dx%d @ (%d,%d)｜%s屏\n", wantW, want, px, py,
+                           g_view == 1 ? "设置" : "pin");
                     fflush(stdout);
                     // 高度已经与预算解耦，正常一帧就收敛；留 6 帧余量给异步生效，超了就放弃本轮，
                     // 免得系统真不给高（屏太小）时逐帧硬设尺寸刷日志。
@@ -2043,7 +2643,7 @@ int main(int argc, char** argv) {
             // 行高稳住 2 秒（＝连续两轮重扫没改行数）才回读，不然拍到的是半截列表。
             int cw_now, ch_now; glfwGetWindowSize(win, &cw_now, &ch_now);
             if (shot_to && g_seq.load() >= 2 && glfwGetTime() - lastResize > 2.0 &&
-                ch_now == WantedWindowH()) {   // 窗口收到＝「该摆的高度」才算摆稳；被屏高截断也算稳，否则拍到被裁的一截
+                ch_now == WantedWindowH() && cw_now == WantedWindowW()) {   // 窗口收到＝「该摆的高度」才算摆稳；被屏高截断也算稳，否则拍到被裁的一截
                 int sw, sh; glfwGetFramebufferSize(win, &sw, &sh);
                 std::vector<unsigned char> pix((size_t)sw * sh * 4);
                 glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, pix.data());
@@ -2088,7 +2688,13 @@ int main(int argc, char** argv) {
     }
 
     // 离屏探针：先等第一轮真扫描落地，再六语并排渲一帧存 PPM。
-    g_budgetH = (float)(H - 60);   // 面板顶在 y=60，预算＝探针窗口高减去这条上边距
+    // 两行各自的预算必须按「内容自然高」算，不能拍脑袋给大：
+    // ImGui 的裁剪矩形＝ max(预算, kCanvasH 760)，而 pin 屏末尾那段（「还有 N 条」+ 卡脚，实测 56pt）
+    // 不受 maxBot 约束、总会多摆一截 —— 预算给到 720 时内容就涨到 776，底部 16pt 被裁剪矩形吃掉，
+    // 实拍会拍到卡脚凭空缺一截（不是没画，是被裁了）。所以两行预算都压在 760 之内。
+    const float kPinY = 60.0f, kSetY = 846.0f;
+    const float kPinBudget = 700.0f, kSetBudget = 740.0f;
+    g_budgetH = kPinBudget;
     for (int i = 0; i < 400 && g_seq.load() == 0; i++) usleep(50000);
     for (int pass = 0; pass < 3; pass++) {
         glClearColor(0, 0, 0, 1);   // 探针窗口不透明：底色清成纯黑，卡框边缘才量得准
@@ -2111,11 +2717,21 @@ int main(int argc, char** argv) {
         { std::lock_guard<std::mutex> lk(g_mtx); when = (time_t)g_snap.scanned_at; }
         strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&when));
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.55f, 1),
-            "Agent Ping · 单壳 Dear ImGui 版 · 活数据扫描于 %s · 六语并排，逐 run 字体回退已实现", stamp);
+            "Agent Ping · 单壳 Dear ImGui 版 · 活数据扫描于 %s · 上排 pin／下排设置，各六语并排", stamp);
         ImGui::PopFont();
         ImGui::End();
-        for (int loc = 0; loc < kLocales; loc++)
-            drawPanel(14 + loc * 374.0f, 60, (float)kPanelW, loc);
+        for (int loc = 0; loc < kLocales; loc++) {
+            g_budgetH = kPinBudget;
+            drawPanel(14 + loc * 374.0f, kPinY, (float)kPanelW, loc, 0);
+            const float ph = g_panelH;
+            g_budgetH = kSetBudget;
+            drawPanel(14 + loc * 434.0f, kSetY, (float)kSetW, loc, 1);
+            // 两行各自量一次：超过 760 会被 ImGui 裁剪矩形吃掉，超过行距会叠进下一行。
+            if (pass == 0) printf("[探针] 语%d pin %.1fpt｜设置 %.1fpt（裁剪矩形 760，行距 %.0f）%s\n",
+                                  loc, ph, g_panelH, kSetY - kPinY,
+                                  (ph > 760.0f || ph > kSetY - kPinY || g_panelH > 760.0f)
+                                      ? "＝溢出，本行不可信" : "");
+        }
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(win);

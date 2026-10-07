@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -75,7 +76,10 @@ int selftest() {
                          ses("e", "排队里", ap::ST_QUEUED) });
     std::set<std::string> led;
     std::set<std::string> out;
-    ap::AlertRound r1 = ap::select_alerts(s, led, false, &out);
+    // 后面七轮跑的都是「四档全开、done 关」＝默认设置，与 ① 那条 should_alert 判据表必须等价。
+    ap::AlertCfg kOn;
+    ap::AlertCfg kDnd; kDnd.dnd = true;
+    ap::AlertRound r1 = ap::select_alerts(s, led, kOn, &out);
     expect("首轮：判据命中条数", r1.hits, 3);
     expect("首轮：其中首次出现", r1.fresh, 3);
     expect("首轮：待发出", (long)r1.to_post.size(), 3);
@@ -84,7 +88,7 @@ int selftest() {
     led = out;
 
     // ③ 第二轮同一份数据：一条都不许多响（去重是真的，不是靠运气）
-    ap::AlertRound r2 = ap::select_alerts(s, led, false, &out);
+    ap::AlertRound r2 = ap::select_alerts(s, led, kOn, &out);
     expect("次轮：判据仍命中", r2.hits, 3);
     expect("次轮：首次出现归零", r2.fresh, 0);
     expect("次轮：待发出归零", (long)r2.to_post.size(), 0);
@@ -96,12 +100,12 @@ int selftest() {
                           ses("b", "答完了", ap::ST_RESTING),
                           ses("c", "第三条等授权", ap::ST_AWAIT),
                           ses("d", "疑似等授权", ap::ST_AWAIT, true) });
-    ap::AlertRound r3 = ap::select_alerts(s2, led, false, &out);
+    ap::AlertRound r3 = ap::select_alerts(s2, led, kOn, &out);
     expect("摘账：命中", r3.hits, 2);
     expect("摘账：摘掉条数", r3.retired, 1);
     expect("摘账：账本剩", (long)out.size(), 2);
     led = out;
-    ap::AlertRound r4 = ap::select_alerts(s, led, false, &out);
+    ap::AlertRound r4 = ap::select_alerts(s, led, kOn, &out);
     expect("回到待处理：还能响", (long)r4.to_post.size(), 1);
     expect("回到待处理：账本补回", (long)out.size(), 3);
     led = out;
@@ -113,11 +117,11 @@ int selftest() {
                            ses("3", "三", ap::ST_FAILED), ses("4", "四", ap::ST_FAILED),
                            ses("5", "五", ap::ST_FAILED), ses("6", "六", ap::ST_FAILED) });
     std::set<std::string> blank;
-    ap::AlertRound r5 = ap::select_alerts(big, blank, false, &out);
+    ap::AlertRound r5 = ap::select_alerts(big, blank, kOn, &out);
     expect("上限：本轮发出", (long)r5.to_post.size(), ap::kMaxPerRound);
     expect("上限：被压掉", r5.capped, 2);
     expect("上限：账本只记发出的", (long)out.size(), (long)ap::kMaxPerRound);
-    ap::AlertRound r6 = ap::select_alerts(big, out, false, &out);
+    ap::AlertRound r6 = ap::select_alerts(big, out, kOn, &out);
     expect("上限：压掉的下轮仍是首次", r6.fresh, 2);
 
     // ⑥ 免打扰：整轮跳过且不清账。先落一份已知账本，两条断言才有真内容可比
@@ -128,7 +132,7 @@ int selftest() {
     std::set<std::string> before = ap::load_alerted();
     expect("落盘：读回条数", (long)before.size(), 2);
     led = before;
-    ap::AlertRound r7 = ap::select_alerts(s, led, true, &out);
+    ap::AlertRound r7 = ap::select_alerts(s, led, kDnd, &out);
     expect("免打扰：不发", (long)r7.to_post.size(), 0);
     expect("免打扰：命中数不统计（整轮跳过）", r7.hits, 0);
     expect("免打扰：摘账数不统计", r7.retired, 0);
@@ -151,6 +155,72 @@ int selftest() {
     expect_true("设置：env 能压过文件（取证专用）", !ap::load_alert_cfg().dnd);
     unsetenv("AGENTPING_DND");
 
+    // ⑧b 设置屏写下去的八档必须全数读回来：界面上亮着、文件里没记，重启后就是「骗人的开关」
+    ap::AlertCfg all;
+    all.sound = false; all.dnd = true; all.needs_user = true; all.await_perm = false;
+    all.failed = true; all.done = true; all.on_top = false; all.max_rows = 5;
+    expect_true("设置：八档一起写", ap::save_alert_cfg(all, &err));
+    ap::AlertCfg rb = ap::load_alert_cfg();
+    expect_true("设置：读回逐档相等（提示音/免打扰）", rb.sound == all.sound && rb.dnd == all.dnd);
+    expect_true("设置：读回逐档相等（四档状态）",
+                rb.needs_user == all.needs_user && rb.await_perm == all.await_perm &&
+                rb.failed == all.failed && rb.done == all.done);
+    expect_true("设置：读回逐档相等（置顶/每组条数）",
+                rb.on_top == all.on_top && rb.max_rows == all.max_rows);
+    {
+        // 用户手改过的设置文件：错键不许吞掉其它档，0 条这种自杀值不许当设置生效
+        std::ofstream mf(ap::alert_settings_path(), std::ios::binary | std::ios::trunc);
+        mf << "sound=1\nbogus_key=7\nalert_failed=0\nmax_rows=0\n";
+        mf.close();
+        ap::AlertCfg hand = ap::load_alert_cfg();
+        expect_true("手改：认得的键读到了", hand.sound && !hand.failed);
+        expect_true("手改：不认得的键没把默认档一起吞掉", hand.needs_user && hand.await_perm);
+        expect("手改：max_rows=0 回落默认（摆不出行不是设置）", hand.max_rows, 8);
+    }
+
+    // ⑨ 「需要提醒的状态」四档：默认必须与 should_alert 逐条等价，只许关不许开（done 除外，它另有条门）
+    ap::AlertCfg def;
+    long same = 1;
+    const ap::State st_all[6] = { ap::ST_WORKING, ap::ST_NEEDS_USER, ap::ST_AWAIT,
+                                  ap::ST_QUEUED, ap::ST_FAILED, ap::ST_RESTING };
+    for (ap::State st : st_all)
+        for (int inf = 0; inf < 2; inf++)
+            if (ap::alertable(def, st, inf != 0, false) != ap::should_alert(st, inf != 0)) same = 0;
+    expect_true("档位：默认四档与 should_alert 逐条等价（12 组）", same);
+    {
+        ap::AlertCfg off = def; off.needs_user = false;
+        expect_true("档位：关掉「等你回复」后这一档不响",
+                    !ap::alertable(off, ap::ST_NEEDS_USER, false, false));
+        off = def; off.await_perm = false;
+        expect_true("档位：关掉「等待确认」后这一档不响", !ap::alertable(off, ap::ST_AWAIT, false, false));
+        off = def; off.failed = false;
+        expect_true("档位：关掉「失败中断」后这一档不响", !ap::alertable(off, ap::ST_FAILED, false, false));
+        expect_true("档位：关掉的档不许把误报（inferred）放进来",
+                    !ap::alertable(off, ap::ST_AWAIT, true, false));
+    }
+    {
+        // 「已完成」是唯一往外扩的一档：开着但没有跳变证据也不许响，否则第一次打开会把
+        // 窗口里所有历史静置会话当成刚跑完，连吵十几轮。
+        ap::AlertCfg done = def; done.done = true;
+        expect_true("已完成：关着时，带跳变证据也不响",
+                    !ap::alertable(def, ap::ST_RESTING, false, true));
+        expect_true("已完成：开着但没跳变证据不响",
+                    !ap::alertable(done, ap::ST_RESTING, false, false));
+        expect_true("已完成：开着且有跳变证据才响",
+                    ap::alertable(done, ap::ST_RESTING, false, true));
+        auto sd = snap_with({ ses("r1", "刚跑完", ap::ST_RESTING), ses("r2", "早就凉了", ap::ST_RESTING) });
+        std::set<std::string> jf = { ap::alert_key("qoder", "r1") };
+        std::set<std::string> led2, out2;
+        ap::AlertRound r8 = ap::select_alerts(sd, led2, done, &out2, &jf);
+        expect("已完成：一轮里只认那条真跳变的", r8.hits, 1);
+        expect("已完成：待发出", (long)r8.to_post.size(), 1);
+        led2 = out2;
+        std::set<std::string> jf2;                       // 下一轮没有新的跳变
+        ap::AlertRound r9 = ap::select_alerts(sd, led2, done, &out2, &jf2);
+        expect("已完成：次轮不重复吵", (long)r9.to_post.size(), 0);
+        expect("已完成：跳变过去后就摘账（下次跑完还能再报）", r9.retired, 1);
+    }
+
     printf("[自检] 断言 %d 条，通过 %d，不符 %d\n", g_pass + g_fail, g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
@@ -168,8 +238,12 @@ int live_round(bool do_post) {
     ap::AlertCfg cfg = ap::load_alert_cfg();
     std::set<std::string> led = ap::load_alerted();
     printf("[实况] 状态目录＝%s\n", ap::state_dir().c_str());
-    printf("[实况] 设置＝提示音%s 免打扰%s（env 覆盖：%s / %s）\n",
+    printf("[实况] 设置＝提示音%s 免打扰%s｜状态四档 等你回复%s/等待确认%s/失败中断%s/已完成%s"
+           "｜每组 %d 条｜置顶%s（env 覆盖：%s / %s）\n",
            cfg.sound ? "开" : "关", cfg.dnd ? "开" : "关",
+           cfg.needs_user ? "开" : "关", cfg.await_perm ? "开" : "关",
+           cfg.failed ? "开" : "关", cfg.done ? "开" : "关",
+           cfg.max_rows, cfg.on_top ? "开" : "关",
            getenv("AGENTPING_SOUND") ? getenv("AGENTPING_SOUND") : "未设",
            getenv("AGENTPING_DND") ? getenv("AGENTPING_DND") : "未设");
     printf("[实况] 进账本的条数＝%zu\n", led.size());
@@ -179,7 +253,7 @@ int live_round(bool do_post) {
     printf("[通道] %s：%s\n", ch == 0 ? "横幅可用" : ch == 1 ? "横幅不可用" : "问不出来", why);
 
     std::set<std::string> out;
-    ap::AlertRound r = ap::select_alerts(s, led, cfg.dnd, &out);
+    ap::AlertRound r = ap::select_alerts(s, led, cfg, &out);
     printf("[判据] 命中 %d｜首次 %d｜待发 %zu｜压掉 %d｜摘账 %d｜免打扰%s\n",
            r.hits, r.fresh, r.to_post.size(), r.capped, r.retired, r.dnd ? "开（整轮跳过）" : "关");
     for (const auto& p : r.to_post) {
