@@ -44,11 +44,26 @@ else()
   # 出图/跑 GUI 用 xvfb-run -a -s "-screen 0 1400x1100x24"（Mesa llvmpipe 软渲染即可，1.0x 栅格）。
   # 提醒层另需两个包才有真行为：libnotify-bin（横幅）、sound-theme-freedesktop + pipewire-utils
   #   或 alsa-utils（出声）—— 少哪一个，ap_notify_post 都会把「哪一边不通」写回 reason。
+  # 状态项走 StatusNotifierItem（KDE/GNOME/XFCE/LXQt 共用的 D-Bus 协议），只要 libdbus-1，
+  #   不为了一颗托盘图标把 GTK3 拉进依赖：apt-get install -y libdbus-1-dev
+  # 模块名是 dbus-1（包里就这一个 dbus-1.pc，实测 1.14.10）；写成 libdbus-1 会查不到而退化。
+  # 装了就用真实现，没装退到占位实现并且**明说**——静默退化成「没有状态项」是假通过。
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(LIBDBUS QUIET dbus-1)
+  endif()
   find_library(OPENGL_LIB GL REQUIRED)
-  set(STATUSBAR_SRC src/platform/statusbar_stub.cpp)
   set(OPEN_SRC src/platform/open_posix.cpp)
   set(NOTIFY_SRC src/platform/notify_posix.cpp)
   set(PLATFORM_LIBS ${OPENGL_LIB})
+  if(LIBDBUS_FOUND)
+    set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
+    message(STATUS "状态项：SNI 实现（libdbus-1 ${LIBDBUS_VERSION}）")
+  else()
+    set(STATUSBAR_SRC src/platform/statusbar_stub.cpp)
+    message(STATUS "状态项：占位实现——pkg-config 查不到 dbus-1（装开发包 apt-get install libdbus-1-dev），"
+                   "这一档只有窗口，托盘那三个数不会出现")
+  endif()
 endif()
 
 add_executable(i18n_probe
@@ -70,6 +85,11 @@ add_executable(pin_imgui_shell
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
+if(LIBDBUS_FOUND)
+  target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})
+  target_link_directories(pin_imgui_shell PRIVATE ${LIBDBUS_LIBRARY_DIRS})
+  target_link_libraries(pin_imgui_shell ${LIBDBUS_LIBRARIES})
+endif()
 if(SQLITE3_LIB)
   target_compile_definitions(pin_imgui_shell PRIVATE AP_HAVE_SQLITE=1)
   target_link_libraries(pin_imgui_shell ${SQLITE3_LIB})

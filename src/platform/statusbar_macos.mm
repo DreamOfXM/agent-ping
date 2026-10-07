@@ -15,16 +15,21 @@
 }
 - (instancetype)initWithIcon:(NSString*)path
                      tooltip:(NSString*)tip
+                    showHide:(NSString*)showHideLabel
                         quit:(NSString*)quitLabel
                        click:(sb_click_fn)click
                         user:(void*)ud;
 - (void)setLabel:(NSString*)text;
+- (void)setTooltip:(NSString*)text;
+- (int)capture:(NSString*)path;
+- (void)readback:(const char*)why;
 @end
 
 @implementation SBController
 
 - (instancetype)initWithIcon:(NSString*)path
                      tooltip:(NSString*)tip
+                    showHide:(NSString*)showHideLabel
                         quit:(NSString*)quitLabel
                        click:(sb_click_fn)click
                         user:(void*)ud {
@@ -48,14 +53,19 @@
     _item.button.action = @selector(clicked:);
     [_item.button sendActionOn:(NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp)];
     if (tip.length) _item.button.toolTip = tip;
+    // 初始标题就摆成 setLabel:@"") 的那个形状，否则第一帧会报一条「数字变了」——
+    // 那条其实是「从空串变成空串」，读日志的人会当成丢了数。
+    _item.button.title = @"  ";
 
     // 不给 _item.menu：一给，左键也被系统吃掉去弹菜单，click 回调就再也不触发。
     _menu = [[NSMenu alloc] init];
-    NSMenuItem* toggle = [[NSMenuItem alloc] initWithTitle:@"显示／隐藏面板"
-                                                    action:@selector(showHide:)
-                                             keyEquivalent:@""];
-    toggle.target = self;
-    [_menu addItem:toggle];
+    if (showHideLabel.length) {
+        NSMenuItem* toggle = [[NSMenuItem alloc] initWithTitle:showHideLabel
+                                                        action:@selector(showHide:)
+                                                 keyEquivalent:@""];
+        toggle.target = self;
+        [_menu addItem:toggle];
+    }
     if (quitLabel.length) {
         NSMenuItem* quit = [[NSMenuItem alloc] initWithTitle:quitLabel
                                                       action:@selector(quitApp:)
@@ -67,7 +77,46 @@
 }
 
 - (void)setLabel:(NSString*)text {
-    _item.button.title = text.length ? [@" " stringByAppendingString:text] : @"  ";
+    NSString* old = _item.button.title;
+    NSString* want = text.length ? [@" " stringByAppendingString:text] : @"  ";
+    if ([old isEqual:want]) return;
+    _item.button.title = want;
+    [self readback:"数字变了"];
+}
+
+- (void)setTooltip:(NSString*)text {
+    NSString* old = _item.button.toolTip ?: @"";
+    if ([old isEqual:text]) return;
+    _item.button.toolTip = text.length ? text : nil;
+    [self readback:"悬停说明变了"];
+}
+
+/// 把「系统那一侧现在到底挂着什么」读回来打一行。为什么必须读而不是直接打我们传进去的串：
+/// 状态项在菜单栏里，命令行截屏在这台机器上只会得到纯黑（没有屏幕录制授权），肉眼看不到，
+/// 于是「数字改了」和「我以为改了」在日志里长一样。这里取的是 NSStatusBarButton 自己的
+/// title/toolTip——setter 没生效就是空，报不出来。
+- (void)readback:(const char*)why {
+    NSString* t = _item.button.title ?: @"";
+    NSString* tip = _item.button.toolTip ?: @"";
+    fprintf(stderr, "[状态项] %s：标题＝「%s」｜悬停＝「%s」\n", why,
+            t.UTF8String, tip.UTF8String);
+    fflush(stderr);
+}
+
+/// 把按钮自己画进 PNG：cacheDisplay 走的是系统那一套排版（模板图染色 + 标题字距），
+/// 不是我们照着重画的示意图。背景是透明菜单条材质，拍出来带 alpha，读图时要垫一层深色。
+- (int)capture:(NSString*)path {
+    NSRect b = _item.button.bounds;
+    if (b.size.width <= 0 || b.size.height <= 0) return 1;
+    NSBitmapImageRep* rep = [_item.button bitmapImageRepForCachingDisplayInRect:b];
+    [_item.button cacheDisplayInRect:b toBitmapImageRep:rep];
+    NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    if (!png) return 2;
+    if (![png writeToFile:path atomically:YES]) return 3;
+    fprintf(stderr, "[状态项] 实拍 %s %ldx%ld 像素（按钮自绘，含系统模板图染色）\n",
+            path.UTF8String, (long)rep.pixelsWide, (long)rep.pixelsHigh);
+    fflush(stderr);
+    return 0;
 }
 
 - (void)clicked:(id)sender {
@@ -89,8 +138,8 @@
 
 static SBController* g_ctl = nil;
 
-int sb_show(const char* icon_path, const char* tooltip, const char* quit_label,
-            sb_click_fn on_click, void* ud) {
+int sb_show(const char* icon_path, const char* tooltip, const char* show_hide_label,
+            const char* quit_label, sb_click_fn on_click, void* ud) {
     @autoreleasepool {
         // 挂上状态项＝这个 App 的入口在菜单栏，不在 Dock。GLFW 建窗口时把进程注册成了
         // Regular（实测 lsappinfo type="Foreground" 且启动后抢在前台），而 Info.plist 里的
@@ -99,10 +148,13 @@ int sb_show(const char* icon_path, const char* tooltip, const char* quit_label,
         if (NSApp) [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         NSString* path = icon_path ? [NSString stringWithUTF8String:icon_path] : nil;
         NSString* tip = tooltip ? [NSString stringWithUTF8String:tooltip] : @"";
+        NSString* sh = show_hide_label ? [NSString stringWithUTF8String:show_hide_label] : @"";
         NSString* quit = quit_label ? [NSString stringWithUTF8String:quit_label] : @"";
-        g_ctl = [[SBController alloc] initWithIcon:path tooltip:tip quit:quit click:on_click user:ud];
+        g_ctl = [[SBController alloc] initWithIcon:path tooltip:tip showHide:sh quit:quit
+                                             click:on_click user:ud];
         if (!g_ctl) return 1;
         [g_ctl setLabel:@""];
+        [g_ctl readback:"挂上状态项"];
         fprintf(stderr, "[状态项] 策略＝%d（0 常驻 Dock／1 只在菜单栏）\n",
                 NSApp ? (int)NSApp.activationPolicy : -1);
         fflush(stderr);
@@ -113,11 +165,24 @@ int sb_show(const char* icon_path, const char* tooltip, const char* quit_label,
 void sb_set_label(const char* utf8) {
     if (!g_ctl) return;
     @autoreleasepool {
+        // 每 3 秒一轮都会走到这里：只有真变了才读回来打日志，不然重扫会把日志刷满。
         [g_ctl setLabel:utf8 ? [NSString stringWithUTF8String:utf8] : @""];
     }
 }
 
+void sb_set_tooltip(const char* utf8) {
+    if (!g_ctl) return;
+    @autoreleasepool {
+        [g_ctl setTooltip:utf8 ? [NSString stringWithUTF8String:utf8] : @""];
+    }
+}
+
 void sb_pump(void) {}
+
+int sb_capture(const char* png_path) {
+    if (!g_ctl || !png_path) return 1;
+    @autoreleasepool { return [g_ctl capture:[NSString stringWithUTF8String:png_path]]; }
+}
 
 int sb_float_window(void) {
     @autoreleasepool {

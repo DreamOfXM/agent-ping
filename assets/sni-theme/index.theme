@@ -1,0 +1,4 @@
+[Icon Theme]
+Name=agent-ping
+Comment=Agent Ping status item icons
+Directories=16x16/status,22x22/status,24x24/status,32x32/status,44x44/status,hicolor/16x16/status,hicolor/22x22/status,hicolor/24x24/status,hicolor/32x32/status,hicolor/44x44/status

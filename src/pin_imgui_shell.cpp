@@ -65,6 +65,21 @@ static const Key kStr[] = {
     {"grp_queue",      {"排队中", "Queued", "In Warteschlange", "In coda", "キュー待ち", "대기열"}},
     {"grp_fail",       {"失败中断", "Failed", "Fehlgeschlagen", "Fallito", "エラー中断", "오류 중단"}},
     {"grp_done",       {"今日已结束", "Done today", "Heute beendet", "Conclusi oggi", "本日完了", "오늘 종료"}},
+    // 状态项（菜单栏／系统托盘）的悬停说明：那里只有图标＋两三个数字，
+    // 「哪个数字是哪一档」和「点了会怎样」只能靠这一句说清。
+    {"sb_hint",        {"点一下收／放面板，右键出菜单",
+                        "Click to show or hide the panel · right-click for the menu",
+                        "Klick zeigt bzw. versteckt das Panel · Rechtsklick öffnet das Menü",
+                        "Clicca per mostrare o nascondere il pannello · tasto destro per il menu",
+                        "クリックでパネル開閉、右クリックでメニュー",
+                        "클릭으로 패널 열기／닫기, 우클릭은 메뉴"}},
+    {"sb_queued",      {"含排队 %d", "(%d queued)", "(%d in Warteschlange)",
+                        "(%d in coda)", "（うちキュー %d）", "(대기 %d)"}},
+    // 状态项右键菜单的两项。菜单是系统画的，字只能由我们喂进去，所以六语都得有。
+    {"sb_show_hide",   {"显示／隐藏面板", "Show / hide panel", "Panel ein-/ausblenden",
+                        "Mostra / nascondi pannello", "パネル表示／非表示", "패널 표시／숨기기"}},
+    {"sb_quit",        {"退出 Agent Ping", "Quit Agent Ping", "Agent Ping beenden",
+                        "Esci da Agent Ping", "Agent Ping を終了", "Agent Ping 종료"}},
     {"cost",           {"今日消耗", "Today cost", "Heutige Kosten", "Costo di oggi", "本日の消費", "오늘 비용"}},
     {"tokens",         {"输入 tokens", "Input tokens", "Eingegebene Tokens", "Token immessi", "入力トークン", "입력 토큰"}},
     {"present",        {"今日在场", "Present today", "Heute anwesend", "Presente oggi", "本日在席", "오늘 재석"}},
@@ -565,6 +580,8 @@ struct PanelData {
     std::vector<std::string> errors;     // 「某采集器：读失败原因」
     int hook_live = 0;                   // Hook 收件箱里这轮真数得到的信号文件数（数据源那一格）
     int needs = 0, run = 0;              // 顶栏两个数（needs＝介入+失败，run＝运行+排队）
+    int await_n = 0, fail_n = 0;         // 状态项那三个数：介入与失败各算一档，不并成 needs
+    int queue_n = 0;                     // run 里有多少条其实在排队——悬停说明要摊开这一层
     double credits = 0;
     double yday_credits = 0;             // 昨天同窗用量，只为第三格的「较昨日」环比
     int live = 0;                        // 状态项上的数字：非静置会话数
@@ -1985,17 +2002,45 @@ static void RebuildPanel(const ap::Snapshot& s) {
     // 所以它的公式看不见这一档；把失败算成 0 会让面板比真相慢），running = 运行中 + 排队中。
     for (const auto& r : pd.rows) {
         int g = GroupOf(r.state);
-        if (g == G_AWAIT || g == G_FAIL) pd.needs++;
-        else if (g == G_RUN || g == G_QUEUE) pd.run++;
+        if (g == G_AWAIT) { pd.needs++; pd.await_n++; }
+        else if (g == G_FAIL) { pd.needs++; pd.fail_n++; }
+        else if (g == G_RUN) pd.run++;
+        else if (g == G_QUEUE) { pd.run++; pd.queue_n++; }
     }
     // 今日用量是整轮口径（scan_all 已汇总），不由逐项拼出来
     pd.credits = s.today_credits;
     pd.yday_credits = s.yesterday_credits;
 
     g_pd = std::move(pd);
-    char label[16];
-    snprintf(label, sizeof label, "%d", g_pd.live);
+    // 状态项上摆三个数：菜单栏那一行放不下词，数字只能按「介入 · 运行 · 失败」的固定顺序排。
+    // 每个数是哪一档、以及「运行」里并进了排队，全部由悬停说明逐条对上——说明里连 0 的那档
+    // 也念出来，不然「2 · 5」这种少了位的读法会让人以为第三档没数据而不是没有。
+    char label[24], tip[256];
+    {
+        const int v[3] = {g_pd.await_n, g_pd.run, g_pd.fail_n};
+        label[0] = '\0';
+        char part[16];
+        for (int i = 0; i < 3; i++) {
+            if (!v[i]) continue;              // 空档不占字位：菜单栏宽度是全局共享的稀缺资源
+            snprintf(part, sizeof part, "%s%d", label[0] ? " · " : "", v[i]);
+            strncat(label, part, sizeof label - strlen(label) - 1);
+        }
+    }
     sb_set_label(label);
+    {
+        char q[48] = "";
+        if (g_pd.queue_n) {
+            char qs[40];
+            snprintf(qs, sizeof qs, T("sb_queued", 0), g_pd.queue_n);
+            snprintf(q, sizeof q, " %s", qs);
+        }
+        snprintf(tip, sizeof tip, "%s %d · %s %d%s · %s %d · %s",
+                 T("grp_await", 0), g_pd.await_n,
+                 T("grp_run", 0), g_pd.run, q,
+                 T("grp_fail", 0), g_pd.fail_n,
+                 T("sb_hint", 0));
+    }
+    sb_set_tooltip(tip);
     g_relayout = true;
 }
 
@@ -2103,6 +2148,10 @@ static int WantedWindowW() { return g_view == 1 ? kSetW : kPanelW; }
 static void TogglePanel(void*) {
     if (!g_win) return;
     g_panelVisible = !g_panelVisible;
+    // 打这一行是为了让总线点击可被外部核对：宿主调 Activate 只能证明「回包没报错」，
+    // 证明不了面板真的动了。取证轮比对 app.log 里这行的出现次数与点击次数。
+    printf("[面板] %s\n", g_panelVisible ? "展开" : "收起");
+    fflush(stdout);
     if (g_panelVisible) { glfwShowWindow(g_win); glfwFocusWindow(g_win); g_relayout = true; }
     else glfwHideWindow(g_win);
 }
@@ -2537,7 +2586,7 @@ int main(int argc, char** argv) {
         fflush(stdout);
 
         std::string icon = BundleResources() + "/menubar-icon@2x.png";
-        if (sb_show(icon.c_str(), "Agent Ping：点一下收／放面板，右键出菜单", "退出 Agent Ping",
+        if (sb_show(icon.c_str(), T("sb_hint", 0), T("sb_show_hide", 0), T("sb_quit", 0),
                     TogglePanel, nullptr) != 0)
             fprintf(stderr, "[状态项] 本平台还没有实现，只有窗口\n");
 
@@ -2557,9 +2606,21 @@ int main(int argc, char** argv) {
         fflush(stderr);
         double lastResize = glfwGetTime();
         int settle = 0;
+        // AGENTPING_SNI_HOLD=毫秒：只挂着总线就收摊的取证模式。
+        // 状态项的数不在我们这块窗口里（由宿主画），所以这一档不出图，只保证
+        // 「宿主来读的时候进程还在」——没有它，自检脚本要么把窗口关掉导致总线名消失，
+        // 要么一直跑不退出。
+        static const char* kHolding = getenv("AGENTPING_SNI_HOLD");
+        const double hold_ms = kHolding ? atof(kHolding) : 0.0;
+        const double hold_until = hold_ms > 0.0 ? glfwGetTime() + hold_ms / 1000.0 : 0.0;
         while (!glfwWindowShouldClose(win)) {
             glfwPollEvents();
             sb_pump();
+            if (hold_until > 0.0 && glfwGetTime() >= hold_until) {
+                printf("[状态项] 挂总线 %.0fms 后收摊（AGENTPING_SNI_HOLD）\n", hold_ms);
+                fflush(stdout);
+                glfwSetWindowShouldClose(win, GLFW_TRUE);
+            }
             // 提醒排在可见性判断之前：面板收着的时候正是它该干活的时候。
             if (alerts_on) {
                 long aseq = g_seq.load();
@@ -2678,6 +2739,13 @@ int main(int argc, char** argv) {
                        wrote ? shot_to : "（未落盘）", sw, sh, stamp, g_panelH, cw_now, ch_now, tl, bl, tlin);
                 fflush(stdout);
                 sb_float_window();   // 收摊前再报一次：resize 之后浮层属性有没有被 GLFW 改回去
+                // 菜单栏那颗不在我们这块窗口里，而外部截屏在这台机器上只会得到纯黑
+                // （驱动器没有屏幕录制授权），所以「数字到底挂上去没有」只能让按钮自绘一张。
+                if (const char* sb = getenv("AGENTPING_SB_SHOT")) {
+                    const int rc = sb_capture(sb);
+                    if (rc) fprintf(stderr, "[状态项] 实拍没成：这一档没有可拍的按钮（码 %d）\n", rc);
+                    fflush(stderr);
+                }
                 glfwSetWindowShouldClose(win, GLFW_TRUE);
             }
         }
