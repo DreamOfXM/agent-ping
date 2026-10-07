@@ -12,6 +12,7 @@
 #include "platform/statusbar.h"
 #include "platform/open.h"
 #include "platform/notify.h"
+#include "platform/lang.h"
 #include "alert.h"
 #include "scan.h"
 
@@ -50,6 +51,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 static const char* L0 = "zh", *L1 = "en", *L2 = "de", *L3 = "it", *L4 = "ja", *L5 = "ko";
 static const int kLocales = 6;
+static const char* kLocTag[kLocales] = {L0, L1, L2, L3, L4, L5};
 
 struct Key { const char* k; const char* t[6]; };
 static const Key kStr[] = {
@@ -601,6 +603,10 @@ static const char* g_shot_to = getenv("AGENTPING_SHOT");
 static ap::AlertCfg g_cfg;
 /// 0＝pin 列表，1＝设置屏。同一块窗口换内容，不另开窗口（另开就得多块卡框、多处收窗）。
 static int g_view = 0;
+/// 这一轮界面用哪一语（kStr 六列的下标）。启动时由平台层读一次，之后不改：
+/// 换语言要重烘字形，而这是常驻进程，运行时改口只会让半屏旧字半屏新字。
+/// 初值只在「main 还没跑到检测」时生效，取值口径见 [语言] 那行打印。
+static int g_loc = AP_LANG_ZH;
 /// 上一轮「还在动」（非静置）的会话身份键。设置屏打开「已完成」那一档后，只有
 /// 从这条集合里掉出来的会话才允许响 —— 没有它，第一次打开就会把几十条几天前静置的
 /// 会话当成跳变，连吵十几轮（alert.h 里同一条门）。
@@ -1031,7 +1037,7 @@ static float drawSettings(ImDrawList* dl, float L, float R, float maxBot, int lo
         DrawTextRun(dl, L, CellTop(cy, kSegH, kHead10Line, T_MLBL, loc), UpAscii(T("set_title", loc)),
                     loc, kStIdle, T_MLBL, track);
         GhostPill(dl, R - pw, cy, pw, loc, "back", z);
-        AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_BACK, kNavRow, 0, loc, T("back", 0), 0);
+        AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_BACK, kNavRow, 0, loc, T("back", loc), 0);
         cy += kSegH + kSectionGap;
     }
 
@@ -2031,14 +2037,14 @@ static void RebuildPanel(const ap::Snapshot& s) {
         char q[48] = "";
         if (g_pd.queue_n) {
             char qs[40];
-            snprintf(qs, sizeof qs, T("sb_queued", 0), g_pd.queue_n);
+            snprintf(qs, sizeof qs, T("sb_queued", g_loc), g_pd.queue_n);
             snprintf(q, sizeof q, " %s", qs);
         }
         snprintf(tip, sizeof tip, "%s %d · %s %d%s · %s %d · %s",
-                 T("grp_await", 0), g_pd.await_n,
-                 T("grp_run", 0), g_pd.run, q,
-                 T("grp_fail", 0), g_pd.fail_n,
-                 T("sb_hint", 0));
+                 T("grp_await", g_loc), g_pd.await_n,
+                 T("grp_run", g_loc), g_pd.run, q,
+                 T("grp_fail", g_loc), g_pd.fail_n,
+                 T("sb_hint", g_loc));
     }
     sb_set_tooltip(tip);
     g_relayout = true;
@@ -2092,9 +2098,9 @@ static void RunAlertRound(const ap::Snapshot& s) {
     for (const auto& p : keep) {
         // 标题里的状态词与面板同一份表：横幅说「等你授权」、面板说「等待确认」
         // 这种两处各念一套的分裂，用户只能靠猜来对齐。
-        const char* word = p.state == ap::ST_FAILED ? T("failed", 0)
-                       : p.state == ap::ST_AWAIT ? T("awaiting", 0)
-                                                 : T("st_done", 0);
+        const char* word = p.state == ap::ST_FAILED ? T("failed", g_loc)
+                       : p.state == ap::ST_AWAIT ? T("awaiting", g_loc)
+                                                 : T("st_done", g_loc);
         const std::string title = p.agent_name + " · " + word;
         char why[512] = {0};
         int rc = ap_notify_post(title.c_str(), p.title.c_str(), p.agent_id.c_str(),
@@ -2166,6 +2172,31 @@ int main(int argc, char** argv) {
     }
     // 无参数＝从访达双击：出窗口。带参数＝离屏探针，按老用法渲一帧存 PPM。
     if (pos.empty() && !dump) windowed = true;
+
+    // 界面语言：先读系统，再让环境变量盖上去。
+    // 顺序是有意的——AGENTPING_LANG 是取证口（同一次构建要能拍出六张不同语言的图），
+    // 它盖在系统值上，但打印里会同时给出系统原本读到的是哪一语，不然「强制」会被
+    // 读成「检测到了」。认不出的强制值不静默丢弃：明说没生效、继续用系统值。
+    {
+        char src[160] = {0};
+        const int sys = ap_lang(src, (int)sizeof src);
+        g_loc = sys;
+        const char* want = getenv("AGENTPING_LANG");
+        if (want && *want) {
+            const int forced = ap_lang_from_tag(want);
+            if (forced >= 0) {
+                g_loc = forced;
+                printf("[语言] 强制 AGENTPING_LANG=%s → %s｜系统读到 %s\n", want,
+                       kLocTag[g_loc], src);
+            } else {
+                printf("[语言] AGENTPING_LANG=%s 不在六语里，忽略强制值｜系统读到 %s → %s\n",
+                       want, src, kLocTag[g_loc]);
+            }
+        } else {
+            printf("[语言] %s → %s\n", src, kLocTag[g_loc]);
+        }
+        fflush(stdout);
+    }
 
     if (dump) {
         // 秒级 time() 量不出 0.5s 这一档，冷扫耗时必须能报准
@@ -2292,7 +2323,6 @@ int main(int argc, char** argv) {
         ImGui::SetNextWindowSize(ImVec2(w, g_budgetH > kCanvasH ? g_budgetH : kCanvasH));
         // 名字必须带上屏别：探针一帧里同一语会 Begin 两次（pin + 设置），
         // 撞了同一个窗口 ID 就是两次 Begin 一个 End，ImGui 会把两屏内容叠进同一块裁剪矩形。
-        static const char* kLocTag[] = {L0, L1, L2, L3, L4, L5};
         char wname[32]; snprintf(wname, sizeof wname, "%s##%s", view == 1 ? "set" : "pin",
                                  kLocTag[loc % kLocales]);
         ImGui::Begin(wname, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -2334,7 +2364,8 @@ int main(int argc, char** argv) {
             const float pw = GhostPillW("set_title", loc);
             const long z = Zid(loc, kNavRow, HIT_SETTINGS, 0);
             GhostPill(dl, R - pw, cy, pw, loc, "set_title", z);
-            AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_SETTINGS, kNavRow, 0, loc, T("set_title", 0), 0);
+            AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_SETTINGS, kNavRow, 0, loc,
+                   T("set_title", loc), 0);
             cy += kSegH + kSectionGap;
         }
 
@@ -2363,8 +2394,21 @@ int main(int argc, char** argv) {
                                 delta, T("vs_yesterday", loc));
         for (int i = 0; i < nc; i++) {
             float cx = L + i * (cellW + 10.0f);
-            DrawTextRun(dl, cx, TextTop(cy, numH, T_NUM, loc), nums[i], loc, hcols[i], T_NUM,
-                        -kTierPx[T_NUM] * 0.03f);
+            // 第三格（成本）右对齐到内容边 R，前两格照稿子左对齐在 cx。
+            // 为什么只有这一格改：稿子是中文，"75.5 cr" 与 "↓ -75.3% 较昨日" 都落在格内；
+            // 换成英/德后同一格要念 "Today cost" / "Heutige Kosten" 和 "vs yesterday" /
+            // "vs gestern"。修前口径可复算：把下面 right 临时改成 false 重出图，
+            // 同一把尺子量到墨迹右缘 x=679px（R=654px，越出 12.5pt），产物留在
+            // evidence/2026-10-08-locale/prefix-mac-*.ppm ＋ measure-mac-prefix.txt。
+            // 右对齐把数字与脚行都收进 R 以内，且不靠裁字／不靠缩写保住原词。
+            const bool right = (i == 2);
+            const float anchor_x = right ? R : cx;
+            if (right)
+                DrawTextRight(dl, anchor_x, TextTop(cy, numH, T_NUM, loc), nums[i], loc, hcols[i],
+                              T_NUM, -kTierPx[T_NUM] * 0.03f);
+            else
+                DrawTextRun(dl, cx, TextTop(cy, numH, T_NUM, loc), nums[i], loc, hcols[i], T_NUM,
+                            -kTierPx[T_NUM] * 0.03f);
             // micro-label 是 leading-none（行框＝字号），脚行是 body 的 1.5 倍行框。
             DrawTextRun(dl, cx, TextTop(cy + numH + 4.0f, kTierPx[T_MICRO], T_MICRO, loc),
                         UpAscii(T(hkeys[i], loc)), loc, kMicro, T_MICRO, track);
@@ -2372,9 +2416,9 @@ int main(int argc, char** argv) {
             // 我们的真值是跌（今日 53.5 cr / 昨日 2086.6 cr），跌的行配琥珀箭头自相矛盾，
             // 所以按 StatBand 那条条件式走。
             if (i == 2 && has_delta)
-                DrawTextRun(dl, cx, TextTop(cy + numH + 4.0f + kTierPx[T_MICRO] + 4.0f,
-                                            kTierPx[T_SM] * 1.5f, T_SM, loc),
-                            foot, loc, up ? kStAwait : kStDone, T_SM, -kTierPx[T_SM] * 0.01f);
+                DrawTextRight(dl, R, TextTop(cy + numH + 4.0f + kTierPx[T_MICRO] + 4.0f,
+                                             kTierPx[T_SM] * 1.5f, T_SM, loc),
+                              foot, loc, up ? kStAwait : kStDone, T_SM, -kTierPx[T_SM] * 0.01f);
         }
         cy += numH + 4.0f + kTierPx[T_MICRO] + (has_delta ? 4.0f + kTierPx[T_SM] * 1.5f : 0.0f)
               + kSectionGap;
@@ -2586,8 +2630,8 @@ int main(int argc, char** argv) {
         fflush(stdout);
 
         std::string icon = BundleResources() + "/menubar-icon@2x.png";
-        if (sb_show(icon.c_str(), T("sb_hint", 0), T("sb_show_hide", 0), T("sb_quit", 0),
-                    TogglePanel, nullptr) != 0)
+        if (sb_show(icon.c_str(), T("sb_hint", g_loc), T("sb_show_hide", g_loc),
+                    T("sb_quit", g_loc), TogglePanel, nullptr) != 0)
             fprintf(stderr, "[状态项] 本平台还没有实现，只有窗口\n");
 
         glfwSwapInterval(1);
@@ -2658,7 +2702,7 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lk(g_mtx);
                 RebuildPanel(g_snap);
             }
-            drawPanel(0, 0, (float)WantedWindowW(), 0, g_view);
+            drawPanel(0, 0, (float)WantedWindowW(), g_loc, g_view);
             // AGENTPING_HITS=1：把这一帧真登记出来的命中区打到 stderr，只报一次。
             // 取证要按坐标钉悬停/点击，而坐标只有绘制那一趟算得准——手按着稿子估一份，
             // 估错就会「钉在按钮旁边的空白上」然后判成命中失效。

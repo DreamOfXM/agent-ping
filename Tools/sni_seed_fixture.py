@@ -59,7 +59,19 @@ def records(kind, now, idx):
         ts = now - (STALE + 300)
         tail = [asst(ts, "end_turn")]
     head = [user(now - 900, cid)]
-    return cid, head + tail
+    # 昨天那条只为了给表头第三格造出「较昨日」的跌：scan.cpp:219 的回扫窗是
+    # [今天起点-86400, 今天起点)，落在这里的记录进 y_credits；它不是最后一条有声记录，
+    # derive 看不到它 ⇒ 三档计数与期望 Label 都不受影响。
+    # 起点按本机当地零点算（同 scan.cpp:82 window_start），不能写成 now-90000 这种固定偏移：
+    # 那在凌晨第一小时内会掉到窗口外，取证就会「昨天没数」而第三格整格消失。
+    return cid, head + [asst(day_start(now) - 3600.0, "end_turn", 24.0)] + tail
+
+
+def day_start(ts):
+    """当天当地零点（epoch 秒）。口径抄 scan.cpp:80-84，不自己发明。"""
+    lt = time.localtime(ts)
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, lt.tm_wday,
+                        lt.tm_yday, lt.tm_isdst))
 
 
 def user(ts, cid=None):
@@ -71,12 +83,16 @@ def user(ts, cid=None):
     return r
 
 
-def asst(ts, stop):
+def asst(ts, stop, credits=6.0):
+    # credits 这个键是面板表头第三格（今日消耗）的唯一数据源（scan.cpp:233）。
+    # 不写它 ⇒ 容器里 credits 恒 0 ⇒ has_cost 假 ⇒ 那一格整格不画，
+    # 于是「六语文案会不会撑破成本格」这条在 Linux 上根本测不到（macOS 上就是这么漏的）。
     return {"type": "assistant", "timestamp": ts,
             "message": {"role": "assistant", "stop_reason": stop,
                         "usage": {"input_tokens": 1200 + 77 * len(stop),
                                   "cache_read_input_tokens": 40,
-                                  "output_tokens": 300}}}
+                                  "output_tokens": 300,
+                                  "credits": credits}}}
 
 
 def queue_op(ts, op):
@@ -104,6 +120,7 @@ def main():
     now = time.time()
     made = 0
     counts = {}
+    exp_today = exp_yday = 0.0
     for kind, n in PLAN:
         counts[kind] = n
         for i in range(1, n + 1):
@@ -111,6 +128,13 @@ def main():
             with open(os.path.join(root, cid + ".jsonl"), "w") as f:
                 for r in recs:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                    u = r.get("message", {}).get("usage")
+                    if u and "credits" in u:
+                        t = r["timestamp"]
+                        if t >= day_start(now):
+                            exp_today += u["credits"]
+                        elif t >= day_start(now) - 86400:
+                            exp_yday += u["credits"]
             made += 1
 
     # 期望标签：按 derive→GroupOf→标签构造器同一条链重算，不手抄字符串
@@ -121,6 +145,10 @@ def main():
     print("目录=%s 会话=%d" % (root, made))
     print("期望 Label=\"%s\"（介入 %d · 运行 %d（含排队 %d）· 失败 %d）"
           % (" · ".join(parts), await_n, run_n, counts["queued"], fail_n))
+    # 表头第三格的期望值：从「实际写进去的那批记录」累加出来的，不是照抄面板显示。
+    # 面板读 app.log 里 snapshot_dump 那行（today_credits / yesterday_credits）就能逐位对上。
+    print("期望 today_credits=%.2f yesterday_credits=%.2f 环比=%+.1f%%"
+          % (exp_today, exp_yday, (exp_today - exp_yday) / exp_yday * 100.0 if exp_yday else 0.0))
 
 
 if __name__ == "__main__":

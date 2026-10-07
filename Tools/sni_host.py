@@ -347,7 +347,11 @@ def drive(dest, path, d):
                 return pid, lab
         return None, None
 
-    sid, slab = find('显示', '隐藏', 'Show', 'hide', 'toggle')
+    # 键表要覆盖六语：托盘菜单的文案跟着系统语言走，宿主只写中英的话，
+    # 换到 de 就变成「布局里没找到该项」——10-08 那轮 LC_ALL=de_DE.UTF-8 实测就是这样，
+    # 总线上明明有 'Panel ein-/ausblenden'／'Agent Ping beenden'，是宿主认不出，不是 App 没挂上。
+    sid, slab = find('显示', '隐藏', 'Show', 'hide', 'toggle', 'ein-', 'ausblenden',
+                     'Mostra', 'nascondi', '表示', '표시', '숨기기')
     if sid is not None:
         ok, r = call(dest, menu, MENU_IFACE, 'Event', '(isvu)',
                      (sid, 'clicked', GLib.Variant('a{sv}', {}), 0))
@@ -356,7 +360,7 @@ def drive(dest, path, d):
     else:
         rec('Event(显示／隐藏)', False, '布局里没找到该项')
 
-    qid, qlab = find('退出', 'Quit', 'exit')
+    qid, qlab = find('退出', 'Quit', 'exit', 'beenden', 'Esci', '終了', '종료')
     if qid is not None:
         ok, r = call(dest, menu, MENU_IFACE, 'Event', '(isvu)',
                      (qid, 'clicked', GLib.Variant('a{sv}', {}), 0))

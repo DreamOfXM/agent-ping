@@ -98,8 +98,12 @@
 - (void)readback:(const char*)why {
     NSString* t = _item.button.title ?: @"";
     NSString* tip = _item.button.toolTip ?: @"";
-    fprintf(stderr, "[状态项] %s：标题＝「%s」｜悬停＝「%s」\n", why,
-            t.UTF8String, tip.UTF8String);
+    // 菜单那两项也从 NSMenu 自己身上读：六语接上之后，「把文案传进去」和「系统真挂上了」
+    // 是两件事——只打传入串的话，标题没生效照样能报出一句本地化。
+    NSString* m1 = _menu && _menu.numberOfItems > 0 ? [_menu itemAtIndex:0].title : @"";
+    NSString* m2 = _menu && _menu.numberOfItems > 1 ? [_menu itemAtIndex:1].title : @"";
+    fprintf(stderr, "[状态项] %s：标题＝「%s」｜悬停＝「%s」｜菜单＝「%s」「%s」\n", why,
+            t.UTF8String, tip.UTF8String, m1.UTF8String, m2.UTF8String);
     fflush(stderr);
 }
 

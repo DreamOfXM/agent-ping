@@ -36,6 +36,8 @@ if(APPLE)
   set_source_files_properties(${OPEN_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(NOTIFY_SRC src/platform/notify_macos.mm)
   set_source_files_properties(${NOTIFY_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(LANG_SRC src/platform/lang_macos.mm)
+  set_source_files_properties(${LANG_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
   set(PLATFORM_LIBS ${COCOA_LIB} ${IOKIT_LIB} ${OPENGL_LIB} ${COREGRAPHICS_LIB} ${USERNOTIFICATIONS_LIB})
 else()
@@ -55,6 +57,7 @@ else()
   find_library(OPENGL_LIB GL REQUIRED)
   set(OPEN_SRC src/platform/open_posix.cpp)
   set(NOTIFY_SRC src/platform/notify_posix.cpp)
+  set(LANG_SRC src/platform/lang_posix.cpp)
   set(PLATFORM_LIBS ${OPENGL_LIB})
   if(LIBDBUS_FOUND)
     set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
@@ -81,6 +84,7 @@ add_executable(pin_imgui_shell
   ${STATUSBAR_SRC}
   ${OPEN_SRC}
   ${NOTIFY_SRC}
+  ${LANG_SRC}
   ${IMGUI_SRC}
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
