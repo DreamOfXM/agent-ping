@@ -23,6 +23,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <sys/stat.h>
 #include <algorithm>
 #include <map>
 #include <mutex>
@@ -2047,12 +2048,25 @@ int main(int argc, char** argv) {
                 std::vector<unsigned char> pix((size_t)sw * sh * 4);
                 glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, pix.data());
                 std::ofstream of(shot_to, std::ios::binary);
-                of << "P6\n" << sw << "\n" << sh << "\n255\n";
-                for (int y = sh - 1; y >= 0; y--)
+                const bool opened = of.is_open();
+                if (opened) of << "P6\n" << sw << "\n" << sh << "\n255\n";
+                for (int y = sh - 1; opened && y >= 0; y--)
                     for (int x = 0; x < sw; x++) {
                         unsigned char* p = &pix[((size_t)y * sw + x) * 4];
                         of << p[0] << p[1] << p[2];
                     }
+                of.close();
+                // 落不了盘就不许报成功：曾经出现过日志写着「实拍 680x1678」、磁盘上什么
+                // 都没有的一轮，相对路径在 .app 里跑时按不存在的 cwd 解析。取证只认文件。
+                struct stat sb_st;
+                const bool wrote = opened && ::stat(shot_to, &sb_st) == 0 && sb_st.st_size > 0;
+                if (!wrote) {
+                    char cwd[1024] = "?";
+                    if (getcwd(cwd, sizeof cwd)) { /* keep */ }
+                    fprintf(stderr, "[实拍] 没写成：%s（打不开或写完仍不存在；进程 cwd=%s）——本轮不算出图\n",
+                            shot_to, cwd);
+                    fflush(stderr);
+                }
                 time_t when = (time_t)g_snap.scanned_at;
                 char stamp[32];
                 strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&when));
@@ -2061,7 +2075,7 @@ int main(int argc, char** argv) {
                 int bl = pix[3];
                 printf("[实拍] %s (%dx%d，窗口帧缓冲原样) 数据扫描于 %s｜内容高 g_panelH=%.1fpt，"
                        "窗口内容框 %dx%dpt｜alpha 左上=%d 左下=%d 圆角内=%d（左上 0 才说明透明浮层真的生效）\n",
-                       shot_to, sw, sh, stamp, g_panelH, cw_now, ch_now, tl, bl, tlin);
+                       wrote ? shot_to : "（未落盘）", sw, sh, stamp, g_panelH, cw_now, ch_now, tl, bl, tlin);
                 fflush(stdout);
                 sb_float_window();   // 收摊前再报一次：resize 之后浮层属性有没有被 GLFW 改回去
                 glfwSetWindowShouldClose(win, GLFW_TRUE);
@@ -2111,9 +2125,17 @@ int main(int argc, char** argv) {
     std::vector<unsigned char> buf((size_t)w * h * 4);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
     { std::ofstream of(out, std::ios::binary);
-      of << "P6\n" << w << "\n" << h << "\n255\n";
-      for (int y = h - 1; y >= 0; y--) for (int x = 0; x < w; x++) {
-          unsigned char* p = &buf[((size_t)y * w + x) * 4]; of << p[0] << p[1] << p[2]; } }
+      const bool opened = of.is_open();
+      if (opened) of << "P6\n" << w << "\n" << h << "\n255\n";
+      for (int y = h - 1; opened && y >= 0; y--) for (int x = 0; x < w; x++) {
+          unsigned char* p = &buf[((size_t)y * w + x) * 4]; of << p[0] << p[1] << p[2]; }
+      of.close();
+      struct stat st_out;
+      if (!opened || ::stat(out, &st_out) != 0 || st_out.st_size <= 0) {
+          fprintf(stderr, "[输出] 没写成：%s——本轮不算出图\n", out);
+          g_quit.store(true); scanner.join(); FT_Done_FreeType(ft);
+          return 1;
+      } }
     printf("[输出] %s (%dx%d)\n", out, w, h);
     g_quit.store(true);
     scanner.join();
