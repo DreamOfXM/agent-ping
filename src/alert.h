@@ -26,8 +26,17 @@ struct AlertCfg {
     bool await_perm = true;   // 等待确认（ST_AWAIT 且非推断出来的那个）
     bool failed = true;       // 失败中断
     bool done = false;        // 已完成（ST_RESTING）
+    /// 「已读水位线」：完成时刻 ≤ 它的会话都算看过（小点点不亮）。冷启动没有这个键时
+    /// 取当前时刻——存量的完成记录不倒灌成未读，只给今后新完成的起点。
+    long long seen_until = 0;
+    /// 面板窗口位置：拖动过就记住（-1＝没拖过，启动贴菜单栏右下）。
+    int win_x = -1, win_y = -1;
     int max_rows = 8;         // 每组最多摆几条，多出来的收进「还有 N 条」
     bool on_top = true;       // 常驻置顶
+    /// 界面语言（0..5，见 pin_imgui_shell.cpp 的 kLocTag）。这是界面偏好，不是提醒判据，
+    /// 只是与上面几档共用同一个 settings.txt——面板的设置就这一个文件，不再多开一个。
+    /// -1＝没写过，由平台层探测 / AGENTPING_LANG 决定，与加这一项之前的行为一致。
+    int lang = -1;
 };
 
 /// 设置生效后的判据：只许在 should_alert 已成立的前提上按档位关，不许凭空多响——

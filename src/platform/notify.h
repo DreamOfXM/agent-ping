@@ -18,6 +18,10 @@ extern "C" {
    UTF-8，out_len 含结尾 0。 */
 int ap_notify_channel(char* reason, int out_len);
 
+/* 只出声不发横幅：设置屏打开提示音时的即时测试音。
+   返回 0＝出了声；非 0＝没出成（reason 写明走的是哪条路、卡在哪）。 */
+int ap_sound_test(char* reason, int out_len);
+
 /* 发一条。agent_id / session_id 带进通知的 userInfo：点横幅要能跳回那一条会话，
    没有这两个键，点击下去只是消失。
    want_sound＝0 时任何一档都不许多出声（设置里提示音关着）。

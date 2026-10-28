@@ -1,5 +1,6 @@
 #include "alert.h"
 
+#include <ctime>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -162,7 +163,17 @@ AlertCfg load_alert_cfg() {
             int n = atoi(v.c_str());
             if (n >= 1 && n <= 40) c.max_rows = n;      // 0 或负数＝整组摆不出来，那是失效不是设置
         }
+        else if (k == "lang") {
+            int n = atoi(v.c_str());
+            if (n >= 0 && n <= 5) c.lang = n;           // -1（没写过）留在探测那条路上
+        }
+        else if (k == "seen_until") { c.seen_until = atoll(v.c_str()); }
+        else if (k == "win_x") { c.win_x = atoi(v.c_str()); }
+        else if (k == "win_y") { c.win_y = atoi(v.c_str()); }
     }
+    // 没写过水位线（0＝1970，真实值不可能是它）＝第一次用：存量完成记录不倒灌成未读，
+    // 只给今后新完成的起点。以后每次看过一条会话，水位线推进并落盘。
+    if (c.seen_until == 0) c.seen_until = (long long)std::time(nullptr);
     // 环境变量只用于取证：同一份判据要能在不碰他真实设置文件的前提下验出「免打扰确实压住了」。
     if (const char* e = getenv("AGENTPING_DND")) c.dnd = (*e == '1');
     if (const char* e = getenv("AGENTPING_SOUND")) c.sound = (*e != '0');
@@ -181,7 +192,11 @@ bool save_alert_cfg(const AlertCfg& cfg, std::string* err) {
       << "alert_failed=" << (cfg.failed ? 1 : 0) << "\n"
       << "alert_done=" << (cfg.done ? 1 : 0) << "\n"
       << "on_top=" << (cfg.on_top ? 1 : 0) << "\n"
-      << "max_rows=" << cfg.max_rows << "\n";
+      << "max_rows=" << cfg.max_rows << "\n"
+      << "lang=" << cfg.lang << "\n"
+      << "seen_until=" << cfg.seen_until << "\n"
+      << "win_x=" << cfg.win_x << "\n"
+      << "win_y=" << cfg.win_y << "\n";
     f.flush();
     if (!f) { if (err) *err = "写到一半失败（" + p + "）"; return false; }
     return true;

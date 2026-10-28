@@ -120,6 +120,32 @@ std::string bannerErr(int rc, const std::string& err) {
     return s;
 }
 
+/// 玩家与音源必须成对选出来：paplay 只吃 ogg/flac、aplay 只吃 wav，
+/// 极简镜像两样都没有。找不到就返回 false，让调用方明说「无声可出」。
+/// 抽成一个函数是因为设置屏的测试音和提醒的兜底出声必须走同一个选择器，
+/// 否则「测试响了」并不等于「提醒会响」。
+bool pickSound(std::string& player, std::string& file) {
+    for (const char* pl : kPlayers) {
+        if (!findInPath(pl, nullptr)) continue;
+        for (const char* f : kSoundFiles) {
+            if (!exists(f)) continue;
+            bool wav = strlen(f) >= 4 && !strcmp(f + strlen(f) - 4, ".wav");
+            if (!strcmp(pl, "aplay") && !wav) continue;   // aplay 只吃 wav
+            if (!strcmp(pl, "paplay") && wav) continue;   // paplay 只吃 ogg/flac
+            player = pl; file = f; return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> soundArgv(const std::string& player, const std::string& file) {
+    if (player == "paplay" || player == "pw-play") return { player, file };
+    if (player == "aplay" || player == "cxplay") return { player, "-q", file };
+    if (player == "ffplay")
+        return { player, "-loglevel", "error", "-nodisp", "-autoexit", "-quiet", file };
+    return { player, "-i", "message", "-l", "0.8" };   // canberra-gtk-play 按事件名放
+}
+
 }  // namespace
 
 extern "C" void ap_notify_on_click(ap_notify_click_fn fn, void* ud) {
@@ -183,28 +209,12 @@ extern "C" int ap_notify_post(const char* title, const char* body,
     }
     // 出声：玩家 + 音源都得真找到才算响。桌面音库没装（很多极简镜像没有）就明写。
     std::string player, file;
-    for (const char* pl : kPlayers) {
-        if (!findInPath(pl, nullptr)) continue;
-        for (const char* f : kSoundFiles) {
-            if (!exists(f)) continue;
-            bool wav = strlen(f) >= 4 && !strcmp(f + strlen(f) - 4, ".wav");
-            if (!strcmp(pl, "aplay") && !wav) continue;   // aplay 只吃 wav
-            if (!strcmp(pl, "paplay") && wav) continue;   // paplay 只吃 ogg/flac
-            player = pl; file = f; break;
-        }
-        if (!player.empty()) break;
-    }
-    if (player.empty()) {
+    if (!pickSound(player, file)) {
         copyReason(reason, out_len, banner + "；无声可出：没找到 paplay/pw-play/ffplay 或桌面音库文件");
         return 2;
     }
-    std::vector<std::string> argv;
-    if (player == "paplay" || player == "pw-play") argv = { player, file };
-    else if (player == "aplay" || player == "cxplay") argv = { player, "-q", file };
-    else if (player == "ffplay") argv = { player, "-loglevel", "error", "-nodisp", "-autoexit", "-quiet", file };
-    else argv = { player, "-i", "message", "-l", "0.8" };   // canberra-gtk-play 按事件名放
     std::string perr;
-    int prc = runWait(argv, 4000, &perr);
+    int prc = runWait(soundArgv(player, file), 4000, &perr);
     if (prc == -2) {   // 播放器被超时杀掉：到底响没响不知道，记「没发过」让下轮再试
         copyReason(reason, out_len, banner + "；出声没在 4s 内回执（" + player + "），本轮不算发出");
         return 3;
@@ -213,4 +223,29 @@ extern "C" int ap_notify_post(const char* title, const char* body,
                std::to_string(prc) + "（" + file + "）" +
                (prc == 0 || perr.empty() ? std::string() : "；平台原话：" + perr));
     return prc == 0 ? 1 : 2;
+}
+
+// 设置屏把「提示音」翻到开时当场响一声，用户不必等下一次提醒才知道开关真起作用。
+// 走的是 ap_notify_post 兜底出声那同一条选择器（pickSound + soundArgv），
+// 所以「测试响了」和「提醒会响」是同一件事，不是两套代码各自的运气。
+extern "C" int ap_sound_test(char* reason, int out_len) {
+    std::string player, file;
+    if (!pickSound(player, file)) {
+        copyReason(reason, out_len, "无声可出：没找到 paplay/pw-play/ffplay/cxplay/aplay，"
+                                    "或桌面音库文件缺失（Debian 需 sound-theme-freedesktop）");
+        return 1;
+    }
+    std::string perr;
+    int prc = runWait(soundArgv(player, file), 4000, &perr);
+    if (prc == -2) {
+        copyReason(reason, out_len, player + " 没在 4s 内退出（声卡被占或守护进程没应答）");
+        return 1;
+    }
+    if (prc != 0) {
+        copyReason(reason, out_len, player + " 退出码 " + std::to_string(prc) +
+                                    (perr.empty() ? std::string() : "；平台原话：" + perr));
+        return 1;
+    }
+    copyReason(reason, out_len, "已出声：" + player + " " + file);
+    return 0;
 }

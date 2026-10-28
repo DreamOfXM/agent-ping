@@ -65,6 +65,17 @@ int playSync(NSString* path) {
 /// 两条路都要把结果写成机器能读的判据 —— Swift 侧注释说得对：play() 返回 false 是静默失败。
 /// 一轮四条时后三条要排在前面那条放完之后：Swift 侧四条同刻起，实测同一刻的四声 Glass
 /// 听感就是一坨爆音，分不出「响了几条」—— 而屏幕上写的是四条。
+void copyReason(char* reason, int out_len, const std::string& s);   // 定义在本文件下方
+bool playFallback(std::string* via);                                // 同上
+
+extern "C" int ap_sound_test(char* reason, int out_len) {
+    if (!NSApp) { copyReason(reason, out_len, "AppKit 未就绪"); return 1; }
+    std::string via;
+    const bool ok = playFallback(&via);
+    copyReason(reason, out_len, "测试音 " + std::string(ok ? "已出声" : "没出成") + "（" + via + "）");
+    return ok ? 0 : 1;
+}
+
 bool playFallback(std::string* via) {
     NSString* p = glassSoundPath();
     if (NSApp) {

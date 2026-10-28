@@ -329,6 +329,10 @@ HeadFacts head_facts(const std::string& path, std::size_t max_bytes) {
 
     static const char* kNeedle = "\"cwd\"";
     each_line(buf.data(), (std::size_t)got, false, [&](char* l, std::size_t n) {
+        if (hf.first_ts == 0 && contains(l, n, "\"timestamp\"")) {
+            Json jt;
+            if (json_parse(l, n, jt)) hf.first_ts = json_date_at(jt, "timestamp");
+        }
         if (!hf.cwd.empty() && !hf.prompt.empty()) return;
         if (hf.cwd.empty() && contains(l, n, kNeedle)) {
             Json j;

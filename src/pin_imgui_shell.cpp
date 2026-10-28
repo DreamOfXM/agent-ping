@@ -13,8 +13,10 @@
 #include "platform/open.h"
 #include "platform/notify.h"
 #include "platform/lang.h"
+#include "platform/autostart.h"
 #include "alert.h"
 #include "scan.h"
+#include "hook_install.h"
 
 #include <atomic>
 #include <cctype>
@@ -101,6 +103,8 @@ static const Key kStr[] = {
     // await 行专属的三颗（稿子 SessionRow.tsx:190 / 状态胶囊「等待确认」）
     {"await_confirm",  {"等待确认", "Waiting to confirm", "Warten auf Zusage", "In attesa di conferma", "確認待ち", "확인 대기"}},
     {"ask_confirm",    {"需要你确认", "needs your confirmation", "braucht deine Bestätigung", "richiede la tua conferma", "確認が必要です", "확인 필요"}},
+    {"ask_answer",     {"需要你回答", "needs your answer", "braucht deine Antwort", "richiede una risposta", "回答が必要です", "답변이 필요"}},
+    {"in_wait",        {"在等你", "Waiting on you", "Wartet auf dich", "In attesa di te", "待っています", "기다리는 중"}},
     {"mark_read",      {"已读", "Read", "Gelesen", "Letto", "既読", "읽음"}},
     {"later",          {"稍后", "Later", "Später", "Dopo", "後で", "나중에"}},
     {"queue_pos",      {"队列第 %d 位", "Queue #%d", "Warteschlange #%d", "Coda #%d", "キュー %d 番目", "대기열 %d 번째"}},
@@ -160,6 +164,557 @@ static const Key kStr[] = {
     {"min_ago",        {"%d 分钟前", "%d min ago", "vor %d Min", "%d min fa", "%d 分前", "%d분 전"}},
     {"hour_ago",       {"%d 小时前", "%d h ago", "vor %d Std", "%d h fa", "%d 時間前", "%d시간 전"}},
     {"day_ago",        {"%d 天前", "%d d ago", "vor %d Tg", "%d gg fa", "%d 日前", "%d일 전"}},
+    // ── 面板补全（r20 的接线／问答详情／授权详情／历史）────────────────────────
+    {"nav_history",    {"历史", "History", "Verlauf", "Cronologia", "履歴", "기록"}},
+    {"nav_setup",      {"接线", "Connect", "Verbinden", "Collega", "接続", "연결"}},
+    {"setup_lead",     {"让 CLI 停在问你的时候，把原话和选项送到这块面板。",
+                        "When a CLI stops to ask you something, its question and options land here.",
+                        "Wenn eine CLI dich etwas fragt, landen Frage und Optionen hier.",
+                        "Quando una CLI si ferma a chiederti qualcosa, domanda e opzioni arrivano qui.",
+                        "CLI が質問で止まったとき、原文と選択肢がここに届きます。",
+                        "CLI가 질문하며 멈추면 원문과 선택지가 여기로 옵니다."}},
+    {"setup_ok",       {"已接线", "Connected", "Verbunden", "Collegato", "接続済み", "연결됨"}},
+    {"setup_stale",    {"路径失效", "Script missing", "Skript fehlt", "Script mancante",
+                        "参照切れ", "경로 끊김"}},
+    {"setup_none",     {"未接线", "Not connected", "Nicht verbunden", "Non collegato",
+                        "未接続", "미연결"}},
+    {"setup_manual",   {"需手动", "Manual", "Manuell", "Manuale", "手動", "수동"}},
+    {"setup_watch",    {"只看状态", "State only", "Nur Status", "Solo stato", "状態のみ", "상태만"}},
+    {"setup_install",  {"写入", "Install", "Installieren", "Installa", "設定", "설치"}},
+    {"setup_rewrite",  {"重写", "Rewrite", "Neu schreiben", "Riscrivi", "再設定", "다시 쓰기"}},
+    {"setup_writer",   {"写入器", "Writer script", "Writer-Skript", "Script writer",
+                        "書き込みスクリプト", "기록 스크립트"}},
+    {"setup_inbox",    {"收件箱", "Inbox", "Eingang", "Casella", "受信箱", "수신함"}},
+    {"setup_cfg",      {"配置", "Config", "Konfiguration", "Configurazione", "設定ファイル", "설정 파일"}},
+    {"setup_note",     {"只改本机文件；写配置前先备份。",
+                        "Local files only; the existing config is backed up first.",
+                        "Nur lokale Dateien; die bestehende Konfiguration wird vorher gesichert.",
+                        "Solo file locali; la configurazione esistente viene salvata prima.",
+                        "ローカルのファイルだけを変更します。設定は書き換え前にバックアップします。",
+                        "로컬 파일만 바꾸며, 쓰기 전에 기존 설정을 백업합니다."}},
+    {"setup_wait",     {"接好后让一个 CLI 停下来问你，这里会亮。",
+                        "Once connected, the next time a CLI stops to ask, this panel lights up.",
+                        "Wenn eine CLI danach fragt, leuchtet dieses Panel auf.",
+                        "Dopo il collegamento, quando una CLI chiede, questo pannello si accende.",
+                        "接続後、CLI が質問で止まるとここが光ります。",
+                        "연결 후 CLI가 질문하며 멈추면 여기가 켜집니다."}},
+    {"setup_fail",     {"写入失败", "Install failed", "Installieren fehlgeschlagen",
+                        "Installazione fallita", "設定に失敗", "설치 실패"}},
+    {"setup_done",     {"%s 已接线", "%s connected", "%s verbunden", "%s collegato",
+                        "%s を接続しました", "%s 연결됨"}},
+    {"setup_backup",   {"备份 %s", "Backup %s", "Sicherung %s", "Backup %s",
+                        "バックアップ %s", "백업 %s"}},
+    {"setup_restart",  {"若 CLI 正开着，重新打开一次再试。",
+                        "If the CLI is running, reopen it before testing.",
+                        "Läuft die CLI noch, öffne sie neu.",
+                        "Se la CLI è aperta, riaprila prima di provare.",
+                        "CLI を開いたままなら、開き直してから試してください。",
+                        "CLI가 열려 있다면 다시 연 뒤 시험하세요."}},
+    {"setup_occupied", {"被占用", "Occupied", "Belegt", "Occupato", "使用中", "사용 중"}},
+    {"setup_hero",     {"先让它看见你的 agent", "Let it see your agents", "Lass es deine Agents sehen",
+                        "Fagli vedere i tuoi agent", "まず agent を見つけさせます", "먼저 agent를 보게 하세요"}},
+    {"setup_step1",    {"检测本机 agent", "Detect local agents", "Lokale Agents erkennen",
+                        "Rileva gli agent locali", "ローカル agent を検出", "로컬 agent 감지"}},
+    {"setup_step2",    {"接入提问信号", "Wire up questions", "Fragesignale verbinden",
+                        "Collega i segnali di domanda", "質問シグナルを接続", "질문 신호 연결"}},
+    {"setup_avail",    {"%d 个可用", "%d available", "%d verfügbar", "%d disponibili",
+                        "%d 個利用可", "%d개 사용 가능"}},
+    {"setup_hooknote", {"日志只看得出「停住了」，看不出它在问你什么。把 CLI 的 Notification 钩子接到本机脚本，问题原文就会写进收件箱；面板只读它。",
+                        "Logs show that a CLI stopped, not what it asks. Point the CLI's Notification hook at the local script below and the exact question is written to the inbox; the panel only reads it.",
+                        "Logs zeigen nur, dass eine CLI angehalten hat, nicht was sie fragt. Richte den Notification-Hook der CLI auf das lokale Skript unten, dann landet die Frage im Postfach; das Panel liest nur mit.",
+                        "I log dicono solo che una CLI si è fermata, non cosa chiede. Collega l'hook Notification della CLI allo script locale qui sotto: la domanda finisce nella casella, il pannello la legge soltanto.",
+                        "ログでは「止まった」ことしか分からず、何を聞いているかは分かりません。CLI の Notification フックを下のローカルスクリプトに向けると、質問原文が受信箱に書き込まれます。パネルは読むだけです。",
+                        "로그로는 CLI가 멈춘 것만 알 수 있고 무엇을 묻는지는 알 수 없습니다. CLI의 Notification 훅을 아래 로컬 스크립트로 연결하면 질문 원문이 수신함에 기록됩니다. 패널은 읽기만 합니다."}},
+    {"setup_nohook",   {"ZCode、WorkBuddy、OpenCode 没有可写的通知钩子，只读日志。",
+                        "ZCode, WorkBuddy and OpenCode expose no writable notification hook — their logs are read only.",
+                        "ZCode, WorkBuddy und OpenCode haben keinen schreibbaren Notification-Hook — nur Log-Lesen.",
+                        "ZCode, WorkBuddy e OpenCode non hanno un hook Notification scrivibile: si leggono solo i log.",
+                        "ZCode・WorkBuddy・OpenCode には書き込める通知フックがなく、ログを読むだけです。",
+                        "ZCode, WorkBuddy, OpenCode는 쓸 수 있는 알림 훅이 없어 로그만 읽습니다."}},
+    {"det_title",      {"提问", "Question", "Frage", "Domanda", "質問", "질문"}},
+    {"det_session",    {"会话", "Session", "Sitzung", "Sessione", "セッション", "세션"}},
+    {"det_source_val", {"hook 收件箱 · 本机", "hook inbox · local", "Hook-Postfach · lokal",
+                        "casella hook · locale", "hook 受信箱 · ローカル", "훅 수신함 · 로컬"}},
+    {"det_sess_n",     {"%d 会话", "%d sessions", "%d Sitzungen", "%d sessioni",
+                        "%d セッション", "%d 세션"}},
+    {"det_opt_count",  {"%d 个选项", "%d options", "%d Optionen", "%d opzioni",
+                        "%d 個の選択肢", "%d개 선택지"}},
+    {"det_empty",      {"现在没有待回答的问题。", "No questions are waiting right now.",
+                        "Derzeit warten keine Fragen.", "Nessuna domanda in attesa.",
+                        "今は答え待ちの質問がありません。", "지금 대기 중인 질문이 없습니다."}},
+    {"det_toast",      {"已复制「%s」", "Copied “%s”", "„%s“ kopiert", "Copiato «%s»",
+                        "「%s」をコピーしました", "「%s」 복사됨"}},
+    {"det_toast_sub",  {"切到 %s 会话，粘贴后回车。", "Switch to the %s session, paste, press Enter.",
+                        "Zur %s-Sitzung wechseln, einfügen, Enter.", "Vai alla sessione %s, incolla e premi Invio.",
+                        "%s のセッションに移り、貼り付けて Enter。", "%s 세션으로 이동해 붙여넣고 Enter."}},
+    {"det_options",    {"选项", "Options", "Optionen", "Opzioni", "選択肢", "선택지"}},
+    {"det_copy",       {"复制", "Copy", "Kopieren", "Copia", "コピー", "복사"}},
+    {"det_copied",     {"已复制", "Copied", "Kopiert", "Copiato", "コピー済み", "복사됨"}},
+    {"det_jump",       {"跳到终端", "Open terminal", "Zum Terminal", "Vai al terminale",
+                        "ターミナルへ", "터미널로"}},
+    {"det_no_submit",  {"这里不代你提交答案；复制后到终端粘贴。",
+                        "Nothing is submitted for you — copy, then paste in the terminal.",
+                        "Hier wird nichts gesendet — kopieren und im Terminal einfügen.",
+                        "Qui non viene inviato nulla: copia e incolla nel terminale.",
+                        "ここからは送信しません。コピーしてターミナルに貼り付けてください。",
+                        "여기서 대신 제출하지 않습니다. 복사해 터미널에 붙여넣으세요."}},
+    {"det_source",     {"来源", "Source", "Quelle", "Fonte", "取得元", "출처"}},
+    {"det_wait",       {"已等", "Waiting", "Wartet", "In attesa", "待機", "대기"}},
+    {"perm_title",     {"授权", "Permission", "Berechtigung", "Autorizzazione", "許可", "권한"}},
+    {"perm_tool",      {"工具", "Tool", "Werkzeug", "Strumento", "ツール", "도구"}},
+    {"perm_message",   {"CLI 原文", "CLI message", "CLI-Meldung", "Messaggio CLI",
+                        "CLI の原文", "CLI 원문"}},
+    {"perm_hint",      {"授权只能在终端完成。面板不会代你点允许或拒绝，这里只告诉你是哪一条、等了多久。",
+                        "Permission is granted in the terminal. The panel never clicks allow or deny for you — it only shows which request it is and how long it has waited.",
+                        "Berechtigungen werden im Terminal erteilt. Das Panel klickt nie Erlauben oder Ablehnen für dich — es zeigt nur, welcher Eintrag es ist und wie lange er wartet.",
+                        "L'autorizzazione si dà nel terminale. Il pannello non clicca mai consenti o nega al posto tuo: dice solo quale richiesta è e da quanto attende.",
+                        "許可はターミナルで行います。パネルが許可／拒否を代わりに押すことはありません。どれが、どれだけ待っているかだけを示します。",
+                        "권한은 터미널에서 부여합니다. 패널이 허용/거부를 대신 누르지 않으며, 어떤 요청인지와 얼마나 기다렸는지만 보여 줍니다."}},
+    {"perm_status",    {"停在授权", "Waiting for permission", "Wartet auf Freigabe",
+                        "In attesa di permesso", "許可待ち", "권한 대기"}},
+    {"perm_project",   {"项目", "Project", "Projekt", "Progetto", "プロジェクト", "프로젝트"}},
+    {"perm_empty",     {"现在没有停在授权的会话。", "No session is waiting for permission.",
+                        "Keine Sitzung wartet auf Freigabe.", "Nessuna sessione attende un permesso.",
+                        "許可待ちのセッションはありません。", "권한을 기다리는 세션이 없습니다."}},
+    {"jump_project",   {"切到 %s 的终端", "Open the %s terminal", "Zum %s-Terminal",
+                        "Apri il terminale di %s", "%s のターミナルへ", "%s 터미널로"}},
+    {"hist_done",      {"今日完成", "Finished today", "Heute beendet", "Conclusi oggi",
+                        "本日完了", "오늘 완료"}},
+    {"hist_latest",    {"回到最新", "Back to latest", "Zu den neuesten", "Torna ai recenti",
+                        "最新に戻る", "최신으로"}},
+    {"hist_sum",       {"%d 个会话完成", "%d sessions finished", "%d Sitzungen beendet",
+                        "%d sessioni concluse", "%d セッション完了", "%d개 세션 완료"}},
+    {"hist_empty",     {"今天还没有结束的会话。", "No sessions finished today yet.",
+                        "Heute noch keine beendeten Sitzungen.", "Nessuna sessione conclusa oggi.",
+                        "今日はまだ終了したセッションがありません。", "오늘 아직 끝난 세션이 없습니다."}},
+    // ── r20 版式（340 宽、底部标签、排队式总览）。这组键只服务 r20 那一套结构：
+    //    节头带计数与右注、等你回答的琥珀胶囊、等你授权行、44px 标签栏、详情页的 kv 表。
+    {"sl_q",           {"等你回答", "Waiting on you", "Wartet auf dich", "In attesa di te",
+                        "回答待ち", "답변 대기"}},
+    {"sl_p",           {"等你授权", "Waiting for permission", "Wartet auf Freigabe",
+                        "In attesa di permesso", "許可待ち", "권한 대기"}},
+    {"sl_run",         {"其它在跑", "Also running", "Außerdem läuft", "Altri in corso",
+                        "その他実行中", "기타 실행 중"}},
+    {"longest",        {"最久 %s", "Oldest %s", "Ältestes %s", "Più vecchio %s",
+                        "最長 %s", "최장 %s"}},
+    {"confirm_term",   {"在终端确认", "Confirm in the terminal", "Im Terminal bestätigen",
+                        "Conferma nel terminale", "ターミナルで確認", "터미널에서 확인"}},
+    {"running_now",    {"在跑", "Running", "Läuft", "In corso", "実行中", "실행 중"}},
+    {"opt_n",          {"%d 个选项", "%d options", "%d Optionen", "%d opzioni",
+                        "%d 個の選択肢", "%d개 옵션"}},
+    {"step_ago",       {"上一步 %s 前", "last step %s ago", "letzter Schritt vor %s",
+                        "ultimo passo %s fa", "前回の操作 %s前", "마지막 단계 %s 전"}},
+    {"turns_n",        {"%d 轮", "%d turns", "%d Runden", "%d turni",
+                        "%d ターン", "%d 턴"}},
+    {"skip",           {"跳过", "Skip", "Überspringen", "Salta", "スキップ", "건너뛰기"}},
+    {"tab_overview",   {"总览", "Overview", "Übersicht", "Panoramica", "概要", "개요"}},
+    {"empty_none",     {"没有等你处理的事", "Nothing needs you", "Nichts wartet auf dich",
+                        "Niente richiede te", "対応待ちはありません", "처리할 일이 없습니다"}},
+    {"empty_live",     {"「%s」还在跑。它一停下来问你，这里会亮起来。",
+                        "“%s” is still running. When it stops to ask you, this lights up.",
+                        "„%s“ läuft noch. Sobald es dich fragt, leuchtet es hier.",
+                        "«%s» è ancora in corso. Quando si ferma a chiederti, qui si accende.",
+                        "「%s」は実行中です。質問で止まるとここが光ります。",
+                        "「%s」은 아직 실행 중입니다. 질문하며 멈추면 여기가 켜집니다."}},
+    {"empty_idle",     {"今天还没有会话需要介入。有新的提问或授权请求时，菜单栏会亮起并提醒。",
+                        "No session needs you today. When a question or permission request arrives, the menu bar lights up.",
+                        "Heute braucht keine Sitzung dich. Bei einer neuen Frage oder Freigabe leuchtet die Menüleiste.",
+                        "Oggi nessuna sessione richiede te. A una nuova domanda o richiesta di permesso si accende la barra dei menu.",
+                        "今日は対応が必要なセッションがありません。新しい質問や許可要求があるとメニューバーが光ります。",
+                        "오늘은 대응할 세션이 없습니다. 새 질문이나 권한 요청이 오면 메뉴 막대가 켜집니다."}},
+    {"det_optlab",     {"%d 个选项 · 点哪个都只复制，不代提交",
+                        "%d options · any click only copies, never submits",
+                        "%d Optionen · Klick kopiert nur, sendet nie",
+                        "%d opzioni · il clic copia soltanto, non invia",
+                        "%d 個の選択肢 · どれもコピーのみ、送信はしません",
+                        "%d개 옵션 · 클릭은 복사만, 제출하지 않음"}},
+    {"det_rec",        {"推荐", "Suggested", "Empfohlen", "Consigliato",
+                        "おすすめ", "추천"}},
+    {"det_hint_q",     {"复制后切到 %s 的该会话，粘贴、回车。面板不替你把答案发出去。",
+                        "Copy, switch to that %s session, paste, press Enter. The panel never sends the answer.",
+                        "Kopieren, zur %s-Sitzung wechseln, einfügen, Enter. Das Panel sendet nie.",
+                        "Copia, vai a quella sessione %s, incolla, Invio. Il pannello non invia mai.",
+                        "コピーして %s の該当セッションで貼り付け、Enter。パネルは送信しません。",
+                        "%s 세션으로 이동해 붙여넣고 Enter. 패널은 답을 보내지 않습니다."}},
+    {"hist_rail",      {"轮 · 今日 %d 个会话完成", "turns · %d sessions finished today",
+                        "Runden · %d Sitzungen heute beendet", "turni · %d sessioni concluse oggi",
+                        "ターン · 本日 %d セッション完了", "턴 · 오늘 %d개 세션 완료"}},
+    {"hist_span",      {"08:00 – 24:00", "08:00 – 24:00", "08:00 – 24:00",
+                        "08:00 – 24:00", "08:00 – 24:00", "08:00 – 24:00"}},
+    {"copy",           {"复制", "Copy", "Kopieren", "Copia", "コピー", "복사"}},
+    {"set_alert",      {"提醒", "Alerts", "Hinweise", "Avvisi", "通知", "알림"}},
+    {"set_access",     {"接入", "Connection", "Anbindung", "Collegamento",
+                        "接続", "연결"}},
+    {"set_ui",         {"界面", "Interface", "Oberfläche", "Interfaccia",
+                        "表示", "인터페이스"}},
+    {"set_dnd",        {"免打扰", "Do not disturb", "Nicht stören", "Non disturbare",
+                        "おやすみモード", "방해 금지"}},
+    {"set_dnd_sub",    {"暂停新提醒，不清账本", "Pause new alerts, keep the ledger",
+                        "Neue Hinweise pausieren, Zähler bleiben",
+                        "Sospendi i nuovi avvisi, il conteggio resta",
+                        "新しい通知を止めます。記録は残ります",
+                        "새 알림을 멈추고 기록은 유지"}},
+    {"set_launch",     {"登录时启动", "Launch at login", "Beim Anmelden starten",
+                        "Avvia all'accesso", "ログイン時に起動", "로그인 시 시작"}},
+    {"set_launch_sub", {"macOS LaunchAgent · Linux autostart",
+                        "macOS LaunchAgent · Linux autostart",
+                        "macOS LaunchAgent · Linux autostart",
+                        "macOS LaunchAgent · Linux autostart",
+                        "macOS LaunchAgent · Linux autostart",
+                        "macOS LaunchAgent · Linux autostart"}},
+    {"set_recheck",    {"重新运行接入检测", "Re-run detection", "Erkennung erneut starten",
+                        "Ripeti il rilevamento", "検出をやり直す", "감지 다시 실행"}},
+    {"set_recheck_sub",{"检测本机 agent 与 hook 收件箱", "Check local agents and the hook inbox",
+                        "Lokale Agents und Hook-Postfach prüfen",
+                        "Controlla agent locali e casella hook",
+                        "ローカル agent と hook 受信箱を確認",
+                        "로컬 agent와 훅 수신함 확인"}},
+    {"set_agents",     {"监控的 agent", "Monitored agents", "Überwachte Agents",
+                        "Agent monitorati", "監視する agent", "모니터링 agent"}},
+    {"set_agents_sub", {"来自内置采集器", "From the built-in collectors",
+                        "Aus den eingebauten Sammlern", "Dai raccoglitori integrati",
+                        "内蔵収集器から", "내장 수집기에서"}},
+    {"set_lang",       {"语言", "Language", "Sprache", "Lingua", "言語", "언어"}},
+    {"set_lang_sub",   {"六语", "Six languages", "Sechs Sprachen", "Sei lingue",
+                        "6 言語", "6개 언어"}},
+    {"set_data",       {"数据", "Data", "Daten", "Dati", "データ", "데이터"}},
+    {"set_data_sub",   {"只读本机六个 agent 的日志与 hook 收件箱；二进制内无网络调用。",
+                        "Reads local logs of six agents and the hook inbox; the binary makes no network calls.",
+                        "Liest lokale Logs von sechs Agents und das Hook-Postfach; keine Netzwerkaufrufe.",
+                        "Legge i log locali di sei agent e la casella hook; nessuna chiamata di rete.",
+                        "本機 6 agent のログと hook 受信箱のみ読みます。ネットワーク呼び出しはありません。",
+                        "로컬 6개 agent 로그와 훅 수신함만 읽습니다. 네트워크 호출은 없습니다."}},
+    {"set_license",    {"许可", "License", "Lizenz", "Licenza", "ライセンス", "라이선스"}},
+    {"set_license_sub",{"Apache-2.0 · 字体 SIL OFL · Dear ImGui MIT",
+                        "Apache-2.0 · fonts SIL OFL · Dear ImGui MIT",
+                        "Apache-2.0 · Schriften SIL OFL · Dear ImGui MIT",
+                        "Apache-2.0 · font SIL OFL · Dear ImGui MIT",
+                        "Apache-2.0 · フォント SIL OFL · Dear ImGui MIT",
+                        "Apache-2.0 · 폰트 SIL OFL · Dear ImGui MIT"}},
+    {"set_proto",      {"快照", "Snapshot", "Momentaufnahme", "Istantanea",
+                        "スナップショット", "스냅샷"}},
+    {"set_proto_sub",  {"列表与数字为最近一次本机扫描结果；接线页的检测与命令均在本机真实执行。",
+                        "Lists and numbers come from the latest local scan; the checks and commands on the setup screen run for real, locally.",
+                        "Listen und Zahlen stammen vom letzten lokalen Scan; Prüfungen und Befehle der Einrichtung laufen wirklich lokal.",
+                        "Elenchi e numeri dall'ultima scansione locale; i controlli e i comandi della schermata di configurazione vengono eseguiti davvero in locale.",
+                        "一覧と数字は直近のローカル走査結果です。接続画面の検出とコマンドは本機で実際に実行します。",
+                        "목록과 숫자는 최근 로컬 스캔 결과이며, 연결 화면의 감지와 명령은 본 기기에서 실제로 실행됩니다."}},
+    {"open",           {"打开", "Open", "Öffnen", "Apri", "開く", "열기"}},
+    {"manage",         {"管理", "Manage", "Verwalten", "Gestisci", "管理", "관리"}},
+    {"setup_hero_sub", {"Agent Ping 不连服务器：它读本机日志判断谁在跑、谁在等你，再在菜单栏提醒你。两步接完。",
+                        "Agent Ping has no server: it reads local logs to see who is running and who waits for you, then alerts from the menu bar. Two steps.",
+                        "Agent Ping hat keinen Server: Es liest lokale Logs und meldet sich aus der Menüleiste. Zwei Schritte.",
+                        "Agent Ping non ha server: legge i log locali e avvisa dalla barra dei menu. Due passi.",
+                        "Agent Ping はサーバーに接続しません。ローカルログを読み、メニューバーで知らせます。2 ステップです。",
+                        "Agent Ping은 서버에 연결하지 않습니다. 로컬 로그를 읽고 메뉴 막대에서 알립니다. 두 단계입니다."}},
+    {"setup_n_agents", {"%d 个可用", "%d available", "%d verfügbar", "%d disponibili",
+                        "%d 個利用可", "%d개 사용 가능"}},
+    // ── r20 版式收尾：稿子里几处带占位符的短句。%s 那一段由外面填，所以要六语各留一个洞。
+    {"wait_for",       {"等 %s", "%s waiting", "%s wartet", "%s in attesa", "%s 待ち", "%s 대기"}},
+    {"src_signal",     {"信号来源", "Signal source", "Signalquelle", "Origine segnale",
+                        "シグナル元", "신호 출처"}},
+    {"hist_win",       {"%s – %s", "%s – %s", "%s – %s", "%s – %s", "%s – %s", "%s – %s"}},
+    // 接线屏两条脚注：粗体那截（收件箱路径 / 文件名形状）在稿子里是 <b>，
+    // 这里用 %s 占位，绘制时按「%s 前 / %s 本身 / %s 后」三段分别上色。
+    {"setup_inbox_note",
+        {"日志只看得出「停住了」，看不出「在问你什么」。把 CLI 的 Notification 钩子接到下面的脚本，"
+         "问题原文就会写进收件箱 %s。Agent Ping 只读它，从不写它。",
+         "Logs show that a CLI stopped, not what it asks. Point the CLI's Notification hook at the script "
+         "below and the exact question lands in the inbox %s. Agent Ping only reads it, never writes it.",
+         "Logs zeigen nur, dass eine CLI angehalten hat, nicht was sie fragt. Richte den Notification-Hook "
+         "der CLI auf das Skript unten, dann landet die Frage im Postfach %s. Agent Ping liest nur, schreibt nie.",
+         "I log dicono solo che una CLI si è fermata, non cosa chiede. Collega l'hook Notification della CLI "
+         "allo script qui sotto: la domanda finisce nella casella %s. Agent Ping la legge soltanto, non ci scrive.",
+         "ログでは「止まった」ことしか分からず、何を聞いているかは分かりません。CLI の Notification フックを"
+         "下のスクリプトに向けると、質問原文が受信箱 %s に書き込まれます。Agent Ping は読むだけで、書きません。",
+         "로그로는 CLI가 멈춘 것만 알 수 있고 무엇을 묻는지는 알 수 없습니다. CLI의 Notification 훅을 아래 "
+         "스크립트로 연결하면 질문 원문이 수신함 %s 에 기록됩니다. Agent Ping은 읽기만 하고 쓰지 않습니다."}},
+    // 跨平台脚注：本机收件箱后面括住另一套系统的默认位置（稿子同款）。
+    {"setup_os_hint",  {"（%s：%s）", " (%s: %s)", " (%s: %s)", " (%s: %s)",
+                        "（%s：%s）", "(%s: %s)"}},
+    {"setup_files_note",
+        {"Qoder CLI 挂同一条命令即可。文件名形状 %s。",
+         "Qoder CLI uses the same command. File name shape %s.",
+         "Qoder CLI nutzt denselben Befehl. Dateinamensmuster %s.",
+         "Qoder CLI usa lo stesso comando. Formato del nome file %s.",
+         "Qoder CLI も同じコマンドです。ファイル名は %s 形式。",
+         "Qoder CLI도 같은 명령을 씁니다. 파일 이름 형태는 %s."}},
+    {"setup_cfg_note", {"%s · 追加 hooks 段", "%s · append the hooks block", "%s · hooks-Block anhängen",
+                        "%s · aggiungi il blocco hooks", "%s · hooks を追記", "%s · hooks 블록 추가"}},
+    {"setup_copied",   {"已复制接入脚本", "Setup snippet copied", "Einrichtungsschnipsel kopiert",
+                        "Frammento di configurazione copiato", "設定スニペットをコピーしました",
+                        "설정 스니펫 복사됨"}},
+    {"setup_copied_sub",{"粘到终端回车即可落盘", "Paste into a terminal and press Enter to write it",
+                        "In ein Terminal einfügen und Enter drücken", "Incolla nel terminale e premi Invio",
+                        "ターミナルに貼り付けて Enter", "터미널에 붙여넣고 Enter"}},
+    {"setup_waitline", {"等待第一个信号……收到后总览会出现「等你回答」。",
+                        "Waiting for the first signal… once it arrives, “Waiting on you” shows up in Overview.",
+                        "Warte auf das erste Signal… danach erscheint „Wartet auf dich“ in der Übersicht.",
+                        "In attesa del primo segnale… poi compare «In attesa di te» nella panoramica.",
+                        "最初のシグナルを待っています…届くと概要に「回答待ち」が出ます。",
+                        "첫 신호를 기다리는 중… 도착하면 개요에 「답변 대기」가 나타납니다."}},
+    {"set_dnd_note",   {"settings.txt · dnd", "settings.txt · dnd", "settings.txt · dnd",
+                        "settings.txt · dnd", "settings.txt · dnd", "settings.txt · dnd"}},
+    {"set_sound_note", {"settings.txt · sound", "settings.txt · sound", "settings.txt · sound",
+                        "settings.txt · sound", "settings.txt · sound", "settings.txt · sound"}},
+    {"set_top_note",   {"settings.txt · on_top", "settings.txt · on_top", "settings.txt · on_top",
+                        "settings.txt · on_top", "settings.txt · on_top", "settings.txt · on_top"}},
+    {"set_state_note", {"settings.txt · %s", "settings.txt · %s", "settings.txt · %s",
+                        "settings.txt · %s", "settings.txt · %s", "settings.txt · %s"}},
+    {"set_lang_note",  {"AGENTPING_LANG · 六语", "AGENTPING_LANG · six languages",
+                        "AGENTPING_LANG · sechs Sprachen", "AGENTPING_LANG · sei lingue",
+                        "AGENTPING_LANG · 6 言語", "AGENTPING_LANG · 6개 언어"}},
+    {"set_agents_ids", {"%s", "%s", "%s", "%s", "%s", "%s"}},
+    {"set_on_top",     {"常驻置顶", "Keep on top", "Immer oben halten", "Sempre in primo piano",
+                        "常に手前に表示", "항상 최상단"}},
+    {"span_contig",    {"连续 %s", "%s straight", "%s am Stück", "%s di fila",
+                        "連続 %s", "%s 연속"}},
+    {"jump_done",      {"已切到 %s 的终端", "Switched to the %s terminal", "Zum %s-Terminal gewechselt",
+                        "Passato al terminale di %s", "%s のターミナルへ移動", "%s 터미널로 전환"}},
+    {"jump_done_sub",  {"允许 / 拒绝只在那个终端里点", "Allow / deny only in that terminal",
+                        "Erlauben / Ablehnen nur dort", "Consenti / nega solo lì",
+                        "許可・拒否はそのターミナルで", "허용/거부는 그 터미널에서만"}},
+    {"toast_back_ov",  {"返回总览", "Back to overview", "Zur Übersicht", "Torna alla panoramica",
+                        "概要に戻る", "개요로 돌아가기"}},
+    // 稿子授权详情里「触发说明」那一行的键，以及设置屏第四节（四档提醒内容）的节头。
+    {"perm_trigger",   {"触发说明", "Trigger note", "Auslöser", "Innesco", "トリガー", "트리거"}},
+    {"set_states",     {"提醒内容", "Alert types", "Hinweisarten", "Tipi di avviso",
+                        "通知の種類", "알림 종류"}},
+    {"det_sess_today", {"%d 会话 · 今日", "%d sessions · today", "%d Sitzungen · heute",
+                        "%d sessioni · oggi", "%d セッション · 本日", "%d 세션 · 오늘"}},
+    {"setup_absent",   {"未安装", "Not installed", "Nicht installiert", "Non installato",
+                        "未インストール", "미설치"}},
+    // ── r31 版式的固定文案 ────────────────────────────────────────────────
+    {"r_all",          {"全部", "All", "Alle", "Tutti", "すべて", "전체"}},
+    {"r_sessions",     {"会话", "Sessions", "Sitzungen", "Sessioni", "セッション", "세션"}},
+    {"r_usage_tab",    {"用量与额度", "Usage & limits", "Nutzung & Limits", "Uso e limiti",
+                        "使用量と上限", "사용량 및 한도"}},
+    {"r_today",        {"今日", "Today", "Heute", "Oggi", "本日", "오늘"}},
+    {"r_today_usage",  {"今日用量", "Today’s usage", "Heutige Nutzung", "Uso di oggi",
+                        "本日の使用量", "오늘 사용량"}},
+    {"r_account_limits",{"账户额度", "Account limits", "Konto-Limits", "Limiti account",
+                        "アカウント上限", "계정 한도"}},
+    {"r_5h",           {"5 小时剩余", "5h remaining", "5 Std. übrig", "5h rimanenti",
+                        "5時間残り", "5시간 남음"}},
+    {"r_week",         {"周余额", "Weekly remaining", "Wochenrest", "Settimana rimanente",
+                        "週間残り", "주간 남음"}},
+    {"r_after_reset",  {"%s 后重置", "%s to reset", "Reset in %s", "Reset tra %s",
+                        "リセットまで %s", "%s 후 재설정"}},
+    {"r_last_reading", {"上次读数 · 尚未刷新", "Last reading · not refreshed",
+                        "Letzter Stand · nicht aktualisiert", "Ultima lettura · non aggiornata",
+                        "前回の読み値 · 未更新", "마지막 판독 · 새로고침 안 됨"}},
+    {"r_stale_note",   {"额度更新失败；以上为上次成功读数，不代表当前可用量。",
+                        "Refresh failed. Last known readings may not reflect available quota.",
+                        "Aktualisierung fehlgeschlagen. Der letzte Stand kann von der aktuellen Quote abweichen.",
+                        "Aggiornamento non riuscito. L’ultima lettura può non riflettere la quota attuale.",
+                        "更新に失敗しました。前回の読み値は現在の残量とは限りません。",
+                        "업데이트 실패. 마지막 판독값이 현재 잔량과 다를 수 있습니다."}},
+    {"r_stale",        {"待更新", "Stale", "Veraltet", "Da aggiornare", "未更新", "이전 값"}},
+    {"r_beyond",       {"已超过今日最长已完成会话", "Beyond today’s longest completed session",
+                        "Länger als die längste heutige Sitzung", "Oltre la sessione più lunga di oggi",
+                        "本日最長の完了セッションを超過", "오늘 가장 긴 완료 세션 초과"}},
+    {"r_turn",         {"第 %d 轮", "Turn %d", "Runde %d", "Turn %d", "%d ターン", "%d번째 턴"}},
+    {"r_longest",      {"今日最长 %d 轮", "Longest today %d", "Längste heute %d",
+                        "Più lunga oggi %d", "本日最長 %d ターン", "오늘 최장 %d턴"}},
+    {"r_session_total",{"会话累计", "Session total", "Sitzung gesamt", "Totale sessione",
+                        "セッション合計", "세션 합계"}},
+    {"r_turn_explain", {"轮次对照，不代表完成百分比；右端是今天已完成会话的最大轮次。",
+                        "A turn comparison, not completion progress. The reference is today’s longest completed session.",
+                        "Ein Rundenvergleich, kein Fortschritt. Vergleichswert ist die längste heutige abgeschlossene Sitzung.",
+                        "Confronto di turni, non avanzamento. Il riferimento è la sessione completata più lunga di oggi.",
+                        "ターン数の比較であり、進捗率ではありません。右端は本日完了セッションの最大ターン数です。",
+                        "턴 수 비교일 뿐 완료율이 아닙니다. 오른쪽은 오늘 완료된 세션의 최대 턴 수입니다."}},
+    {"r_needs_you",    {"待处理", "Needs you", "Wartet auf dich", "In attesa di te",
+                        "対応待ち", "처리 대기"}},
+    {"r_longest_first",{"等待最久优先", "Longest waiting first", "Längste Wartezeit zuerst",
+                        "Attesa più lunga prima", "待ち時間の長い順", "오래 기다린 순"}},
+    {"r_nothing",      {"这边没有待处理事项", "Nothing waiting here", "Hier wartet nichts",
+                        "Niente in attesa", "ここには何もありません", "대기 중인 항목 없음"}},
+    {"r_try_other",    {"切换工具，或查看今天的完成记录。", "Try another tool or review today’s completed sessions.",
+                        "Wechsle das Tool oder sieh dir die heutigen Abschlüsse an.",
+                        "Prova un altro strumento o rivedi le sessioni completate oggi.",
+                        "別のツールに切り替えるか、本日の完了記録を見てください。",
+                        "다른 도구로 전환하거나 오늘 완료 기록을 확인하세요."}},
+    {"r_no_match",     {"没有匹配的待处理会话", "No matching requests", "Keine passenden Anfragen",
+                        "Nessuna richiesta corrispondente", "一致する待ちはありません",
+                        "일치하는 대기 항목 없음"}},
+    {"r_no_sessions",  {"目前没有会话", "No sessions yet", "Noch keine Sitzungen",
+                        "Nessuna sessione", "まだセッションがありません", "아직 세션이 없습니다"}},
+    {"r_no_sessions_hint",{"开始使用编码工具后，会话会出现在这里。",
+                        "Start a coding session and it will appear here.",
+                        "Starte eine Coding-Sitzung, dann erscheint sie hier.",
+                        "Avvia una sessione di coding e apparirà qui.",
+                        "コーディングを始めると、ここにセッションが表示されます。",
+                        "코딩 세션을 시작하면 여기에 표시됩니다."}},
+    {"r_done_today",   {"今日完成", "Done today", "Heute erledigt", "Completate oggi",
+                        "本日完了", "오늘 완료"}},
+    {"r_show_all",     {"查看全部会话", "Show all sessions", "Alle Sitzungen zeigen",
+                        "Mostra tutte le sessioni", "すべてのセッションを表示", "모든 세션 보기"}},
+    {"r_search",       {"搜索会话", "Search sessions", "Sitzungen suchen", "Cerca sessioni",
+                        "セッションを検索", "세션 검색"}},
+    {"r_search_ph",    {"搜索项目、工具或问题", "Search project, tool or request",
+                        "Projekt, Tool oder Anfrage suchen", "Cerca progetto, strumento o richiesta",
+                        "プロジェクト・ツール・リクエストを検索", "프로젝트, 도구 또는 요청 검색"}},
+    {"r_clear",        {"清除搜索", "Clear search", "Suche löschen", "Cancella ricerca",
+                        "検索をクリア", "검색 지우기"}},
+    {"r_filter_tool",  {"按工具筛选", "Filter by tool", "Nach Tool filtern", "Filtra per strumento",
+                        "ツールで絞り込む", "도구로 필터"}},
+    {"r_all_sessions", {"全部会话", "All sessions", "Alle Sitzungen", "Tutte le sessioni",
+                        "すべてのセッション", "모든 세션"}},
+    {"r_scroll_more",  {"滚动到更多工具", "Scroll to more tools", "Zu weiteren Tools scrollen",
+                        "Scorri ad altri strumenti", "他のツールへスクロール", "더 많은 도구로 스크롤"}},
+    {"r_all_tools_list",{"全部工具列表", "All tools list", "Alle Tools", "Elenco strumenti",
+                        "ツール一覧", "도구 목록"}},
+    {"r_all_tools",    {"全部工具", "All tools", "Alle Tools", "Tutti gli strumenti",
+                        "すべてのツール", "모든 도구"}},
+    {"r_tools_n",      {"%d 个工具", "%d tools", "%d Tools", "%d strumenti",
+                        "%d 個のツール", "%d개 도구"}},
+    {"r_search_tools", {"搜索工具名称", "Search tools", "Tools suchen", "Cerca strumenti",
+                        "ツールを検索", "도구 검색"}},
+    {"r_tools_word",   {"工具", "tools", "Tools", "strumenti", "ツール", "도구"}},
+    {"r_sessions_n",   {"%d 条会话", "%d sessions", "%d Sitzungen", "%d sessioni",
+                        "%d セッション", "%d개 세션"}},
+    {"r_waiting_n",    {"%d 条待处理", "%d waiting", "%d wartend", "%d in attesa",
+                        "%d 件待ち", "%d개 대기"}},
+    {"r_no_tools",     {"没有找到工具", "No matching tools", "Keine passenden Tools",
+                        "Nessuno strumento corrispondente", "一致するツールがありません",
+                        "일치하는 도구 없음"}},
+    {"r_try_tool",     {"试试工具名或 CLI、IDE。", "Try a tool name, CLI or IDE.",
+                        "Versuche einen Toolnamen, CLI oder IDE.", "Prova un nome, CLI o IDE.",
+                        "ツール名や CLI・IDE で試してください。", "도구 이름이나 CLI, IDE로 검색해 보세요."}},
+    {"r_total_today",  {"今日总用量", "Total tokens today", "Token gesamt heute",
+                        "Token totali oggi", "本日の総使用量", "오늘 총 사용량"}},
+    {"r_tools_log",    {"%d 个工具 · 本地记录统计", "%d tools · local log statistics",
+                        "%d Tools · lokale Log-Statistik", "%d strumenti · statistiche log locali",
+                        "%d ツール · ローカルログ集計", "%d개 도구 · 로컬 로그 집계"}},
+    {"r_usage_by",     {"按工具查看", "Usage by tool", "Nach Tool", "Per strumento",
+                        "ツール別", "도구별"}},
+    {"r_data_note",    {"余额属于工具账户，多条会话共用；不同工具的余额不相加。未取得的额度不显示为 0。",
+                        "Limits are shared across an account’s sessions, not added across tools. Missing quota is never shown as zero.",
+                        "Limits gelten pro Konto und werden nicht über Tools addiert. Fehlende Quoten werden nie als 0 angezeigt.",
+                        "I limiti sono per account e non si sommano tra strumenti. Una quota mancante non viene mostrata come 0.",
+                        "上限はアカウント単位で、ツール間で合算しません。取得できない上限は 0 と表示しません。",
+                        "한도는 계정 단위이며 도구 간에 합산하지 않습니다. 없는 할당량은 0으로 표시하지 않습니다."}},
+    {"r_no_usage",     {"这份快照没有用量明细", "No usage breakdown in this snapshot",
+                        "Keine Nutzungsdetails in diesem Stand", "Nessun dettaglio d’uso in questo snapshot",
+                        "このスナップショットに使用明細はありません", "이 스냅샷에는 사용 내역이 없습니다"}},
+    {"r_no_usage_hint",{"只展示来源记录已有的字段，不从 tokens 推算订阅余额。",
+                        "Only source fields are shown. Token counts do not imply subscription quota.",
+                        "Nur vorhandene Quellenfelder werden gezeigt. Token-Zahlen sind keine Abo-Quote.",
+                        "Solo i campi della fonte. I token non indicano la quota dell’abbonamento.",
+                        "記録にある項目だけを表示します。tokens から購読残量は推定しません。",
+                        "기록에 있는 항목만 표시합니다. 토큰 수로 구독 잔량을 추정하지 않습니다."}},
+    {"r_personal",     {"个人账户", "Personal account", "Privates Konto", "Account personale",
+                        "個人アカウント", "개인 계정"}},
+    {"r_local_usage",  {"本地会话用量", "Local session usage", "Lokale Sitzungsnutzung",
+                        "Uso sessioni locali", "ローカルセッション使用量", "로컬 세션 사용량"}},
+    {"r_total_usage",  {"总用量", "Total usage", "Gesamtnutzung", "Uso totale",
+                        "総使用量", "총 사용량"}},
+    {"r_consumed",     {"消耗 %s Credits", "Consumed %s Credits", "Verbraucht %s Credits",
+                        "Consumati %s Credits", "消費 %s Credits", "소비 %s Credits"}},
+    {"r_tool_sessions",{"查看此工具的会话", "View this tool’s sessions", "Sitzungen dieses Tools",
+                        "Sessioni di questo strumento", "このツールのセッション", "이 도구의 세션"}},
+    {"r_activity",     {"今日用量分布", "Today’s activity", "Heutige Aktivität",
+                        "Attività di oggi", "本日の推移", "오늘 활동"}},
+    {"r_hourly",       {"按小时", "Hourly", "Stündlich", "Ogni ora", "時間別", "시간별"}},
+    {"r_input",        {"输入", "Input", "Eingabe", "Input", "入力", "입력"}},
+    {"r_output",       {"输出", "Output", "Ausgabe", "Output", "出力", "출력"}},
+    {"r_cache_read",   {"缓存读取", "Cache read", "Cache-Lesen", "Lettura cache",
+                        "キャッシュ読取", "캐시 읽기"}},
+    {"r_cache_write",  {"缓存写入", "Cache write", "Cache-Schreiben", "Scrittura cache",
+                        "キャッシュ書込", "캐시 쓰기"}},
+    {"r_by_model",     {"按模型", "By model", "Nach Modell", "Per modello", "モデル別", "모델별"}},
+    {"r_models_n",     {"%d 个", "%d", "%d", "%d", "%d 件", "%d개"}},
+    {"r_model_note",   {"总用量 = 输入 + 输出 + 缓存读取 + 缓存写入；不同工具接入时须先统一口径。",
+                        "Total = input + output + cache read + cache write. Tool-specific counters must be normalized.",
+                        "Gesamt = Eingabe + Ausgabe + Cache-Lesen + Cache-Schreiben. Zähler müssen normalisiert sein.",
+                        "Totale = input + output + lettura cache + scrittura cache. I contatori vanno normalizzati.",
+                        "総使用量 = 入力 + 出力 + キャッシュ読取 + キャッシュ書込。ツール間で口径を揃える必要があります。",
+                        "총 사용량 = 입력 + 출력 + 캐시 읽기 + 캐시 쓰기. 도구별 기준을 통일해야 합니다."}},
+    {"r_no_account",   {"没有账户用量数据", "No account usage data", "Keine Kontonutzungsdaten",
+                        "Nessun dato d’uso dell’account", "アカウント使用量データなし",
+                        "계정 사용량 데이터 없음"}},
+    {"r_no_account_hint",{"当前快照未包含这些字段。", "These fields are not included in the current snapshot.",
+                        "Diese Felder sind im aktuellen Stand nicht enthalten.",
+                        "Questi campi non sono nello snapshot attuale.",
+                        "現在のスナップショットにこれらの項目はありません。",
+                        "현재 스냅샷에 이 항목이 없습니다."}},
+    {"r_original",     {"原始请求", "Original request", "Ursprüngliche Anfrage",
+                        "Richiesta originale", "元のリクエスト", "원래 요청"}},
+    {"r_record",       {"会话记录", "Session record", "Sitzungsprotokoll", "Registro sessione",
+                        "セッション記録", "세션 기록"}},
+    {"r_options",      {"待回答选项", "Response options", "Antwortoptionen",
+                        "Opzioni di risposta", "回答候補", "응답 옵션"}},
+    {"r_boundary",     {"请在原工具中处理请求；这里不执行授权或提交答案。",
+                        "Handle the request in its original tool. This panel does not grant permissions or submit answers.",
+                        "Bearbeite die Anfrage im Original-Tool. Dieses Panel erteilt keine Rechte und sendet keine Antworten.",
+                        "Gestisci la richiesta nello strumento originale. Questo pannello non concede permessi né invia risposte.",
+                        "元のツールで処理してください。ここでは許可や回答の送信は行いません。",
+                        "원래 도구에서 처리하세요. 이 패널은 권한을 부여하거나 답변을 제출하지 않습니다."}},
+    {"r_truncated",    {"来源记录本身已截断，无法在此恢复完整内容。",
+                        "The source record is truncated; the full text is not available.",
+                        "Der Quelleneintrag ist gekürzt; der vollständige Text ist nicht verfügbar.",
+                        "Il record di origine è troncato; il testo completo non è disponibile.",
+                        "記録自体が切り詰められており、全文は復元できません。",
+                        "원본 기록이 잘려 있어 전체 내용을 복원할 수 없습니다."}},
+    {"r_copy_request", {"复制请求原文", "Copy original request", "Anfrage kopieren",
+                        "Copia richiesta", "リクエストをコピー", "요청 복사"}},
+    {"r_open_session", {"前往会话", "Open session", "Sitzung öffnen", "Apri sessione",
+                        "セッションを開く", "세션 열기"}},
+    {"r_open_zcode",   {"打开 ZCode", "Open ZCode", "ZCode öffnen", "Apri ZCode",
+                        "ZCode を開く", "ZCode 열기"}},
+    {"r_completed_at", {"这条会话于 %s 完成，共 %d 轮。", "Completed at %s, after %d turns.",
+                        "Abgeschlossen um %s nach %d Runden.", "Completata alle %s dopo %d turni.",
+                        "%s に完了、全 %d ターン。", "%s에 완료, 총 %d턴."}},
+    {"r_running_none", {"会话正在运行；没有待处理的请求。",
+                        "The session is running, with no pending request.",
+                        "Die Sitzung läuft; keine offene Anfrage.", "La sessione è in esecuzione; nessuna richiesta in sospeso.",
+                        "セッションは実行中で、待機中のリクエストはありません。",
+                        "세션이 실행 중이며 대기 중인 요청이 없습니다."}},
+    {"r_completed_today",{"今日完成", "Completed today", "Heute abgeschlossen", "Completate oggi",
+                        "本日完了", "오늘 완료"}},
+    {"r_no_completed", {"没有完成记录", "No completed sessions", "Keine abgeschlossenen Sitzungen",
+                        "Nessuna sessione completata", "完了記録なし", "완료 기록 없음"}},
+    {"r_no_completed_hint",{"完成的会话会显示在这里。", "Completed sessions will appear here.",
+                        "Abgeschlossene Sitzungen erscheinen hier.", "Le sessioni completate appariranno qui.",
+                        "完了したセッションがここに表示されます。", "완료된 세션이 여기에 표시됩니다."}},
+    {"r_running",      {"运行中", "Running", "Läuft", "In esecuzione", "実行中", "실행 중"}},
+    {"r_details",      {"明细", "Details", "Details", "Dettagli", "詳細", "상세"}},
+    {"r_back_sessions",{"会话总览", "Sessions", "Sitzungen", "Sessioni", "セッション概要", "세션 개요"}},
+    {"r_back_usage",   {"用量与额度", "Usage & limits", "Nutzung & Limits", "Uso e limiti",
+                        "使用量と上限", "사용량 및 한도"}},
+    {"r_back_account", {"工具用量", "Tool usage", "Tool-Nutzung", "Uso strumenti",
+                        "ツール使用量", "도구 사용량"}},
+    {"r_back_detail",  {"会话详情", "Session details", "Sitzungsdetails", "Dettagli sessione",
+                        "セッション詳細", "세션 상세"}},
+    {"r_mode_live",    {"实时", "Live", "Live", "Live", "ライブ", "실시간"}},
+    {"r_updated",      {"%s 更新", "updated %s", "%s aktualisiert", "aggiornato %s",
+                        "%s 更新", "%s 업데이트"}},
+    {"r_next_expiry",  {"最近 %s 后到期", "Next expiry in %s", "Nächster Ablauf in %s",
+                        "Prossima scadenza tra %s", "次の期限まで %s", "%s 후 만료"}},
+    {"r_last_refresh", {"上次读数 %s", "Last reading %s", "Letzter Stand %s",
+                        "Ultima lettura %s", "前回の読み値 %s", "마지막 판독 %s"}},
+    {"r_local_data",   {"本机数据", "Local data", "Lokale Daten", "Dati locali",
+                        "ローカルデータ", "로컬 데이터"}},
+    {"r_sample_data",  {"样例数据", "Sample data", "Beispieldaten", "Dati di esempio",
+                        "サンプルデータ", "샘플 데이터"}},
+    {"r_fail_short",   {"失败", "Failed", "Fehler", "Errore", "失敗", "실패"}},
+    {"r_ask_short",    {"回答", "Question", "Frage", "Domanda", "質問", "질문"}},
+    {"r_perm_short",   {"授权", "Permission", "Freigabe", "Permesso", "許可", "권한"}},
+    {"r_queue_short",  {"排队", "Queued", "Wartend", "In coda", "待機", "대기"}},
+    {"r_back_history", {"完成记录", "History", "Verlauf", "Cronologia",
+                        "完了記録", "완료 기록"}},
+    {"r_local_log",    {"本机记录", "Local logs", "Lokale Logs", "Log locali",
+                        "ローカル記録", "로컬 기록"}},
+    {"r_not_billing",  {"不代表订阅实付", "Not subscription charges",
+                        "Keine Abo-Abrechnung", "Non è l’addebito dell’abbonamento",
+                        "サブスクの実費ではありません", "구독 실결제가 아닙니다"}},
+    {"r_no_trunc",     {"来源记录未标截断", "Source record not marked truncated",
+                        "Quelle nicht als gekürzt markiert", "Fonte non indicata come troncata",
+                        "記録に切り詰めの印なし", "원본에 잘림 표시 없음"}},
+    {"r_children",     {"%d 条子对话", "%d sub-agents", "%d Unteragenten", "%d sotto-agenti",
+                        "%d 件のサブ会話", "%d개 하위 대화"}},
+    {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
 };
 static const char* T(const char* key, int loc) {
     for (const auto& s : kStr) if (!strcmp(s.k, key)) return s.t[loc];
@@ -173,6 +728,26 @@ static std::string Ago(double age_sec, int loc) {
     if (age_sec < 3600) { snprintf(buf, sizeof buf, T("min_ago", loc), (int)(age_sec / 60)); return buf; }
     if (age_sec < 86400) { snprintf(buf, sizeof buf, T("hour_ago", loc), (int)(age_sec / 3600)); return buf; }
     snprintf(buf, sizeof buf, T("day_ago", loc), (int)(age_sec / 86400));
+    return buf;
+}
+
+/// 同一段时间，只念时长，句子里的「等」「最久」「…前」由调用方自己写。
+/// 与 Ago 分开是有原因的：Ago 的六语都自带「前 / ago」，接在「等」后面会念成「等 5 分钟前」。
+/// 单位用 r20 的紧凑写法（49m / 15h / 1h 07m）：`.wt`/`.rt`/`.l3` 都是等宽 9.5–10.5，
+/// 「4 小时 12 分钟」那种长句会把整行挤爆；六语共用同一套 ASCII 单位，不必各翻一遍。
+static std::string Dur(double age_sec, int loc) {
+    (void)loc;
+    char buf[32];
+    if (age_sec < 0) age_sec = 0;
+    if (age_sec < 60) { snprintf(buf, sizeof buf, "%ds", (int)age_sec); return buf; }
+    if (age_sec < 3600) { snprintf(buf, sizeof buf, "%dm", (int)(age_sec / 60)); return buf; }
+    if (age_sec < 86400) {
+        const int h = (int)(age_sec / 3600), m = (int)((age_sec - h * 3600) / 60);
+        if (m > 0) snprintf(buf, sizeof buf, "%dh %02dm", h, m);
+        else snprintf(buf, sizeof buf, "%dh", h);
+        return buf;
+    }
+    snprintf(buf, sizeof buf, "%dd", (int)(age_sec / 86400));
     return buf;
 }
 
@@ -211,19 +786,93 @@ enum Tier { T_NUM, T_TITLE, T_CHIP, T_TURNS, T_FAIL, T_BTN, T_GLYPH, T_GLYPH_SM,
             // T_LABEL 开关行文案的 sans 11.5；T_TOOL 工具名的 sans 12；
             // T_GLYPH9 20pt 头像里的首字母 9（稿子 font-size:9px;font-weight:600 ——
             // NotoSans 系只有常规字重，这一档按常规画，与 T_GLYPH 同一笔已知差异）。
-            T_MLBL, T_SEG, T_LABEL, T_TOOL, T_GLYPH9, TIER_N };
+            T_MLBL, T_SEG, T_LABEL, T_TOOL, T_GLYPH9,
+            // 详情屏的提问原文（r20 `.qbig` 15px）：正文档最大的一号，单独一档，
+            // 这样它跟着 340pt 的尺度走，而不是借用 26pt 的数字档。
+            T_HERO,
+            // r20 新增四档：13.5＝总览里的一条提问（.qt）；17＝历史导轨那个大数（.rh .n）；
+            // 10＝节头文字与关于卡（.slabel .tx / .about）；8.5＝历史刻度的时标（.track .lb）。
+            T_QT, T_NUM17, T_10S, T_TICK,
+            // T_H3＝空态那句标题（r20 `.empty h3` 14px/1.4，font-weight:600）。
+            // 与 T_HERO(15) 差 1pt，两处都是稿子里写死的声明，不能共用一档。
+            T_H3,
+            // r20 的正文里 10.5/9.5 各有两个 family：10.5 既有 mono（已由 T_FAIL 承担）
+            // 也有 sans（.live .st / .opt .ds / .hint），9.5 既有 mono（T_PILL）也有
+            // sans（.codebox .cp）。同尺寸不同 family 必须拆档，否则 opt 说明会被画成等宽。
+            T_S105, T_S95,
+            // 同尺寸再按字重拆：`.dhead .tt`/`.src .a` 是 600 12，而 `.prow .pj`/`.gobtn`
+            // 是 500 12；`.opt .lb` 是 500 12.5，`.head .word`/`.live .proj` 是 600 12.5。
+            // 10 这一档同样是三种：节头 600 sans、导轨单位 400 sans、`.opt .k` 500 mono。
+            // T_S115＝接线屏 hero 那句 11.5/1.6 sans 400（同尺寸的 T_LABEL 是 500 行文案）。
+            T_S12B, T_S125, T_M10B, T_S10, T_S115,
+            // .codebox .cb-h .f 是 mono 500 9.5（与同尺寸的 T_TIME 400 不同档）。
+            T_FHEAD,
+            // r31 的八处新声明：8.5/9/10/11 已有的档不够用，因为 R31 在同一尺寸上用了
+            // 更多字重（500/600/650）。逐条对着 app.css 的真实 font-size/weight 抄：
+            //   T_S9   9/400（行用量、脚注）
+            //   T_S11B 11/600（节头、详情标签）
+            //   T_S12  12/400（标签页、正文）
+            //   T_S13B 13/600（行标题、工具名）
+            //   T_S14  14/400（提问原文全文）
+            //   T_S14B 14/650（产品名、详情提问）
+            //   T_S17  17/500（详情身份名、会话累计大数）
+            //   T_S20  20/600（账户页标题）
+            //   T_S22  22/600（详情页项目标题）
+            //   T_N23  23/500（账户 peek 的大数）
+            //   T_N28  28/500（额度数字）
+            //   T_N35  35/550（今日总用量）
+            //   T_N39  39/500（账户总用量）
+            T_S9, T_S11B, T_S12, T_S13B, T_S14, T_S14B, T_S17, T_S20, T_S22,
+            T_N23, T_N28, T_N35, T_N39,
+            // r31 第二轮补齐四处同尺寸异字重：T_S10B 10/650（run-labels、tabs 计数）、
+            // T_S11 11/500（状态行）、T_S15B 15/620（run-project）、T_S23B 23/600（历史页标题）。
+            // r31 第三轮（2026-10-28 geom_1440.json 实测缺口，check_tiers.py 判 MISSING 的五条）：
+            //   T_S8   8/400（.daytimes 起止时刻、账户小时图刻度）
+            //   T_S9B  9/600（来源导轨「全部」那颗的文字与图标标签）
+            //   T_S16B 16/600（空态标题 .empty h2；app.css 覆盖 base 的 17px，脚本看不到）
+            //   T_S17B 17/600（详情屏工具名 .detail-identity .agent-name，与 T_S17=17/500 不同档）
+            //   T_N20  20/500（账户页拆解大数 .breakdown strong，与 T_S20=20/600 字重不同）
+            T_S10B, T_S11, T_S15B, T_S23B, T_S8, T_S9B, T_S16B, T_S17B, T_N20, TIER_N };
 static const float kTierPx[TIER_N]   = {26.0f, 12.5f, 11.0f, 11.0f, 10.5f, 10.5f, 10.0f, 6.0f,
                                         10.0f, 9.5f, 9.5f, 9.0f,
-                                        10.0f, 11.0f, 11.5f, 12.0f, 9.0f};
+                                        10.0f, 11.0f, 11.5f, 12.0f, 9.0f, 15.0f,
+                                        13.5f, 17.0f, 10.0f, 8.5f, 14.0f, 10.5f, 9.5f,
+                                        12.0f, 12.5f, 10.0f, 10.0f, 11.5f, 9.5f,
+                                        9.0f, 11.0f, 12.0f, 13.0f, 14.0f, 14.0f, 17.0f,
+                                        20.0f, 22.0f, 23.0f, 28.0f, 35.0f, 39.0f,
+                                        10.0f, 11.0f, 15.0f, 23.0f,
+                                        8.0f, 9.0f, 16.0f, 17.0f, 20.0f};
 static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false, false, false,
                                         true,  false, true,  true,
-                                        true,  true,  false, false, false};
+                                        true,  true,  false, false, false, false,
+                                        false, true,  false, true,  false, false, false,
+                                        false, false, true,  false, false, true,
+                                        false, false, false, false, false, false, false,
+                                        false, false, false, false, false, false,
+                                        false, false, false, false,
+                                        false, false, false, false, false};
 // 稿子里的粗体只有两处落在 mono 上（num-xl 600、「N 轮」semibold），本机有
 // JetBrainsMono-SemiBold 可以直接对应。头像首字母（ToolGlyph）也是 600，但它的 family
 // 走 --font-sans，而 NotoSans 系只有常规字重 —— 那两档只能按常规画，差异记在 RESULT.md。
 static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false, false, false,
                                         false, false, false, false,
+                                        false, false, false, false, false, false,
+                                        false, true,  false, false, false, false, false,
+                                        false, false, false, false, false, false,
+                                        false, false, false, false, false, false, false,
+                                        false, false, false, false, false, false,
+                                        false, false, false, false,
                                         false, false, false, false, false};
+// 0＝400 / 1＝500 / 2＝600。字体包里的 sans 只有 Regular 一档，500/600 在绘制时按
+// 半个像素的横向重描补出来（见 DrawTextRun）；mono 档有真 SemiBold，不再叠这一层。
+static const unsigned char kTierW[TIER_N] = {0, 2, 0, 0, 0, 1, 1, 1,
+                                             0, 1, 0, 0,
+                                             1, 0, 1, 1, 1, 2,
+                                             1, 0, 2, 0, 2, 0, 1,
+                                             2, 1, 1, 0, 0, 1,
+                                             0, 2, 0, 2, 0, 2, 1, 2, 2, 1, 1, 1, 1,
+                                             2, 1, 2, 2,
+                                             0, 2, 2, 2, 1};
 static bool MonoTier(int t) { return kTierMono[t]; }
 static int  MonoFace(int t) { return kTierBold[t] ? MONO_SB : MONO_R; }
 // 这张脸在这一档有没有可能被选中：mono 档只可能用到「它那一号等宽脸 + 四张正文脸」
@@ -343,15 +992,33 @@ static float TextHeight(int tier) { return kTierPx[tier] * 1.2f; }
 
 // 绝对定位写一行：混排下 ImGui 的 SameLine 会把 x 记账搞乱（实测字形重叠），
 // 而且这一版面板要画卡框/胶囊/条码，本来就得自己管坐标。
+// sans 的 500/600 没有真字重：右移 0.35/0.55pt 再描一遍，2x 帧缓冲里就是半像素级加粗。
+static float SynthWeight(int tier) {
+    if (MonoTier(tier) && kTierBold[tier]) return 0.0f;   // 真 SemiBold，别再叠
+    // 0.35/0.55 看起来像「加粗」，实际几乎不生效：RenderText 会把起笔截到整点，
+    // 亚像素偏移只在零头恰好进位时才多画一格 —— 同一段文字有的粗有的没粗。
+    // 现在第二遍走 TextNoPixelSnap，偏移就是真偏移；0.5pt = 2× 屏上 1 个设备像素。
+    return kTierW[tier] == 1 ? 0.5f : (kTierW[tier] == 2 ? 0.75f : 0.0f);
+}
 static float DrawTextRun(ImDrawList* dl, float x, float y, const std::string& text, int locale,
                          ImU32 col, int tier, float track = 0.0f) {
     float cx = x;
     float ref_asc = AscentPx(tier, RefFace(tier, locale));
+    const float synth = SynthWeight(tier);
     for (const auto& r : SplitRuns(text.c_str(), locale, tier)) {
         float px = Bake(tier, r.face);
         ImVec2 sz = g_font[tier][r.face]->CalcTextSizeA(px, 1e9f, 0.0f, r.text.c_str());
-        dl->AddText(g_font[tier][r.face], px, ImVec2(cx, y + ref_asc - AscentPx(tier, r.face)),
-                    col, r.text.c_str());
+        const ImVec2 pos(cx, y + ref_asc - AscentPx(tier, r.face));
+        // 第一遍按 ImGui 的常规对齐落点；第二遍从同一个整点起笔、只横向偏 synth，
+        // 两遍之间关掉像素对齐，偏移量才不随这一行的零头变化。
+        const float bx = (float)(int)pos.x, by = (float)(int)pos.y;
+        dl->AddText(g_font[tier][r.face], px, ImVec2(bx, by), col, r.text.c_str());
+        if (synth > 0.0f) {
+            const ImDrawListFlags saved = dl->Flags;
+            dl->Flags |= ImDrawListFlags_TextNoPixelSnap;
+            dl->AddText(g_font[tier][r.face], px, ImVec2(bx + synth, by), col, r.text.c_str());
+            dl->Flags = saved;
+        }
         cx += sz.x + track;
     }
     if (!text.empty()) cx -= track;
@@ -364,34 +1031,47 @@ static float DrawTextRight(ImDrawList* dl, float x1, float y, const std::string&
     return DrawTextRun(dl, x1 - TextWidth(text, locale, tier, track), y, text, locale, col, tier, track);
 }
 
-// ── 配色：逐条由 r14/meoo-styles.css 的 oklch token 换算（换算式 = evidence-1005/oklch.py，
-//    与 Theme.swift 已拍的同一口径）。改颜色请先改稿子，这里只跟。────────
-static const ImU32 kBg       = IM_COL32(11, 16, 23, 255);   // --background oklch(.17 .018 258) → Chrome 实测 (11,16,23)
-static const ImU32 kFg        = IM_COL32(236, 241, 245, 255);
-static const ImU32 kMutedFg   = IM_COL32(144, 153, 165, 255);
-static const ImU32 kStAwait   = IM_COL32(255, 180, 7, 255);   // --st-await  .82 .17 78
-static const ImU32 kStRun     = IM_COL32(0, 200, 202, 255);   // --st-run    .74 .16 195
-static const ImU32 kStQueue   = IM_COL32(146, 160, 177, 255); // --st-queue  .70 .03 255
-static const ImU32 kStFail    = IM_COL32(255, 81, 90, 255);   // --st-fail   .68 .21 22
-static const ImU32 kStDone    = IM_COL32(62, 212, 120, 255);  // --st-done   .77 .18 152
-static const ImU32 kInk       = IM_COL32(11, 13, 18, 255);    // #0b0d12，选中胶囊上的反色字
-static const ImU32 kHair      = IM_COL32(229, 240, 252, 23);  // --hairline oklch(.95 .02 250 / 9%)
-// 设置屏（r14/settings.html）另用的五支：全部由 evidence/1007-settings/colors-chrome.txt
-// 里那条「Chrome 无头 canvas 逐支涂 1×1 读回设备像素」的量法落数，不是按公式手推。
-// 同一条量法对 --background / --hairline / --st-await 三个已上线的值复算全等，才敢用在这里。
-static const ImU32 kSurface1  = IM_COL32(16, 22, 31, 255);    // --surface-1  .2 .02 258，节的底
-static const ImU32 kSurface2  = IM_COL32(28, 35, 45, 255);    // --surface-2  .255 .022 255，工具行/关轨的底
-static const ImU32 kPrimary   = IM_COL32(0, 209, 218, 255);   // --primary    .78 .14 200，开关与选中段
-static const ImU32 kPrimaryFg = IM_COL32(14, 20, 29, 255);    // --primary-foreground .19 .02 258
-static const ImU32 kStIdle    = IM_COL32(92, 100, 111, 255);  // --st-idle    .5 .02 258，节头与未启用
-static const ImU32 kBorder    = IM_COL32(229, 240, 252, 28);  // --border   同色 11%
-static const ImU32 kInput     = IM_COL32(229, 240, 252, 41);  // --input    同色 16%
+// ── 配色：逐条抄 r20/interaction.src.html 的 :root token（面板 340×640 的那一版）。
+//    旧的 r14 那套 oklch 值全部退休：琥珀/青/红三支换了色相，底与墨也整体提了一档。
+//    改颜色请先改稿子，这里只跟。────────────────────────────────────────────────
+static const ImU32 kBg       = IM_COL32(13, 16, 21, 255);    // --bg #0D1015
+static const ImU32 kSurf     = IM_COL32(18, 22, 28, 255);    // --surf #12161C（live/src/rail/aglist 的底）
+static const ImU32 kSurf2    = IM_COL32(22, 27, 34, 255);    // --surf2 #161B22（opt 悬停 / gobtn / sel）
+static const ImU32 kRecess   = IM_COL32(10, 13, 17, 255);    // --recess #0A0D11（term / codebox）
+static const ImU32 kLine     = IM_COL32(255, 255, 255, 19);  // --line  white 7.5%
+static const ImU32 kLine2    = IM_COL32(255, 255, 255, 31);  // --line2 white 12%
+static const ImU32 kT1       = IM_COL32(232, 236, 241, 255); // --t1 #E8ECF1
+static const ImU32 kT2       = IM_COL32(183, 191, 200, 255); // --t2 #B7BFC8
+static const ImU32 kT3       = IM_COL32(138, 147, 157, 255); // --t3 #8A939D
+static const ImU32 kT4       = IM_COL32(97, 106, 116, 255);  // --t4 #616A74
+static const ImU32 kT5       = IM_COL32(69, 77, 86, 255);    // --t5 #454D56
+static const ImU32 kAmber    = IM_COL32(232, 163, 61, 255);  // --amber #E8A33D
+static const ImU32 kCyan     = IM_COL32(95, 198, 218, 255);  // --cyan #5FC6DA
+static const ImU32 kGreen    = IM_COL32(87, 179, 104, 255);  // --green #57B368
+static const ImU32 kRed      = IM_COL32(217, 105, 90, 255);  // --red #D9695A
+static const ImU32 kInk      = IM_COL32(10, 13, 17, 255);    // 反色字落在浅底上
+// 旧名字保留为别名：几十处调用还在用它们，语义与 r20 那支一一对应。
+static const ImU32 kFg        = kT1;
+static const ImU32 kMutedFg   = kT3;
+static const ImU32 kStAwait   = kAmber;
+static const ImU32 kStRun     = kCyan;
+static const ImU32 kStQueue   = kT3;
+static const ImU32 kStFail    = kRed;
+static const ImU32 kStDone    = kGreen;
+static const ImU32 kHair      = kLine;
+static const ImU32 kSurface1  = kSurf;
+static const ImU32 kSurface2  = kSurf2;
+static const ImU32 kPrimary   = kCyan;
+static const ImU32 kPrimaryFg = kInk;
+static const ImU32 kStIdle    = kT4;
+static const ImU32 kBorder    = kLine2;
+static const ImU32 kInput     = kLine2;
 // 白墨分档（draft 用 white/xx 表达层级）
 static ImU32 W(int a255) { return IM_COL32(255, 255, 255, a255); }
-static const ImU32 kTitle      = W(235);   // white/92
-static const ImU32 kMicro      = W(97);    // white/38
-static const ImU32 kProject    = W(115);   // white/45
-static const ImU32 kTime       = W(76);    // white/30
+static const ImU32 kTitle      = kT1;
+static const ImU32 kMicro      = kT4;
+static const ImU32 kProject    = kT3;
+static const ImU32 kTime       = kT4;
 // 给色带上透明度（状态胶囊边框 40%、底 16%、光晕 60%…）
 static ImU32 WithA(ImU32 c, int a255) { return (c & 0x00FFFFFFu) | ((ImU32)a255 << 24); }
 
@@ -446,7 +1126,41 @@ static std::string ClipToWidth(const std::string& s, float maxw, int locale, int
         if (TextWidth(TakeCP(s, mid) + ell, locale, tier, track) <= maxw) { best = mid; lo = mid + 1; }
         else hi = mid - 1;
     }
-    return TakeCP(s, best) + ell;
+    const std::string out = TakeCP(s, best) + ell;
+    // 覆盖语言轮次里最怕的事不是版面丑，而是「德文那一行被悄悄截成半句」。
+    // AGENTPING_OVERFLOW=1 时把每次真截断的原文与可用宽度打到 stderr，配着图一起读。
+    static const bool log_clip = getenv("AGENTPING_OVERFLOW") != nullptr;
+    if (log_clip) fprintf(stderr, "[裁切] %.0fpt｜%s\n", (double)maxw, s.c_str());
+    return out;
+}
+
+/// 路径太长时保住文件名：显示成 ~/…/hook.sh，而不是 ~/Library/Applica…。
+/// 六种语言的「写入器」标签宽度不同，全路径在德/日/韩会被整段裁掉尾巴，
+/// 而尾巴恰好是唯一能认出这是哪份脚本的部分。
+static std::string MiddleClipPath(const std::string& s, float maxw, int locale, int tier) {
+    if (TextWidth(s, locale, tier) <= maxw) return s;
+    if (s.find('/') == std::string::npos) return ClipToWidth(s, maxw, locale, tier);
+    std::vector<std::string> comps;
+    std::size_t p0 = 0;
+    for (std::size_t i = 0; i <= s.size(); i++)
+        if (i == s.size() || s[i] == '/') {
+            if (i > p0) comps.push_back(s.substr(p0, i - p0));
+            p0 = i + 1;
+        }
+    if (comps.empty()) return ClipToWidth(s, maxw, locale, tier);
+    const std::string head = s[0] == '/' ? "/" : "~/";
+    const char* ell = g_cover[LATIN].count(0x2026) ? "\xE2\x80\xA6" : "...";
+    // 从文件名往回整段地加，塞不下就停：~/Application Support/… → ~/…/AgentPing/hooks/hook.sh。
+    // 只留文件名（旧写法）会把唯一有信息量的上级目录也扔掉。
+    std::string fit = comps.back();
+    bool took = false;
+    for (int i = (int)comps.size() - 2; i >= 0; i--) {
+        const std::string cand = comps[(std::size_t)i] + "/" + fit;
+        if (TextWidth(head + ell + "/" + cand, locale, tier) <= maxw) { fit = cand; took = true; }
+        else break;
+    }
+    if (!took) return ClipToWidth(comps.back(), maxw, locale, tier);
+    return head + ell + "/" + fit;
 }
 
 // 从可执行文件位置反推 Contents/Resources；不在 .app 里则返回空
@@ -490,7 +1204,7 @@ static void AddChromeText(ImFontGlyphRangesBuilder& rb);
 // 活数据：后台线程扫，主线程只读一份发布出来的快照。
 // 扫描会读几十上百个文件（本机实测冷扫 0.54s），绝不能放在渲染帧里。
 // ─────────────────────────────────────────────────────────────────────────────
-static const int kPanelW = 340;                 // #win{width:340px}
+static const int kPanelW = 416;                 // r31 #win{width:416px}
 static const double kScanEvery = 3.0;
 
 // 几何逐条抄 r14/pin.html：main padding 12/12/16、区块 gap 12、行 py-8 pl-11 pr-8、
@@ -508,7 +1222,21 @@ static const float kMetaGap = 4.0f;                                       // mt-
 static const float kMetaLine = kTierPx[T_SM] * 1.5f;                       // 15
 static const float kDetailLine = kTierPx[T_CHIP] * 1.375f, kDetailPadY = 4.0f, kDetailGap = 6.0f;
 static const float kBarH = 6.0f;
-static const float kCanvasH = 760.0f;   // #win{height:760px}：画布按稿子，窗口随后收到内容高
+static const float kCanvasH = 850.0f;   // r31 .panel{height:850px}
+
+// ── r20 的公共骨架（interaction.src.html 里 .head/.tabs/.dhead 三块）──────────
+// 面板固定 640 高：内容不足 640 时底部标签栏挂在 640 的下沿，与稿子逐像素同构；
+// 内容超过 640（接线屏那种长页）就让面板长高，标签栏跟着下移——浮层没有滚动条，
+// 硬裁会把摆不下的行变成看不见也点不到，比「比稿子高一点」更坏。
+static const float kHeadH = 42.0f;            // .head{height:42px}
+static const float kTabsH = 44.0f;            // .tabs{height:44px}
+static const float kDHeadH = 40.0f;           // .dhead{height:40px}
+static const float kBodyPadTop = 4.0f;        // .inner{padding:4px 0 14px}
+static const float kBodyPadBot = 14.0f;
+static const float kMarginX = 14.0f;          // 稿子的左右 14px
+static const float kSlTop = 12.0f, kSlBottom = 7.0f;   // .slabel padding:12px 14px 7px
+static const float kSlLine = 10.0f;           // .tx font-size:10px / line-height 1
+static const float kLogoD = 18.0f;
 
 // 设置屏的几何，逐条抄 r14/settings.html 里 SettingsPopover.tsx 跑出来的 DOM class：
 //   section = rounded-xl(12px 圆角) + border 1 + bg-surface-1 + p-3(12)
@@ -556,6 +1284,7 @@ struct UIRow {
     int state;
     std::string title, project, agent, initial, detail, question, tool;
     std::vector<std::string> options;
+    std::vector<std::string> option_desc;   // 与 options 并行；缺项＝这条选项没有说明
     int turns = 0, queue_pos = 0;
     double age;
     bool inferred;
@@ -565,18 +1294,56 @@ struct UIRow {
     /// 一行的身份：agent id + 该 agent 里的会话 id。已读/稍后/落点都按这个键记，
     /// 单独用会话 id 会跨采集器撞名（两家都用 uuid，但不同家同名 uuid 不是没可能）。
     std::string key, agent_id, native_id;
+    /// 今天这一段的跨度（秒）：`.live` 的「连续 4h 12m」。起点不在今天就是 0，界面不画。
+    double span_sec = 0;
+    /// `.live` 的 `$ cmd`：尾部最后一条 tool_use 的真命令；空＝整行不画。
+    std::string last_cmd;
+    /// 授权详情「触发说明」：hook 原文；空＝退回「工具」那一行。
+    std::string trigger;
+    /// R31 每行那一小截用量：只摆来源真给了的字段。Qoder 的 JSONL 没有 token
+    /// 明细（全 0），所以 has_tokens 为假时整行不画——不拿 0 冒充读数。
+    long tokens = 0;
+    double credits = 0;
+    bool has_tokens = false, has_credits = false;
+    std::string model;
+    std::string cwd;                       // 会话的工作区绝对路径：ZCode 落点要开到工作区窗口
+    std::vector<ap::Session::Child> children;   // 子代理对话：主任务下可展开的那层
+    /// 完成了但你还没看过（完成时刻 > 已读水位线）。只有完成态才有点；
+    /// 双击跳过去或 ⓘ 看过详情就推进水位线，点消失。
+    bool unseen = false;
+
+    double at = 0;                       // 这条会话最后有动静的时刻（日轨要按它落点）
     /// 「已读」＝本进程内不再催；「稍后」＝20 分钟后自动恢复（settings.html:「20 分钟后恢复」）。
     bool acked = false, snoozed = false;
     bool muted() const { return acked || snoozed; }
 };
+
+/// 「停下来问你」的两种形态：带候选选项/AskUserQuestion 的是提问，其余是授权确认。
+/// 详情路由、自动选行、状态胶囊都走这一个判据，三处不许各判一套。
+static bool RowAsksQuestion(const UIRow& r) {
+    return !r.options.empty() || r.tool == "AskUserQuestion";
+}
 struct Chip { std::string name, initial; int n; ImU32 hue; };
 /// 设置屏「监听工具」一行的数据源：本轮 scan 真返回的采集器，一个不多一个不少。
 /// 三个布尔互斥（本机没有／读不通／今天没动静），全 false 才是「正常在听」。
 struct Tool {
-    std::string name, initial;
+    std::string id, name, initial;
     bool available = false, unreadable = false, quiet = false;
     int rows = 0;
     ImU32 hue;
+    // R31：来源自己写下的用量。没有 token 明细的采集器（Qoder）has_tokens 为假，
+    // 面板就不摆 token 那一列；余额也不跨工具相加（每格是它自己账户的口径）。
+    ap::UsageParts usage;
+    double credits = 0;
+    bool has_credits = false;
+    std::vector<ap::ModelUse> models;
+    std::array<long, 24> hourly{};
+    ap::Quota quota;
+    std::string client = "CLI";
+    int wait_n = 0;
+    bool present() const {
+        return rows > 0 || usage.total() > 0 || has_credits || quota.known || available;
+    }
 };
 struct PanelData {
     std::vector<UIRow> rows;
@@ -590,10 +1357,62 @@ struct PanelData {
     int queue_n = 0;                     // run 里有多少条其实在排队——悬停说明要摊开这一层
     double credits = 0;
     double yday_credits = 0;             // 昨天同窗用量，只为第三格的「较昨日」环比
+    long today_tokens = 0;               // 今日 token 汇总（scan_all 已按今天窗口算过）
+    bool has_today_tokens = false;
     int live = 0;                        // 状态项上的数字：非静置会话数
+    int hero = -1;                       // 总览顶部「在跑」卡指的那一行（最近有动静的运行/排队会话）
+    double now = 0, window_start = 0;    // 历史屏要按「今天零点→现在」算时刻，只此一处带过来
 };
 static PanelData g_pd;
 static long g_pd_seq = -1;
+/// 详情屏看的是哪一行。按 key 从本轮的 g_pd.rows 取最新一版；那一行被重扫挤掉时退回
+/// 点下去时的那一份（屏幕上不能因为 3 秒重扫就突然空白）。
+static std::string g_sel_key;
+static int g_sel_kind = 0;               // 1＝问答详情，2＝授权详情
+static UIRow g_sel_copy;
+/// 接线状态缓存：探一次要读两份配置，2 秒一探足够（点「写入」之后立刻重探）。
+static std::vector<ap::HookAgent> g_hooks;
+static double g_hooks_at = -1;
+/// 最近一次界面动作的回执（复制／接线／失败），2.5 秒后自己消失。
+static std::string g_toast, g_toast_sub;
+static double g_toast_at = 0;
+/// r20 的 toast 在「详情屏里复制」这一路会多挂一颗「返回总览」（稿子 showToast 的 act 参数）。
+/// 这是它唯一带动作的回执，所以不做成通用机制，只留一个开关：那颗按钮走 HIT_BACK。
+static bool g_toast_go = false;
+/// toast 左边那颗图标：3＝复制（RI_COPY），4＝跳转（RI_JUMP）。稿子按回执类型给图。
+static int g_toast_icon = 3;
+/// 历史屏翻到第几页（按从最新往旧的顺序）。只在一屏里有效，切走不重置也行。
+static int g_hist_page = 0;
+/// 上一帧历史屏真摆了几行：翻页入口的步长，与 pin 那套 g_shown 同一口径。
+static int g_hist_shown = 0;
+
+// ── R31 的界面状态 ─────────────────────────────────────────────────────────
+// 与稿子的 fresh() 一一对应，只是把「返回栈」压成一层：稿子最多同时叠两屏
+// （总览 → 账户 → 会话），返回一次就够，所以存「来时的屏」而不是完整历史。
+static std::string g_r31_src = "all";      // 来源筛选：all 或 tool id
+static bool g_r31_search = false;          // 总览里那条搜索框是否展开
+static std::string g_r31_query;            // 会话搜索（项目 / 工具 / 客户端 / 问题）
+static std::string g_r31_toolq;            // 工具列表搜索
+static int g_r31_focus = 0;                // 0＝没有输入框在收字，1＝会话搜索，2＝工具搜索
+static int g_r31_rail = 0;                 // 来源导轨从第几颗开始摆（横向滚动）
+static std::string g_r31_account;          // 账户页看的是哪一路（空＝该路没有账户数据）
+static bool g_r31_models = false;          // 账户页「按模型」是否展开
+static bool g_r31_explain = false;         // 运行卡「今日最长」的说明是否展开
+static std::vector<int> g_r31_trail;       // 返回栈：来时的 view
+static int g_r31_detail_kind = 0;          // 1＝问答 2＝授权 3＝已完成
+static std::string g_r31_detail_key;       // 详情屏那一行的 key（活数据按 key 重取）
+static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
+static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
+static int g_r31_hist_n = 12;               // 完成记录已加载到第几条（懒加载页大小 12）
+static bool g_r31_queue_all = false;        // 首页队列是否展开全部（默认只摆前 8 行）
+
+static const UIRow* SelectedRow(const std::string& key) {
+    // 空键不能落到 g_sel_copy 上：那个默认行的 key 也是空串，会把一张「空头像＋等待确认」
+    // 的鬼卡画出来（空收件箱时详情屏实测就是这样，而不是空态文案）。
+    if (key.empty()) return nullptr;
+    for (const auto& r : g_pd.rows) if (r.key == key) return &r;
+    return g_sel_copy.key == key ? &g_sel_copy : nullptr;
+}
 static bool g_relayout = false;
 static bool g_panelVisible = true;
 static GLFWwindow* g_win = nullptr;      // 点击要跳走时得先把这块面板收起来
@@ -607,21 +1426,55 @@ static const char* g_shot_to = getenv("AGENTPING_SHOT");
 static ap::AlertCfg g_cfg;
 /// 0＝pin 列表，1＝设置屏。同一块窗口换内容，不另开窗口（另开就得多块卡框、多处收窗）。
 static int g_view = 0;
-/// 这一轮界面用哪一语（kStr 六列的下标）。启动时由平台层读一次，之后不改：
-/// 换语言要重烘字形，而这是常驻进程，运行时改口只会让半屏旧字半屏新字。
+/// 底部标签栏当前选中的那一格，用 g_view 的同一套编号（0 总览 / 5 历史 / 1 设置）。
+/// 稿子 `data-act="back"` 是 `state.view = state.tab`：从详情返回要回到「你刚才所在的那一屏」，
+/// 不是一律回总览。接线屏不是标签（它由设置屏的「打开」进去），所以它不改 g_tab。
+static int g_tab = 0;
+/// r20 的面板是固定 640 高、`.body{overflow-y:auto}` 且滚动条隐藏，所以长页（接线屏）
+/// 在 C++ 这边只能自己算滚动：每屏一格偏移、一格上限、一格外框。
+/// 上限由绘制那一趟量出来给下一帧用（单趟绘制），外框供 HandleInput 判「滚轮落不落在正文里」。
+/// 这三样必须声明在 HandleInput 之前，而 r20 的绘制层是在文件后半段 include 进来的。
+static float g_scroll[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static float g_scrollTarget[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};   // 滚轮写目标，帧间缓动过去（丝滑）
+static float g_scrollMax[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static ImVec2 g_bodyTop[10], g_bodyBot[10];
+static bool g_bodyValid[10] = {false, false, false, false, false, false, false, false, false, false};
+static float g_contentH[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+/// App 图标（assets/icon-1024.png 重采样成 RGBA 存进 brand_icon.h）上传后的纹理 id。
+/// 稿子的 .mark 是同一张图，这里不许重画星芒，只能贴真像素。
+static ImU64 g_brandTex36 = 0, g_brandTex68 = 0;
+/// 稿子里 `.ag img` / `.m1 img` 用的是各家 logo；两张 64px 位图存在 agent_icons.h。
+static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
+/// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
+static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
+/// 换屏。r20 每屏各有自己的滚动位置，切过去必须从头顶开始——稿子每次 render() 重建 DOM，
+/// `.body` 的 scrollTop 自然归零；这边不清就会把上一屏滚到 halfway 的偏移带过去。
+/// 同一屏内的位置要留着（滚下去点一行再返回，不该被弹回头顶），所以只清目标屏那一格。
+static void GotoView(int v) {
+    if (v < 0 || v > 8) return;
+    g_view = v;
+    g_scroll[v] = 0.0f;
+    g_scrollTarget[v] = 0.0f;
+    g_relayout = true;
+}
+/// 这一轮界面用哪一语（kStr 六列的下标）。启动时由「settings.txt 的 lang → AGENTPING_LANG
+/// → 平台层探测」这条顺序定，之后设置屏那颗 .sel 可以改它（HIT_LANG）：六语的界面固定文案
+/// 在启动时就全烘进图集（AddChromeText 遍历 kLocales），会话标题那类活文本由这一版 ImGui
+/// 按需栅格化，所以运行时改口不会出现半屏旧字半屏新字。
+/// 改完必须 g_relayout：RefFace 决定行框高，换语等于换度量。
 /// 初值只在「main 还没跑到检测」时生效，取值口径见 [语言] 那行打印。
 static int g_loc = AP_LANG_ZH;
 /// 上一轮「还在动」（非静置）的会话身份键。设置屏打开「已完成」那一档后，只有
 /// 从这条集合里掉出来的会话才允许响 —— 没有它，第一次打开就会把几十条几天前静置的
 /// 会话当成跳变，连吵十几轮（alert.h 里同一条门）。
 static std::set<std::string> g_active;
-static const int kSetW = 420;            // settings.html #win{width:420px}
+static const int kSetW = 340;            // r20 里设置屏与总览同宽（稿子不再有 420 那版）
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 画原子：全部是 r14/pin.html 里那一套（胶囊 / 头像环 / 左侧状态条 / 引用块）
 // ─────────────────────────────────────────────────────────────────────────────
 static const float kPillH = kTierPx[T_PILL] + 2 * 2.0f + 2 * 1.0f;   // 15.5：leading-none 的 9.5 + py-[2px] + 上下 1px 边
-static const float kCardR = 16.0f;   // #win{border-radius:16px}
+static const float kCardR = 14.0f;   // r20 #win{border-radius:14px}
 
 static void PillRect(ImDrawList* dl, float x, float y, float w, float h, ImU32 fill, ImU32 border, float r) {
     dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), fill, r);
@@ -847,11 +1700,39 @@ static float PingK(double tn, float period, const float* ez) {
 // ─────────────────────────────────────────────────────────────────────────────
 enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               HIT_SET = 4, HIT_SETTINGS = 5, HIT_BACK = 6, HIT_MORE = 7,
-              HIT_BACKOV = 8 };
+              HIT_BACKOV = 8, HIT_NAVHIST = 9, HIT_NAVSETUP = 10,
+              HIT_HOOKINST = 11, HIT_JUMP = 12, HIT_COPY = 13, HIT_HISTMORE = 14,
+              // r20 版式新加的四个落点：
+              // HIT_LANG    设置屏「语言」那颗 .sel（没有下拉控件，点一下轮换到下一语）
+              // HIT_SKIP    接线屏表头的「跳过」（data-act="skip" → 回总览）
+              // HIT_TABOV   底部标签栏的「总览」
+              // HIT_COPYTEXT 接线屏两个代码框的「复制」：复制 h.title 里装的那段原文
+              HIT_LANG = 15, HIT_SKIP = 16, HIT_TABOV = 17, HIT_COPYTEXT = 18,
+              // R31 版式新接的落点：
+              // HIT_R31BACK 子屏左上那颗「← 来处」；HIT_SRC 来源导轨（key＝tool id / all）；
+              // HIT_TAB31 会话/用量两个标签（opt＝0 / 6）；HIT_INFO31 行上的 ⓘ 进详情；
+              // HIT_RAILNEXT 导轨箭头；HIT_TOOLS31 全部工具；HIT_ACCOUNT31 账户页；
+              // HIT_MODELSTOG 按模型展开；HIT_SEARCHTOG 搜索框；HIT_CLEARQ 清搜索；
+              // HIT_GEAR 设置；HIT_EXPLAIN 轮次说明；HIT_ACCTSESS 账户页看会话；
+              // HIT_PICKTOOL 工具列表选一路；HIT_SEARCHFIELD 输入框收字。
+              // HIT_SHOWALL31 空态「查看全部会话」；HIT_HISTORY31 总览页脚进完成记录。
+              HIT_R31BACK = 19, HIT_SRC = 20, HIT_TAB31 = 21, HIT_INFO31 = 22,
+              HIT_RAILNEXT = 23, HIT_TOOLS31 = 24, HIT_ACCOUNT31 = 25,
+              HIT_MODELSTOG = 26, HIT_SEARCHTOG = 27, HIT_CLEARQ = 28,
+              HIT_GEAR = 29, HIT_EXPLAIN = 30, HIT_ACCTSESS = 31,
+              HIT_PICKTOOL = 32, HIT_SEARCHFIELD = 33,
+              HIT_SHOWALL31 = 34, HIT_HISTORY31 = 35,
+              // HIT_SUBTOG 队列行/运行卡上那颗「N 条子对话」的展开开关
+              HIT_SUBTOG = 36,
+              HIT_H31MORE = 38,      // 完成记录「还有 N 条」补位行（自动续页的兜底入口）
+              HIT_QUEUEALL = 39 };   // 首页队列「还有 N 条」：展开全部待处理行
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
+/// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
+/// SC_NOTIFY（屏上「系统通知」对账上 dnd 要取反）那样绕一道。
+static void Toast(const std::string& a, const std::string& b, bool go = false);   // 定义在 r20 段
 enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
-              SC_TOP, SC_ROWS };
+              SC_TOP, SC_ROWS, SC_DND, SC_LAUNCH, SC_QUIT };
 struct Hit {
     float x0, y0, x1, y1;
     int act = 0, row = 0, opt = 0;
@@ -860,6 +1741,7 @@ struct Hit {
     int state = 0;
     long zid = 0;
     std::string key, agent_id, native_id, label, title;
+    std::string cwd;                       // 行的工作区路径：ZCode 那级落点用
 };
 static std::vector<Hit> g_hits;                  // 本帧登记、下一帧消费
 static std::set<std::string> g_ack;              // 「已读」：只在内存，与 Swift 的 acknowledged 同一口径
@@ -910,9 +1792,14 @@ static const int kOptScaleUp = 104;    // hover:scale-[1.04]
 static const int kOptScaleDown = 95;   // active:scale-95
 
 /// 一个可点零件的编号：六语并排时同一行会出现六次，必须带上 locale 才不会串味。
+/// 位宽按「act 最多 99、row 最多 9999、opt 最多 999」留：原来 act*100 与 row*1000
+/// 是重叠的（act≥10 时 row=0,act=14 与 row=1,act=4 同号），只影响悬停过渡的归属，
+/// 但 r20 把落点种类加到 19 个，重叠面变大，这里一次拉宽。
 static long Zid(int loc, int row, int act, int opt) {
-    return (long)loc * 1000000L + (long)row * 1000L + (long)act * 100L + (long)opt;
+    return (long)loc * 1000000000L + (long)row * 100000L + (long)act * 1000L + (long)opt;
 }
+/// 反解 locale：DoAction 里那两处要用它挑文案，位宽跟着 Zid 一起改，别再各写一遍除数。
+static int LocOfZid(long zid) { return (int)(zid / 1000000000L) % kLocales; }
 /// 设置屏的零件没有 UIRow（一行开关不对应任何会话），所以命中区另走这条：身份字段留空，
 /// 只带 label 供 AGENTPING_CLICK 按名字钉。
 static void AddHit(std::vector<Hit>& v, float x0, float y0, float x1, float y1,
@@ -931,6 +1818,7 @@ static void AddHit(std::vector<Hit>& v, float x0, float y0, float x1, float y1,
     h.act = act; h.row = row; h.opt = opt;
     h.zid = Zid(loc, row, act, opt);
     h.key = r.key; h.agent_id = r.agent_id; h.native_id = r.native_id; h.title = r.title;
+    h.cwd = r.cwd;
     h.label = label;
     v.push_back(h);
 }
@@ -1013,6 +1901,19 @@ static void GhostPill(ImDrawList* dl, float x, float y, float w, int loc, const 
 static void FlipSet(int ctl, int opt) {
     const char* key = "";
     bool b = false;                       // 「屏上那一颗」改完是不是亮着
+    if (ctl == SC_LAUNCH) {
+        // 登录时启动：真源是登录项文件，不在 settings.txt 里。点一下＝写/删那个文件，
+        // 亮灭按写完之后的文件存在性重新读，不按我们「以为成功了」的返回值。
+        const bool was = ap_autostart_get(nullptr, 0) == 1;
+        char why[512] = {0};
+        const int rc = ap_autostart_set(was ? 0 : 1, why, (int)sizeof why);
+        const bool now = ap_autostart_get(nullptr, 0) == 1;
+        printf("[设置] %s ＝ %s｜%s\n", T("set_launch", 0), now ? "开" : "关",
+               (rc == 0 ? std::string("已生效：") + why
+                        : std::string("没改成：") + (why[0] ? why : "原因未回")).c_str());
+        fflush(stdout);
+        return;
+    }
     switch (ctl) {
         case SC_NEEDS:  g_cfg.needs_user = !g_cfg.needs_user; b = g_cfg.needs_user; key = "needs_you"; break;
         case SC_AWAIT:  g_cfg.await_perm = !g_cfg.await_perm; b = g_cfg.await_perm; key = "await_confirm"; break;
@@ -1022,9 +1923,22 @@ static void FlipSet(int ctl, int opt) {
         // 屏上那颗叫「系统通知」，账上那项叫 dnd（免打扰）：同一件事的两个方向，所以这里必须取反。
         // 日志把两边都念出来，对账时才不会把「一个开一个关」误读成 bug。
         case SC_NOTIFY: g_cfg.dnd        = !g_cfg.dnd;        b = !g_cfg.dnd;       key = "sys_notify"; break;
+        case SC_DND:    g_cfg.dnd        = !g_cfg.dnd;        b = g_cfg.dnd;        key = "set_dnd"; break;
         case SC_TOP:    g_cfg.on_top     = !g_cfg.on_top;      b = g_cfg.on_top;    key = "on_top"; break;
         case SC_ROWS:   g_cfg.max_rows   = opt;               b = true;             key = "max_rows"; break;
+        case SC_QUIT:   // 设置屏底部「退出」：走窗口正常关闭（扫描线程在 join 里收）
+            if (g_win) glfwSetWindowShouldClose(g_win, GLFW_TRUE);
+            return;
         default: return;
+    }
+    if (ctl == SC_SOUND && b) {   // 翻到开：当场播一声测试音，不用等下一次提醒才知道生效
+        char why[160];
+        ap_sound_test(why, (int)sizeof why);
+        printf("[设置] %s\n", why);
+        fflush(stdout);
+    }
+    {   // 每次翻转都给一行明确回执：开关两态在暗主题下不够分（2026-10-28 用户实测「点不动」）
+        Toast(std::string(T(key, g_loc)) + (b ? "  已开启" : "  已关闭"), "");
     }
     char val[64];
     if (ctl == SC_ROWS)      snprintf(val, sizeof val, "%d 条", g_cfg.max_rows);
@@ -1332,7 +2246,38 @@ static const char* ActName(int act) {
         case HIT_BACK:     return "返回";
         case HIT_MORE:     return "展开";
         case HIT_BACKOV:   return "收起";
-        default:           return "选项";
+        case HIT_OPTION:   return "选项";
+        case HIT_NAVHIST:  return "历史";
+        case HIT_NAVSETUP: return "接线";
+        case HIT_HOOKINST: return "写入接线";
+        case HIT_JUMP:     return "跳终端";
+        case HIT_COPY:     return "复制选项";
+        case HIT_HISTMORE: return "历史翻页";
+        case HIT_LANG:     return "语言";
+        case HIT_SKIP:     return "跳过接线";
+        case HIT_TABOV:    return "标签·总览";
+        case HIT_COPYTEXT: return "复制脚本";
+        case HIT_R31BACK:  return "返回";
+        case HIT_SRC:      return "来源";
+        case HIT_TAB31:    return "标签";
+        case HIT_INFO31:   return "详情";
+        case HIT_RAILNEXT: return "导轨箭头";
+        case HIT_TOOLS31:  return "全部工具";
+        case HIT_ACCOUNT31:return "账户";
+        case HIT_MODELSTOG:return "按模型";
+        case HIT_SEARCHTOG:return "搜索";
+        case HIT_CLEARQ:   return "清除搜索";
+        case HIT_GEAR:     return "设置";
+        case HIT_EXPLAIN:  return "轮次说明";
+        case HIT_ACCTSESS: return "账户会话";
+        case HIT_PICKTOOL: return "选工具";
+        case HIT_SEARCHFIELD: return "输入框";
+        case HIT_SHOWALL31: return "查看全部会话";
+        case HIT_HISTORY31: return "今日完成";
+        case HIT_SUBTOG:   return "子对话";
+        case HIT_H31MORE: return "加载更多";
+        case HIT_QUEUEALL: return "展开队列";
+        default:           return "未命名";
     }
 }
 
@@ -1345,7 +2290,13 @@ static void JumpTo(const Hit& h) {
         if (g_win) glfwHideWindow(g_win);
     }
     char why[512];
-    int rc = ap_open(h.agent_id.c_str(), h.native_id.c_str(), why, (int)sizeof why);
+    // ZCode 没有会话级 URL，精确落点只有 ⌘K 驱动（激活 → ⌘K → 粘贴标题 → 回车）。
+    // 未授权/没敲成时 reason 会写明，再退回普通落点阶梯，不静默。
+    int rc = 1;
+    if (h.agent_id == "zcode" && !h.title.empty())
+        rc = ap_zcode_navigate(h.title.c_str(), why, (int)sizeof why);
+    if (rc != 0)
+        rc = ap_open2(h.agent_id.c_str(), h.native_id.c_str(), h.cwd.c_str(), why, (int)sizeof why);
     fprintf(stderr, "[落点] %s/%s → %s（ap_open %s）\n", h.agent_id.c_str(), h.native_id.c_str(),
             why[0] ? why : "无说明", rc == 0 ? " ok" : "失败");
     fflush(stderr);
@@ -1392,6 +2343,19 @@ static void DrainBannerClick() {
 }
 
 /// 就地翻这一行的状态：下一轮重扫（3s）才会走 RebuildPanel，点下去必须马上看见反应。
+static int GroupOf(int st);    // 定义在绘制段；这里前置声明给 MarkSeen 用
+/// 看过一条完成会话（双击跳走或 ⓘ 进详情）：把已读水位线推进到它的完成时刻并落盘。
+/// 不落盘的话重启就把今天全部点回未读，那比没有点还吵。
+static void MarkSeen(const UIRow& r) {
+    if (GroupOf(r.state) != G_DONE) return;
+    const long long t = (long long)r.at;
+    if (t <= g_cfg.seen_until) return;
+    g_cfg.seen_until = t;
+    std::string err;
+    if (!ap::save_alert_cfg(g_cfg, &err))
+        fprintf(stderr, "[已读] 水位线没写下去：%s\n", err.c_str());
+}
+
 static void MarkRow(const Hit& h, bool ack, bool later) {
     for (auto& r : g_pd.rows) {
         if (r.key != h.key) continue;
@@ -1400,6 +2364,10 @@ static void MarkRow(const Hit& h, bool ack, bool later) {
     }
     g_relayout = true;
 }
+
+// DoAction 在绘制层之前：接线／回执三个私有件先声明，定义留在 r20 四屏那一块。
+static void RefreshHooks(bool force);
+static std::string TildePath(const std::string& p);
 
 static void DoAction(const Hit& h, const ImVec2& at) {
     std::string where = std::string(ActName(h.act)) + " · " + h.key +
@@ -1424,12 +2392,227 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             return;
         }
         case HIT_SETTINGS:                    // 换屏：同一块窗口换内容，不另开窗口
-            g_view = 1;
+            g_tab = 1;
+            GotoView(1);
+            return;
+        case HIT_TABOV: {                     // 底部标签栏：opt 装目标屏（0 总览 / 5 历史 / 1 设置）
+            int v = (h.opt == 5 || h.opt == 1) ? h.opt : 0;
+            g_tab = v;
+            if (v == 5) g_hist_page = 0;
+            GotoView(v);
+            return;
+        }
+        case HIT_SKIP:                        // 接线屏表头那颗「跳过」＝稿子 data-act="skip"
+            g_tab = 0;
+            GotoView(0);
+            return;
+        case HIT_NAVSETUP:
+            RefreshHooks(true);
+            GotoView(2);
+            return;
+        case HIT_NAVHIST:
+            g_tab = 5;
+            g_hist_page = 0;
+            GotoView(5);
+            return;
+        case HIT_LANG: {
+            if (h.opt < 0) {                  // 点在下拉胶囊上：开/关菜单
+                g_lang_menu = !g_lang_menu;
+                g_relayout = true;
+                return;
+            }
+            const int next = h.opt % kLocales;   // 点在菜单某一行：选定该语
+            g_lang_menu = false;
+            g_loc = next;
+            g_cfg.lang = next;
+            std::string err;
+            const bool wrote = ap::save_alert_cfg(g_cfg, &err);
+            // 菜单栏那串计数与悬停说明是 RebuildPanel 按 g_loc 现做的，把 seq 账清掉
+            // 就等于要求下一帧重摆一次——不然托盘还会挂着上一语的说法，最多拖 3 秒。
+            g_pd_seq = -1;
+            printf("[语言] %s｜%s\n", kLocTag[next],
+                   wrote ? "已落盘 settings.txt" : (std::string("落盘失败：") + err).c_str());
+            fflush(stdout);
             g_relayout = true;
             return;
-        case HIT_BACK:
-            g_view = 0;
+        }
+        case HIT_COPYTEXT: {                  // 接线屏两个代码框的「复制」：原文装在 h.title
+            if (!h.title.empty()) ImGui::SetClipboardText(h.title.c_str());
+            const int loc = LocOfZid(h.zid);
+            Toast(T("setup_copied", loc), T("setup_copied_sub", loc));
+            return;
+        }
+        case HIT_HOOKINST: {                    // 接线屏那颗「写入 / 重写」：真改本机配置
+            std::string backup, err;
+            const bool ok = ap::install_hook(h.agent_id, &backup, &err);
+            RefreshHooks(true);
+            const int loc = LocOfZid(h.zid);
+            if (ok) {
+                char tb[96];
+                snprintf(tb, sizeof tb, T("setup_done", loc), h.title.empty() ? h.agent_id.c_str() : h.title.c_str());
+                if (backup.empty()) Toast(tb, TildePath(h.label));
+                else {
+                    // 备份名比行宽长，而尾部的日期正是还原时要看的那截。按最后一刀拆成
+                    // 「目录 / 文件名」两行，比裁掉尾部诚实。
+                    const std::string tilde = TildePath(backup);
+                    const std::size_t cut = tilde.find_last_of('/');
+                    const std::string wrapped =
+                        cut == std::string::npos ? tilde : tilde.substr(0, cut + 1) + "\n" + tilde.substr(cut + 1);
+                    char sb[256]; snprintf(sb, sizeof sb, T("setup_backup", loc), wrapped.c_str());
+                    Toast(tb, sb);
+                }
+            } else {
+                Toast(T("setup_fail", loc), err.empty() ? T("setup_restart", loc) : err);
+            }
             g_relayout = true;
+            return;
+        }
+        case HIT_JUMP: {                        // 授权详情那颗「切到 … 的终端」：真跳，并回执跳到了哪儿
+            if (!g_shot_to) JumpTo(h);
+            const int loc = LocOfZid(h.zid);
+            char tb[160];
+            snprintf(tb, sizeof tb, T("jump_done", loc), h.label.empty() ? h.key.c_str() : h.label.c_str());
+            Toast(tb, T("jump_done_sub", loc));
+            g_toast_icon = 4;
+            return;
+        }
+        case HIT_COPY: {                        // 详情屏的选项：只进剪贴板，不跳走
+            if (!h.label.empty()) ImGui::SetClipboardText(h.label.c_str());
+            const int loc = LocOfZid(h.zid);
+            char tb[128];
+            snprintf(tb, sizeof tb, T("det_toast", loc), h.label.c_str());
+            // 在详情屏里复制时，稿子会给这声回执挂一颗「返回总览」；总览里复制没有这颗。
+            const bool in_detail = (g_view == 3 || g_view == 4);
+            if (h.title.empty()) Toast(tb, T("det_copy", loc), in_detail);
+            else {
+                char sb[160]; snprintf(sb, sizeof sb, T("det_toast_sub", loc), h.title.c_str());
+                Toast(tb, sb, in_detail);
+            }
+            return;
+        }
+        case HIT_HISTMORE:
+            if (h.opt == 1) g_hist_page = 0;
+            else g_hist_page += g_hist_shown > 0 ? g_hist_shown : 1;
+            g_relayout = true;
+            return;
+        case HIT_R31BACK:                       // 子屏左上「← 来处」：按来时的屏返回
+            if (!g_r31_trail.empty()) {
+                const int v = g_r31_trail.back();
+                g_r31_trail.pop_back();
+                GotoView(v);
+            } else {
+                GotoView(g_tab);
+            }
+            return;
+        case HIT_SRC:                           // 来源导轨：key 装 tool id，空＝全部
+            g_r31_src = h.key.empty() ? "all" : h.key;
+            g_r31_rail = 0;
+            g_scroll[g_view] = 0.0f;
+            g_relayout = true;
+            return;
+        case HIT_TAB31:                         // 会话 / 用量两个标签（opt＝目标屏）
+            g_tab = (h.opt == 6) ? 6 : 0;
+            GotoView(g_tab);
+            return;
+        case HIT_INFO31: {                      // 行上的 ⓘ：进详情，不动跳转
+            const UIRow* r = SelectedRow(h.key);
+            if (!r) return;
+            MarkSeen(*r);
+            g_sel_key = r->key;
+            g_sel_copy = *r;
+            g_sel_kind = (r->state == ap::ST_RESTING) ? 3 : (RowAsksQuestion(*r) ? 1 : 2);
+            g_r31_detail_kind = g_sel_kind;
+            g_r31_detail_key = r->key;
+            if (g_view != 3) g_r31_trail.push_back(g_view);
+            GotoView(3);
+            return;
+        }
+        case HIT_RAILNEXT:                      // 导轨箭头：到头就回到开头，不藏任何一路
+            g_r31_rail = g_r31_rail > 0 ? 0 : 999;
+            g_relayout = true;
+            return;
+        case HIT_TOOLS31:
+            if (g_view != 8) g_r31_trail.push_back(g_view);
+            GotoView(8);
+            return;
+        case HIT_ACCOUNT31:                     // key＝要看哪一路账户
+            g_r31_account = h.key;
+            if (g_view != 7) g_r31_trail.push_back(g_view);
+            GotoView(7);
+            return;
+        case HIT_MODELSTOG:
+            g_r31_models = !g_r31_models;
+            g_relayout = true;
+            return;
+        case HIT_SEARCHTOG:                     // 稿子 app.js:165：按下先回总览；关掉时清掉搜索词
+            g_r31_search = !g_r31_search;
+            g_r31_focus = g_r31_search ? 1 : 0;
+            if (g_r31_search && g_view != 0) { g_r31_trail.clear(); GotoView(0); }
+            if (!g_r31_search) g_r31_query.clear();
+            g_relayout = true;
+            return;
+        case HIT_CLEARQ:                        // opt=2 是工具列表那颗：语义走 g_r31_toolq
+            if (h.opt == 2) {
+                g_r31_toolq.clear();
+                g_r31_focus = 2;
+            } else {
+                g_r31_query.clear();
+                g_r31_focus = 1;
+            }
+            g_relayout = true;
+            return;
+        case HIT_GEAR:
+            if (g_view != 1) g_r31_trail.push_back(g_view);
+            g_tab = 1;    // 设置屏底部标签栏要跟着亮「设置」（只切屏不切 tab 会亮着总览）
+            GotoView(1);
+            return;
+        case HIT_EXPLAIN:
+            g_r31_explain = !g_r31_explain;
+            g_relayout = true;
+            return;
+        case HIT_ACCTSESS:                      // 账户页脚：把这个工具的会话筛出来
+            g_r31_src = g_r31_account.empty() ? "all" : g_r31_account;
+            g_r31_focus = 0;
+            g_r31_trail.clear();
+            GotoView(0);
+            return;
+        case HIT_PICKTOOL:                      // 工具列表选一路 → 总览按它筛
+            g_r31_src = h.key;
+            g_r31_focus = 0;
+            g_r31_trail.clear();
+            GotoView(0);
+            return;
+        case HIT_SEARCHFIELD:                   // opt＝1 会话搜索 / 2 工具搜索
+            g_r31_focus = h.opt;
+            return;
+        case HIT_SHOWALL31:                     // 空态那颗：清掉来源与搜索，回到全部会话
+            g_r31_src = "all";
+            g_r31_query.clear();
+            g_r31_toolq.clear();
+            g_r31_focus = 0;
+            g_r31_rail = 0;
+            GotoView(0);
+            return;
+        case HIT_H31MORE:                       // 完成记录补位行：再翻一页
+            g_r31_hist_n += 12;
+            g_relayout = true;
+            return;
+        case HIT_QUEUEALL:                      // 首页队列：展开收起的待处理行
+            g_r31_queue_all = true;
+            g_relayout = true;
+            return;
+        case HIT_SUBTOG: {                      // 「N 条子对话」展开/收起（key＝父行身份）
+            if (g_r31_subopen.count(h.key)) g_r31_subopen.erase(h.key);
+            else g_r31_subopen.insert(h.key);
+            g_relayout = true;
+            return;
+        }
+        case HIT_HISTORY31:                     // 总览页脚「今日完成」
+            if (g_view != 5) g_r31_trail.push_back(g_view);
+            GotoView(5);
+            return;
+        case HIT_BACK:                          // 稿子 data-act="back"：回到你刚才所在的标签，不是一律回总览
+            GotoView(g_tab);
             return;
         case HIT_MORE: {                        // 「还有 N 条」：把版面换给这一组；在同一组上连着点＝翻页
             int g = h.row - kFoldRow;
@@ -1444,17 +2627,35 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_page = 0;
             g_relayout = true;
             return;
-        case HIT_SET:                          // 设置屏的一颗：改档 + 落盘 + 该生效的立刻生效
+        case HIT_SET: {                        // 设置屏的一颗：改档 + 落盘 + 该生效的立刻生效
+            // 防抖：现在人人都会下意识双击，开关是单击语义——两连击等于翻过去又翻回来，
+            // 屏上看起来就是「点不动」。同一颗 0.4s 内的第二击忽略。
+            static long lastZid = -1;
+            static double lastAt = 0;
+            const double now2 = glfwGetTime();
+            if (lastZid == h.zid && now2 - lastAt < 0.4) { lastAt = now2; return; }
+            lastZid = h.zid;
+            lastAt = now2;
             FlipSet(h.row, h.opt);
             return;
-        default:                        // HIT_OPEN：整行 / 引用块都只负责跳
+        }
+        default: {                      // HIT_OPEN：R31 的主点击＝直接去那会话；ⓘ 才是详情
+            if (const UIRow* r = SelectedRow(h.key)) MarkSeen(*r);
             if (!g_shot_to) JumpTo(h);
             return;
+        }
     }
 }
 
 static long g_press = -1;               // 按下时命中的那颗区，抬起时要在同一颗里才算点击
 static bool g_was_down = false;         // 上一帧的按下态：抬起那一帧才判一次点击
+// 行的「打开」改双击触发（2026-10-28 产品拍板：单击误触的代价是面板收起+跳走，太重）。
+// 记上一击的 zid 与时刻：同一颗 0.5s 内再击一次才算打开；详情页那颗「前往会话」按钮
+// 是明确意图（opt=1 标记），保持单击。ⓘ/芯片等小件本就是单击。
+static long g_open_last_zid = -1;
+static double g_open_last_at = 0;
+/// 标题栏拖动发生过：松手的那一击不算点击（拖完不该触发行/按钮）。
+static bool g_drag_moved = false;
 
 /// 取证的钉法允许直接写零件名（「已读」「稍后提醒」「选项2」），不必抄坐标：坐标由绘制那一趟
 /// 算出来，行数一漂就变了，抄死就会钉到按钮旁边的空白上，然后把「没亮」误判成命中失效。
@@ -1508,12 +2709,33 @@ static std::vector<std::string> g_click_seq = []() {
 }();
 static int g_click_at = 0;      // 序列走到第几颗
 static int g_click_gap = 0;     // 当前这颗已经占了几帧
+// AGENTPING_CLICK_DELAY=毫秒：推迟序列的第一次按下。出图要等第二轮扫描（≥3s）才回读，
+// 而回执只活 2.5s——不推迟就永远拍不到「复制成功」那条浮层（实测截图里只有选项没有回执）。
+static double g_click_delay = []() {
+    const char* e = getenv("AGENTPING_CLICK_DELAY");
+    return e ? atof(e) / 1000.0 : 0.0;
+}();
 
 /// 真实指针为什么不取 io.MousePos：这块面板是系统浮层，指针在它上面时窗口往往不是 key，
 /// GLFW 的 motion 回调只在窗口收到事件时才更新，浮层上实测会漏。Apple 侧直接问系统要全局
 /// 指针位置再换算进窗口内容框——ImGui 的坐标系就是窗口的「点」尺寸（DisplaySize 取
 /// glfwGetWindowSize，Retina 倍率走 DisplayFramebufferScale），而 CG 给的也是点，所以直接减。
 /// 非 Apple 分支退回 io.MousePos（Linux 侧本机还没实机跑过，这条只是不阻断编译）。
+/// 全局屏幕坐标的光标（y 向下，与 glfwGet/SetWindowPos 同一坐标系）。
+/// 拖动窗口必须用它：窗口相对坐标在「窗口跟着动」时会自我反馈，一帧滞后就来回震荡。
+static ImVec2 GlobalCursorNow() {
+    ImVec2 p(-1.0e6f, -1.0e6f);
+#ifdef __APPLE__
+    CGEventRef ev = CGEventCreate(nullptr);
+    if (ev) {
+        const CGPoint g = CGEventGetLocation(ev);
+        p = ImVec2((float)g.x, (float)g.y);
+        CFRelease(ev);
+    }
+#endif
+    return p;
+}
+
 static ImVec2 MousePos(const ImGuiIO& io) {
     ImVec2 p;
     // 序列还没走完就钉在当前这颗上；走完了钉在最后一颗（与单颗点击原本的行为一致：
@@ -1546,8 +2768,77 @@ static ImVec2 MousePos(const ImGuiIO& io) {
 
 /// 每帧在绘制之前跑：拿上一帧登记的命中区算悬停/按下，把过渡目标推给 TxEval，
 /// 顺带判一次点击。命中区是上一帧的几何，滞后一帧＝16ms，比 150ms 的过渡短一个数量级。
+static void Utf8Append(std::string& s, unsigned int cp) {
+    if (cp < 0x80) s.push_back((char)cp);
+    else if (cp < 0x800) { s.push_back((char)(0xC0 | (cp >> 6))); s.push_back((char)(0x80 | (cp & 0x3F))); }
+    else if (cp < 0x10000) {
+        s.push_back((char)(0xE0 | (cp >> 12)));
+        s.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+        s.push_back((char)(0x80 | (cp & 0x3F)));
+    } else {
+        s.push_back((char)(0xF0 | (cp >> 18)));
+        s.push_back((char)(0x80 | ((cp >> 12) & 0x3F)));
+        s.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+        s.push_back((char)(0x80 | (cp & 0x3F)));
+    }
+}
+static void Utf8Pop(std::string& s) {
+    if (s.empty()) return;
+    size_t i = s.size() - 1;
+    while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) i--;
+    s.erase(i);
+}
+
 static void HandleInput(const ImGuiIO& io, double now) {
     ImVec2 mp = MousePos(io);
+    // R31 的两个搜索框自己收字：面板不给控件焦点，字符从 ImGui 的输入队列取。
+    // 输入法组合窗由系统画，组合中的拼音不进这里——上屏那一刻才落字（这条限制写进 RESULT）。
+    if (g_r31_focus) {
+        std::string& target = (g_r31_focus == 2) ? g_r31_toolq : g_r31_query;
+        for (ImWchar c : io.InputQueueCharacters)
+            if (c >= 32 && c != 127) Utf8Append(target, (unsigned int)c);
+        if (ImGui::IsKeyReleased(ImGuiKey_Backspace)) Utf8Pop(target);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+            g_r31_focus = 0;
+        g_relayout = true;
+    }
+    // 稿子 app.js:177 的两条键盘路（「能补就补」档）：⌘/Ctrl+F 唤出搜索并聚焦；
+    // Esc 在根屏收搜索、在子屏等于点「← 来处」。输入框收字时 Esc 仍归输入框。
+    if (!g_r31_focus && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if ((g_view == 0 || g_view == 6) && g_r31_search) {
+            g_r31_search = false;
+            g_r31_query.clear();
+            g_r31_focus = 0;
+            g_relayout = true;
+        } else if (g_view != 0 && g_view != 6) {
+            Hit back_hit;
+            back_hit.act = HIT_R31BACK;
+            DoAction(back_hit, mp);
+        }
+    }
+    if ((io.KeyCtrl || ImGui::IsKeyDown(ImGuiMod_Super)) && ImGui::IsKeyPressed(ImGuiKey_F)) {
+        if (!g_r31_search) {
+            g_r31_search = true;
+            g_r31_trail.clear();
+            GotoView(0);
+        }
+        g_r31_focus = 1;
+        g_relayout = true;
+    }
+    // r20 的 .body 是个真滚动容器（overflow-y:auto 且滚动条隐藏），面板高度锁死 640。
+    // 稿子那边由浏览器滚，这边只能自己算：滚轮一格 40pt（约三行正文），上限由绘制那一趟
+    // 量出来（g_scrollMax，单趟绘制所以滞后一帧）。只有指针落在正文框里才响应——落在表头
+    // 或标签栏上滚动会把内容推着走，那不是稿子的行为。
+    if (io.MouseWheel != 0.0f && g_bodyValid[g_view] &&
+        mp.x >= g_bodyTop[g_view].x && mp.x < g_bodyBot[g_view].x &&
+        mp.y >= g_bodyTop[g_view].y && mp.y < g_bodyBot[g_view].y) {
+        g_scrollTarget[g_view] = std::fmin(g_scrollMax[g_view],
+                                           std::fmax(0.0f, g_scrollTarget[g_view] - io.MouseWheel * 40.0f));
+    }
+    // 取证轮要把长页（接线屏）的下半截拍下来，而合成指针不会滚滚轮：
+    // 给一个「这一屏从多少偏移起画」的入口，只在 AGENTPING_SHOT 那轮生效。
+    static const char* kScroll = getenv("AGENTPING_SCROLL");
+    if (g_shot_to && kScroll) g_scroll[g_view] = g_scrollTarget[g_view] = std::atof(kScroll);
     static const char* kDown = getenv("AGENTPING_DOWN");
     bool down = g_shot_to ? false : io.MouseDown[0];
     // 出图轮只认合成输入：实测他人在桌面上的真点击会落在面板上（这块是系统浮层，340×993 占着
@@ -1557,10 +2848,32 @@ static void HandleInput(const ImGuiIO& io, double now) {
     // （见下面 g_was_down 那段），第 4~8 帧空转，让重摆行和 150ms 过渡都走完，
     // 下一颗才钉得到新版面而不是旧几何。
     if (!g_click_seq.empty() && g_click_at < (int)g_click_seq.size()) {
-        if (!g_hits.empty()) {
+        // 等目标真的出现在命中区里再按：扫描落地前版面是空的，这时按下会落在空白上，
+        // 八帧一过整条序列就被消耗光（实测「复制选项」的 toast 一直不来，日志里 0 次点击）。
+        // 但只有按下 / 抬起 / 发火这三帧（gap 0–2）需要目标在场；之后五帧是冷却，
+        // 点的若是「今日完成」这类一点就切屏的入口，目标在冷却期就没了，再要求它在场
+        // 就会把 gap 冻在 3 上，整条序列永远走不完（实测连点三颗只发出第一颗）。
+        // 另留一条兜底：目标 6 秒不出现就作废余下的颗，取证轮至少拍得出「走到哪算哪」那一屏。
+        static double lastProgress = 0.0;
+        if (now < g_click_delay) lastProgress = now;   // 还在等 CLICK_DELAY 的那段不算「无进展」
+        ImVec2 tp;
+        const bool cooling = g_click_gap >= 3;
+        const bool resolved = now >= g_click_delay &&
+                              (cooling || (!g_hits.empty() &&
+                                           ResolveZone(g_click_seq[g_click_at].c_str(), tp)));
+        if (getenv("AGENTPING_CLICK_TRACE"))
+            fprintf(stderr, "[序列] at=%d gap=%d resolved=%d mp=(%.0f,%.0f) press=%ld hits=%zu\n",
+                    g_click_at, g_click_gap, resolved ? 1 : 0, mp.x, mp.y, g_press, g_hits.size());
+        if (resolved) {
+            lastProgress = now;
             down = (g_click_gap == 0);
             if (g_click_gap == 7) { g_click_at++; g_click_gap = 0; }
             else g_click_gap++;
+        } else if (lastProgress > 0.0 && now - lastProgress > 6.0) {
+            fprintf(stderr, "[点击] 「%s」6 秒未出现在命中区，序列作废\n",
+                    g_click_seq[(size_t)g_click_at].c_str());
+            fflush(stderr);
+            g_click_at = (int)g_click_seq.size();
         }
     } else if (kDown && !g_hits.empty()) {
         down = true;                    // 一直按着：稿子里这就是 :active，抬起才是一次点击
@@ -1592,10 +2905,27 @@ static void HandleInput(const ImGuiIO& io, double now) {
     if (down) {
         g_press = -1;
         for (size_t i = g_hits.size(); i-- > 0;)      // 从后往前：按钮登记在行之后，优先级天然高于行
-            if (Inside(g_hits[i], mp)) { g_press = g_hits[i].zid; break; }
-    } else if (!g_was_down) {
+            if (Inside(g_hits[i], mp)) {
+                g_press = g_hits[i].zid;
+                if (g_hits[i].act != HIT_SEARCHFIELD) g_r31_focus = 0;
+                break;
+            }
+        if (getenv("AGENTPING_INPUT_TRACE"))
+            fprintf(stderr, "[输入] 按下 mp=(%.0f,%.0f) press=%ld hits=%zu\n", mp.x, mp.y,
+                    g_press, g_hits.size());
+    } else if (!g_was_down && !g_drag_moved) {
         for (size_t i = g_hits.size(); i-- > 0;)      // 抬起也得落在同一颗上才算一次点击
-            if (g_hits[i].zid == g_press && Inside(g_hits[i], mp)) { DoAction(g_hits[i], mp); break; }
+            if (g_hits[i].zid == g_press && Inside(g_hits[i], mp)) {
+                if (g_hits[i].act == HIT_OPEN && g_hits[i].opt == 0 &&
+                    !(g_open_last_zid == g_hits[i].zid && now - g_open_last_at < 0.5)) {
+                    g_open_last_zid = g_hits[i].zid;   // 第一击：只记账，不动作（悬停高亮已给反馈）
+                    g_open_last_at = now;
+                } else {
+                    g_open_last_zid = -1;
+                    DoAction(g_hits[i], mp);
+                }
+                break;
+            }
         g_press = -1;
     }
     g_was_down = down;
@@ -1688,11 +3018,26 @@ static ImU32 GrpColor(int g) {
 
 // 逐码点量宽后贪心折行；超过 maxlines 就在最后一行补省略号。
 // （整串反复量会随文本长度平方增长，常驻面板吃不消，所以先拆成单字再累加。）
+/// 日韩文与全角标点按字断，拉丁词整体挪行——不然 "Notification" 会在中间被切两半。
+static bool IsCjkCp(unsigned int cp) {
+    return (cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xAC00 && cp <= 0xD7AF) ||
+           (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFF00 && cp <= 0xFFEF) ||
+           (cp >= 0x20000 && cp <= 0x2FA1F);
+}
+
 static std::vector<std::string> WrapLines(const std::string& s, float maxw, int locale, int tier, int maxlines) {
     auto cps = DecodeUTF8(s.c_str());
-    std::vector<std::string> out;
-    std::string line; float lw = 0; size_t used = 0;
-    for (size_t i = 0; i < cps.size(); i++) {
+    struct Tok { std::string s; float w; bool space; };
+    std::vector<Tok> toks;
+    bool pending_space = false;
+    std::string run;
+    auto flush_run = [&]() {
+        if (run.empty()) return;
+        toks.push_back({run, TextWidth(run, locale, tier), pending_space});
+        pending_space = false;
+        run.clear();
+    };
+    auto cp_at = [&](size_t i) {
         unsigned int cp = cps[i];
         char buf[5] = {}; size_t n = 0;
         if (cp < 0x80) buf[n++] = (char)cp;
@@ -1701,17 +3046,53 @@ static std::vector<std::string> WrapLines(const std::string& s, float maxw, int 
                                  buf[n++] = (char)(0x80 | (cp & 0x3F)); }
         else { buf[n++] = (char)(0xF0 | (cp >> 18)); buf[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
                buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F)); buf[n++] = (char)(0x80 | (cp & 0x3F)); }
-        std::string ch(buf, n);
-        float w = TextWidth(ch, locale, tier);
-        if (lw + w > maxw && !line.empty()) {
-            if ((int)out.size() == maxlines - 1) { used = i; break; }
-            out.push_back(line); line.clear(); lw = 0;
+        return std::string(buf, n);
+    };
+    for (size_t i = 0; i < cps.size(); i++) {
+        const unsigned int cp = cps[i];
+        if (cp == ' ') { flush_run(); pending_space = true; continue; }
+        if (IsCjkCp(cp)) {
+            flush_run();
+            const std::string ch = cp_at(i);
+            toks.push_back({ch, TextWidth(ch, locale, tier), pending_space});
+            pending_space = false;
+            continue;
         }
-        line += ch; lw += w; used = i + 1;
+        run += cp_at(i);
     }
-    if (line.empty()) { if (out.empty()) out.push_back(""); return out; }
-    if (used < cps.size()) out.push_back(ClipToWidth(line, maxw, locale, tier));
-    else out.push_back(line);
+    flush_run();
+
+    std::vector<std::string> out;
+    std::string line; float lw = 0;
+    const float spaceW = TextWidth(" ", locale, tier);
+    auto push = [&]() {
+        if (!line.empty()) out.push_back(line);
+        line.clear(); lw = 0;
+    };
+    for (size_t i = 0; i < toks.size(); i++) {
+        const Tok& t = toks[i];
+        const float need = (line.empty() ? 0.0f : (t.space ? spaceW : 0.0f)) + t.w;
+        if (!line.empty() && lw + need > maxw && (int)out.size() < maxlines - 1) {
+            push();
+            if ((int)out.size() == maxlines - 1) {   // 已到最后一行的位置：剩下的按行宽裁
+                std::string rest = t.s;
+                for (size_t j = i + 1; j < toks.size(); j++) rest += (toks[j].space ? " " : "") + toks[j].s;
+                out.push_back(ClipToWidth(rest, maxw, locale, tier));
+                return out;
+            }
+        }
+        if (line.empty() && t.w > maxw) {            // 单个词就比行宽还长：裁掉并另起一行
+            out.push_back(ClipToWidth(t.s, maxw, locale, tier));
+            if ((int)out.size() >= maxlines) return out;
+            continue;
+        }
+        if (line.empty()) { line = t.s; lw = t.w; }
+        else {
+            if (t.space) { line += ' '; lw += spaceW; }
+            line += t.s; lw += t.w;
+        }
+    }
+    push();
     if ((int)out.size() > maxlines) out.resize(maxlines);
     return out;
 }
@@ -1727,6 +3108,645 @@ static const float kTrackGap = 7.0f;                       // 进度槽行 mt-[7
 static const float kTrackH = kTierPx[T_TURNS] * 1.5f;      // 16.5：这一行最高的是「N 轮」（11 × body 1.5），5px 槽在它里面居中
 static const float kFailGap = 6.0f;                        // 失败原文行 mt-[6px]
 static const float kFailLine = kTierPx[T_FAIL] * 1.5f;     // 15.75：truncate 的 mono 10.5，行框按 body 1.5
+
+// ─────────────────────────────────────────────────────────────────────────────
+// r20 的接线／提问详情／授权详情／历史四屏。
+// 版式逐条对着 interaction.src.html：屏头 → 来源卡 → 正文 → 键值行 → 脚注 → 整宽按钮。
+// 只摆活数据：没有提问原文就整块不画、今天没有完成会话就不摆轨卡，不放「演示」占位。
+// ─────────────────────────────────────────────────────────────────────────────
+static const int kHistRow = 95;        // 历史翻页那条入口占 95：避开 90..94 的导航位
+static const int kHookRowBase = 300;   // 接线行占 300..305，与 SetCtl 的 0..7 不撞
+
+static const char* ViewTag(int v) {
+    switch (v) {
+        case 1: return "set";
+        case 2: return "setup";
+        case 3: return "det";
+        case 4: return "perm";
+        case 5: return "hist";
+        case 6: return "usage";
+        case 7: return "account";
+        case 8: return "tools";
+        default: return "pin";
+    }
+}
+static const char* ViewName(int v) {
+    switch (v) {
+        case 1: return "设置";
+        case 2: return "接线";
+        case 3: return "会话详情";
+        case 4: return "授权详情";
+        case 5: return "完成记录";
+        case 6: return "用量与额度";
+        case 7: return "工具用量";
+        case 8: return "全部工具";
+        default: return "会话总览";
+    }
+}
+
+/// 接线状态每 2 秒重探一次：读两份小配置，够便宜；点「写入」后立刻强制重探。
+/// 用 glfwGetTime 而不是 tn —— 取证时 AGENTPING_TN 会把动画钟冻住，冻住的钟不能拿来判缓存过期。
+static void RefreshHooks(bool force) {
+    const double now = glfwGetTime();
+    if (!force && g_hooks_at >= 0 && now - g_hooks_at < 2.0) return;
+    g_hooks = ap::probe_hooks();
+    g_hooks_at = now;
+}
+/// 有可修的接线问题才在导航那颗上点灯：脚本路径失效，或某家能写却还没接。
+static bool HookAttention() {
+    for (const auto& h : g_hooks) {
+        if (h.stale) return true;
+        if (h.supported && !h.installed && !h.occupied) return true;
+    }
+    return false;
+}
+static const ap::HookAgent* HookOf(const char* id) {
+    for (const auto& h : g_hooks) if (h.id == id) return &h;
+    return nullptr;
+}
+static const Tool* AgentTool(const char* id) {
+    for (const auto& t : g_pd.tools) if (t.id == id) return &t;
+    return nullptr;
+}
+static std::string TildePath(const std::string& p) {
+    const char* h = getenv("HOME");
+    if (h && *h) {
+        std::string home = h;
+        if (p.compare(0, home.size(), home) == 0) return "~" + p.substr(home.size());
+    }
+    return p;
+}
+static void Toast(const std::string& a, const std::string& b, bool go) {
+    g_toast = a;
+    g_toast_sub = b;
+    g_toast_at = glfwGetTime();
+    g_toast_go = go;
+    g_toast_icon = 3;
+}
+static void DrawCheck(ImDrawList* dl, float x, float cy, ImU32 col, float s = 1.0f) {
+    dl->AddLine(ImVec2(x - 4.5f * s, cy), ImVec2(x - 1.2f * s, cy + 3.2f * s), col, 1.5f * s);
+    dl->AddLine(ImVec2(x - 1.2f * s, cy + 3.2f * s), ImVec2(x + 5.0f * s, cy - 3.6f * s), col, 1.5f * s);
+}
+static void CopyGlyph(ImDrawList* dl, float x, float cy, ImU32 col, ImU32 bg) {
+    dl->AddRect(ImVec2(x, cy - 5.0f), ImVec2(x + 7.0f, cy + 3.0f), col, 1.5f, 0, 1.0f);
+    dl->AddRectFilled(ImVec2(x + 3.0f, cy - 3.0f), ImVec2(x + 10.5f, cy + 5.0f), bg, 1.5f);
+    dl->AddRect(ImVec2(x + 3.0f, cy - 3.0f), ImVec2(x + 10.5f, cy + 5.0f), col, 1.5f, 0, 1.0f);
+}
+/// 屏头：左上角微标签写这一屏叫什么，右沿一颗「返回」。四屏共用同一个落点。
+static float ScreenHeader(ImDrawList* dl, float L, float R, float cy, int loc, const char* titleKey) {
+    const float track = kTierPx[T_MLBL] * 0.16f;
+    const float pw = GhostPillW("back", loc);
+    DrawTextRun(dl, L, CellTop(cy, kSegH, kHead10Line, T_MLBL, loc),
+                UpAscii(T(titleKey, loc)), loc, kStIdle, T_MLBL, track);
+    GhostPill(dl, R - pw, cy, pw, loc, "back", Zid(loc, kNavRow, HIT_BACK, 0));
+    AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_BACK, kNavRow, 0, loc, T("back", loc), 0);
+    return cy + kSegH + kSectionGap;
+}
+static void StepBadge(ImDrawList* dl, float x, float cy, int num, bool done, int loc) {
+    const float r = 9.0f;
+    if (done) dl->AddCircleFilled(ImVec2(x + r, cy), r, WithA(kStDone, 30));
+    dl->AddCircle(ImVec2(x + r, cy), r - 0.5f, WithA(done ? kStDone : kStIdle, done ? 150 : 90), 20, 1.0f);
+    if (done) { DrawCheck(dl, x + r, cy, kStDone, 0.8f); return; }
+    char b[8]; snprintf(b, sizeof b, "%d", num);
+    DrawTextRun(dl, x + r - TextWidth(b, loc, T_MLBL) * 0.5f, TextMid(cy, T_MLBL, loc), b, loc, kStIdle, T_MLBL);
+}
+static float MiniBtnW(const char* key, int loc) {
+    return 2 * 7.0f + 2 * 1.0f + TextWidth(T(key, loc), loc, T_BTN);
+}
+static void MiniBtn(ImDrawList* dl, float x, float y, const char* key, int loc, long z) {
+    const float w = MiniBtnW(key, loc), h = 20.0f;
+    const float hv = TxPeek(z);
+    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h),
+                      MixA(WithA(kPrimary, 22), WithA(kPrimary, 40), hv), 5.0f);
+    dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f),
+                WithA(kPrimary, (int)(90 + 80 * hv)), 5.0f, 0, 1.0f);
+    const std::string lab = T(key, loc);
+    DrawTextRun(dl, x + (w - TextWidth(lab, loc, T_BTN)) * 0.5f, TextMid(y + h * 0.5f, T_BTN, loc),
+                lab, loc, kPrimary, T_BTN);
+}
+/// 一行「键 74pt ＋ 值折两行」，上沿一条 hairline。值来自磁盘，长度不设防。
+static float KvRow(ImDrawList* dl, float L, float R, float y, const char* key, const std::string& value,
+                   int loc, bool hairTop) {
+    const float keyW = 74.0f, padY = 7.0f, lineH = kTierPx[T_SM] * 1.5f;
+    // 空值整行不画：行高只有 14pt，硬画一条空键值会和下一条压在同一行（实测「项目」压在
+    // 「来源」上）。没有这个字段就当作没有这一行，不拿空串占位。
+    if (value.empty()) return 0.0f;
+    if (hairTop) dl->AddLine(ImVec2(L, y), ImVec2(R, y), kHair, 1.0f);
+    auto lines = WrapLines(value, R - (L + keyW), loc, T_SM, 2);
+    float yy = y + padY;
+    DrawTextRun(dl, L, TextTop(yy, lineH, T_SM, loc), T(key, loc), loc, kStIdle, T_SM);
+    for (const auto& ln : lines) {
+        DrawTextRun(dl, L + keyW, TextTop(yy, lineH, T_SM, loc), ln, loc, kFg, T_SM);
+        yy += lineH;
+    }
+    return (yy - y) + padY;
+}
+/// 详情两屏顶上的来源卡：头像、名字、项目·会话号，右沿一颗状态点＋状态词。
+static float SourceCard(ImDrawList* dl, float L, float R, float y, const UIRow& row,
+                        const char* statusKey, ImU32 statusCol, int loc) {
+    const float h = 44.0f;
+    dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + h), kSurface1, 10.0f);
+    dl->AddRect(ImVec2(L + 0.5f, y + 0.5f), ImVec2(R - 0.5f, y + h - 0.5f), kHair, 10.0f, 0, 1.0f);
+    const float acx = L + 12.0f + 11.0f, acy = y + h * 0.5f;
+    GradCircle(dl, ImVec2(acx, acy), 11.0f, WithA(row.hue, 66), WithA(row.hue, 20), WithA(row.hue, 140));
+    DrawTextRun(dl, acx - TextWidth(row.initial, loc, T_GLYPH9) * 0.5f, TextMid(acy, T_GLYPH9, loc),
+                row.initial, loc, row.hue, T_GLYPH9);
+    const std::string st = T(statusKey, loc);
+    const float stw = TextWidth(st, loc, T_MLBL) + 12.0f;
+    const float rx = R - 12.0f;
+    const float tx = acx + 11.0f + 8.0f;
+    const float nameLine = kTierPx[T_TOOL] * 1.5f, subLine = kTierPx[T_MICRO] * 1.5f;
+    DrawTextRun(dl, tx, y + 6.0f, ClipToWidth(row.agent, rx - stw - 8.0f - tx, loc, T_TOOL),
+                loc, kFg, T_TOOL);
+    std::string sub = row.project + (row.native_id.empty() ? "" : " · " + row.native_id);
+    DrawTextRun(dl, tx, y + 6.0f + nameLine, ClipToWidth(sub, rx - 8.0f - tx, loc, T_MICRO),
+                loc, kMutedFg, T_MICRO);
+    dl->AddCircleFilled(ImVec2(rx - stw + 3.0f, acy), 3.0f, statusCol);
+    DrawTextRun(dl, rx - stw + 9.0f, TextMid(acy, T_MLBL, loc), st, loc, statusCol, T_MLBL);
+    return h;
+}
+static float GoButton(ImDrawList* dl, float L, float R, float y, const std::string& text, int loc,
+                      const UIRow& row) {
+    const float h = 32.0f;
+    const long z = Zid(loc, 200, HIT_JUMP, 0);
+    const float hv = TxPeek(z);
+    dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + h),
+                      MixA(WithA(kPrimary, 22), WithA(kPrimary, 40), hv), 8.0f);
+    dl->AddRect(ImVec2(L + 0.5f, y + 0.5f), ImVec2(R - 0.5f, y + h - 0.5f),
+                WithA(kPrimary, (int)(90 + 80 * hv)), 8.0f, 0, 1.0f);
+    DrawTextRun(dl, (L + R - TextWidth(text, loc, T_LABEL)) * 0.5f, TextMid(y + h * 0.5f, T_LABEL, loc),
+                text, loc, kPrimary, T_LABEL);
+    AddHit(g_hits, L, y, R, y + h, HIT_JUMP, 200, 0, row, loc, text);
+    return h;
+}
+/// 历史轨上的时刻用本机时区，与面板其它「多久以前」同一把钟。
+static std::string ClockOf(double epoch) {
+    std::time_t t = (std::time_t)epoch;
+    std::tm tv;
+    localtime_r(&t, &tv);
+    char b[8];
+    snprintf(b, sizeof b, "%02d:%02d", tv.tm_hour, tv.tm_min);
+    return b;
+}
+
+// ── 接线屏 ──────────────────────────────────────────────────────────────────
+// 两步照 r20：第一步是只读检测（每条路径与今日会话数都来自这一轮 scan），
+// 第二步把 Notification 钩子写进 CLI 配置。写入由 hook_install.cpp 干，写前备份、原子落盘；
+// 面板这边的按钮只负责「叫他写」并把成败回执摆出来。
+static float drawSetup(ImDrawList* dl, float L, float R, float maxBot, int loc, float cy) {
+    const float track = kTierPx[T_MLBL] * 0.16f;
+    cy = ScreenHeader(dl, L, R, cy, loc, "nav_setup");
+
+    // 开场：一句它做什么，一句为什么要接两步（稿子的 hero 没有图，这里也不摆假图）
+    {
+        const float lineH = kTierPx[T_TITLE] * 1.5f;
+        DrawTextRun(dl, L, cy, T("setup_hero", loc), loc, kFg, T_TITLE);
+        cy += lineH + 4.0f;
+        for (const auto& ln : WrapLines(T("setup_lead", loc), R - L, loc, T_SM, 3)) {
+            DrawTextRun(dl, L, cy, ln, loc, kMutedFg, T_SM);
+            cy += kTierPx[T_SM] * 1.5f;
+        }
+        cy += 10.0f;
+    }
+
+    static const struct { const char* id; const char* path; } kDetect[] = {
+        {"qoder", "~/.qoder/projects"},
+        {"claude", "~/.claude/projects"},
+        {"codex", "~/.codex/sessions"},
+        {"zcode", "~/.zcode/cli/db/db.sqlite"},
+        {"workbuddy", "~/.workbuddy/workbuddy.db"},
+        {"opencode", "~/.local/share/opencode/opencode.db"},
+    };
+    int avail = 0;
+    for (const auto& d : kDetect) {
+        const Tool* t = AgentTool(d.id);
+        if (t && t->available) avail++;
+    }
+
+    auto stepHead = [&](const char* key, int num, const std::string& right, bool done) {
+        StepBadge(dl, L, cy + 9.0f, num, done, loc);
+        DrawTextRun(dl, L + 26.0f, CellTop(cy, 18.0f, kHead10Line, T_LABEL, loc),
+                    T(key, loc), loc, kFg, T_LABEL);
+        if (!right.empty())
+            DrawTextRight(dl, R, CellTop(cy, 18.0f, kHead10Line, T_MLBL, loc), right, loc, kStIdle, T_MLBL);
+        cy += 18.0f + 6.0f;
+    };
+    char av[32];
+    snprintf(av, sizeof av, T("setup_avail", loc), avail);
+    stepHead("setup_step1", 1, av, avail > 0);
+
+    for (int i = 0; i < (int)(sizeof kDetect / sizeof kDetect[0]); i++) {
+        const Tool* t = AgentTool(kDetect[i].id);
+        const std::string name = t ? t->name : kDetect[i].id;
+        const std::string initial = t ? t->initial : InitialOf(kDetect[i].id);
+        const ImU32 hue = t ? t->hue : kMutedFg;
+        const bool ok = t && t->available && !t->unreadable && !t->quiet;
+        std::string st;
+        ImU32 stc = kStIdle;
+        if (!t || !t->available) st = T("absent", loc);
+        else if (t->unreadable) { st = T("unreadable", loc); stc = WithA(kStFail, 210); }
+        else if (t->quiet) st = T("quiet_agents", loc);
+        else {
+            char nb[48];
+            snprintf(nb, sizeof nb, T("det_sess_n", loc), t->rows);
+            st = nb;
+            stc = kStDone;
+        }
+        if (i) dl->AddLine(ImVec2(L, cy), ImVec2(R, cy), kHair, 1.0f);
+        const float acx = L + 9.0f, acy = cy + 16.0f;
+        GradCircle(dl, ImVec2(acx, acy), 8.0f, WithA(hue, t ? 60 : 24), WithA(hue, t ? 18 : 8),
+                   WithA(hue, t ? 130 : 60));
+        DrawTextRun(dl, acx - TextWidth(initial, loc, T_GLYPH9) * 0.5f, TextMid(acy, T_GLYPH9, loc),
+                    initial, loc, t && t->available ? hue : kStIdle, T_GLYPH9);
+        const float stw = TextWidth(st, loc, T_MLBL) + (ok ? 10.0f : 0.0f);
+        const float sx = R - 8.0f - stw;
+        if (ok) DrawCheck(dl, sx + 2.0f, acy, kStDone, 0.7f);
+        DrawTextRun(dl, sx + (ok ? 10.0f : 0.0f), TextMid(acy, T_MLBL, loc), st, loc, stc, T_MLBL);
+        DrawTextRun(dl, L + 22.0f, cy + 3.0f, ClipToWidth(name, sx - 8.0f - (L + 22.0f), loc, T_TOOL),
+                    loc, kFg, T_TOOL);
+        DrawTextRun(dl, L + 22.0f, cy + 17.0f,
+                    MiddleClipPath(kDetect[i].path, sx - 8.0f - (L + 22.0f), loc, T_MICRO),
+                    loc, kMutedFg, T_MICRO);
+        cy += 32.0f;
+    }
+    cy += 12.0f;
+
+    stepHead("setup_step2", 2, "hook", false);
+    for (const auto& ln : WrapLines(T("setup_hooknote", loc), R - L, loc, T_SM, 4)) {
+        DrawTextRun(dl, L, cy, ln, loc, kMutedFg, T_SM);
+        cy += kTierPx[T_SM] * 1.5f;
+    }
+    cy += 6.0f;
+
+    static const char* kWrite[] = {"claude", "qoder", "codex"};
+    for (int i = 0; i < 3; i++) {
+        const ap::HookAgent* h = HookOf(kWrite[i]);
+        const Tool* t = AgentTool(kWrite[i]);
+        const std::string name = h ? h->name : (t ? t->name : kWrite[i]);
+        const std::string initial = t ? t->initial : InitialOf(kWrite[i]);
+        const ImU32 hue = t ? t->hue : HueFor(name);
+        ImU32 dot = kStIdle;
+        const char* stKey = "setup_none";
+        if (h && h->occupied) { dot = kStAwait; stKey = "setup_occupied"; }
+        else if (h && h->stale) { dot = kStAwait; stKey = "setup_stale"; }
+        else if (h && h->installed) { dot = kStDone; stKey = "setup_ok"; }
+        else if (h && !h->supported) { dot = kStIdle; stKey = "setup_manual"; }
+        const bool btn = h && h->supported;
+        const char* btnKey = (h && (h->installed || h->stale)) ? "setup_rewrite" : "setup_install";
+        const float bw = btn ? MiniBtnW(btnKey, loc) : 0.0f;
+        const float acx = L + 10.0f, acy = cy + 21.0f;
+        GradCircle(dl, ImVec2(acx, acy), 9.0f, WithA(hue, 60), WithA(hue, 18), WithA(hue, 130));
+        DrawTextRun(dl, acx - TextWidth(initial, loc, T_GLYPH9) * 0.5f, TextMid(acy, T_GLYPH9, loc),
+                    initial, loc, hue, T_GLYPH9);
+        const float rx = btn ? R - 8.0f - bw : R - 8.0f;   // 按钮左沿
+        const std::string st = T(stKey, loc);
+        // 状态列宽按「到按钮左边为止」算，不再钉死 80pt：意/德的状态词更长，
+        // 钉死会把「Script mancante」裁成半句。名字的右界让到状态左侧，免得两列压字。
+        const float stRight = btn ? rx - 6.0f : R - 8.0f;
+        const std::string stShown =
+            btn ? ClipToWidth(st, stRight - (L + 26.0f) - 8.0f, loc, T_MICRO) : st;
+        const float nameRight = btn ? stRight - TextWidth(stShown, loc, T_MICRO) - 10.0f : rx - 8.0f;
+        DrawTextRun(dl, L + 26.0f, cy + 5.0f, ClipToWidth(name, nameRight - (L + 26.0f), loc, T_TOOL),
+                    loc, kFg, T_TOOL);
+        DrawTextRun(dl, L + 26.0f, cy + 22.0f,
+                    MiddleClipPath(h ? TildePath(h->config) : std::string(), rx - 6.0f - (L + 26.0f), loc, T_MICRO),
+                    loc, kMutedFg, T_MICRO);
+        if (btn) {
+            const long z = Zid(loc, kHookRowBase + i, HIT_HOOKINST, 0);
+            DrawTextRight(dl, stRight, cy + 5.0f, stShown, loc, dot, T_MICRO);
+            MiniBtn(dl, R - 8.0f - bw, cy + 11.0f, btnKey, loc, z);
+            Hit hh;
+            hh.x0 = R - 8.0f - bw; hh.y0 = cy + 11.0f; hh.x1 = R - 8.0f; hh.y1 = cy + 31.0f;
+            hh.act = HIT_HOOKINST; hh.row = kHookRowBase + i; hh.zid = z;
+            hh.agent_id = kWrite[i]; hh.title = name; hh.label = T(btnKey, loc);
+            g_hits.push_back(hh);
+        } else {
+            dl->AddCircleFilled(ImVec2(R - 8.0f - TextWidth(st, loc, T_MLBL), cy + 5.0f + kHead10Line * 0.5f),
+                                3.0f, dot);
+            DrawTextRight(dl, R - 8.0f, cy + 5.0f, st, loc, dot, T_MICRO);
+        }
+        cy += 42.0f;
+    }
+    cy += 2.0f;
+    for (const auto& ln : WrapLines(T("setup_nohook", loc), R - L, loc, T_MICRO, 2)) {
+        DrawTextRun(dl, L, cy, ln, loc, kMicro, T_MICRO);
+        cy += kTierPx[T_MICRO] * 1.5f;
+    }
+    cy += 6.0f;
+
+    // 下面三块是解释性的，屏幕真矮时按「路径 → 备份说明 → 等待」的顺序让位，
+    // 不挤掉上面的检测与写入按钮（那两块才是这一屏要干的事）。
+    const float boxH = 46.0f;
+    if (cy + boxH <= maxBot) {
+        dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + boxH), kSurface2, 8.0f);
+        dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(R - 0.5f, cy + boxH - 0.5f), Over(kSurface2, kHair),
+                    8.0f, 0, 1.0f);
+        const float lx = L + 10.0f, ly = cy + 8.0f;
+        const char* labels[2] = {"setup_writer", "setup_inbox"};
+        const std::string vals[2] = {TildePath(ap::hook_script_path()), TildePath(ap::hook_inbox_dir())};
+        for (int i = 0; i < 2; i++) {
+            const std::string lab = T(labels[i], loc);
+            DrawTextRun(dl, lx, ly + i * 16.0f, lab, loc, kStIdle, T_MICRO);
+            const float px = lx + TextWidth(lab, loc, T_MICRO) + 8.0f;
+            DrawTextRun(dl, px, ly + i * 16.0f,
+                        MiddleClipPath(vals[i], R - 10.0f - px, loc, T_MICRO), loc, kFg, T_MICRO);
+        }
+        cy += boxH + 8.0f;
+    }
+    // 这句在德/意/日比中文长一截：一行放不下就折成两行，不裁半句。
+    const auto noteLines = WrapLines(T("setup_note", loc), R - L, loc, T_MICRO, 2);
+    const float noteH = kTierPx[T_MICRO] * 1.5f * (float)noteLines.size();
+    if (cy + noteH <= maxBot) {
+        for (const auto& ln : noteLines) {
+            DrawTextRun(dl, L, cy, ln, loc, kMicro, T_MICRO);
+            cy += kTierPx[T_MICRO] * 1.5f;
+        }
+        cy += 8.0f;
+    }
+    const float waitH = kTierPx[T_SM] * 1.5f * 2.0f + 8.0f;
+    if (cy + waitH <= maxBot) {
+        const double tn = glfwGetTime();
+        const float e = PingK(std::fmod(tn, 1.9), 1.9f, kEaseInOut);
+        dl->AddCircleFilled(ImVec2(L + 4.0f, cy + 7.0f), 3.0f, WithA(kPrimary, (int)(120 + 120 * e)));
+        dl->AddCircleFilled(ImVec2(L + 4.0f, cy + 7.0f), 6.0f, WithA(kPrimary, (int)(10 + 30 * e)));
+        for (const auto& ln : WrapLines(T("setup_wait", loc), R - (L + 16.0f), loc, T_SM, 2)) {
+            DrawTextRun(dl, L + 16.0f, cy, ln, loc, kMutedFg, T_SM);
+            cy += kTierPx[T_SM] * 1.5f;
+        }
+        cy += 8.0f;
+    }
+    return cy;
+}
+
+// ── 提问详情 ────────────────────────────────────────────────────────────────
+static float drawDetail(ImDrawList* dl, float L, float R, float maxBot, int loc, float cy) {
+    const float track = kTierPx[T_MLBL] * 0.16f;
+    cy = ScreenHeader(dl, L, R, cy, loc, "det_title");
+    const UIRow* r = SelectedRow(g_sel_key);
+    if (!r) {
+        DrawTextRun(dl, L, cy, T("det_empty", loc), loc, kMutedFg, T_SM);
+        return cy + kTierPx[T_SM] * 1.5f;
+    }
+    const bool asks = RowAsksQuestion(*r);
+    cy += SourceCard(dl, L, R, cy, *r, asks ? "in_wait" : "await_confirm",
+                     asks ? kStRun : kStAwait, loc) + 10.0f;
+
+    const std::string q = r->question.empty() ? r->title : r->question;
+    const float qLine = kTierPx[T_HERO] * 1.5f;
+    for (const auto& ln : WrapLines(q, R - L, loc, T_HERO, 5)) {
+        DrawTextRun(dl, L, cy, ln, loc, kFg, T_HERO);
+        cy += qLine;
+    }
+    cy += 8.0f;
+
+    if (!r->options.empty()) {
+        char ol[32];
+        snprintf(ol, sizeof ol, T("det_opt_count", loc), (int)r->options.size());
+        DrawTextRun(dl, L, cy, ol, loc, kStIdle, T_MLBL, track);
+        cy += kHead10Line + 6.0f;
+        for (size_t i = 0; i < r->options.size() && i < 4; i++) {
+            const long z = Zid(loc, (int)i, HIT_COPY, 0);
+            const float hv = TxPeek(z);
+            dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + 34.0f),
+                              MixA(kSurface1, kSurface2, hv), 8.0f);
+            dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(R - 0.5f, cy + 33.5f), kHair, 8.0f, 0, 1.0f);
+            dl->AddRectFilled(ImVec2(L + 8.0f, cy + 9.0f), ImVec2(L + 24.0f, cy + 25.0f), kSurface2, 4.0f);
+            char kn[8];
+            snprintf(kn, sizeof kn, "%d", (int)i + 1);
+            DrawTextRun(dl, L + 16.0f - TextWidth(kn, loc, T_MLBL) * 0.5f, TextMid(cy + 17.0f, T_MLBL, loc),
+                        kn, loc, kMutedFg, T_MLBL);
+            DrawTextRun(dl, L + 32.0f, TextMid(cy + 17.0f, T_TOOL, loc),
+                        ClipToWidth(r->options[i], R - 32.0f - (L + 32.0f) - 20.0f, loc, T_TOOL),
+                        loc, kFg, T_TOOL);
+            CopyGlyph(dl, R - 20.0f, cy + 17.0f, WithA(kFg, (int)(110 + 100 * hv)), kSurface1);
+            AddHit(g_hits, L, cy, R, cy + 34.0f, HIT_COPY, (int)i, 0, *r, loc, r->options[i]);
+            g_hits.back().title = r->project;
+            cy += 34.0f + 6.0f;
+        }
+        cy += 2.0f;
+    }
+
+    cy += KvRow(dl, L, R, cy, "det_session",
+                r->native_id.empty() ? r->key : r->native_id, loc, true);
+    cy += KvRow(dl, L, R, cy, "det_wait", Ago(r->age, loc), loc, false);
+    cy += KvRow(dl, L, R, cy, "det_source", T("det_source_val", loc), loc, false);
+    cy += 8.0f;
+
+    for (const auto& ln : WrapLines(T("det_no_submit", loc), R - L, loc, T_SM, 2)) {
+        DrawTextRun(dl, L, cy, ln, loc, kMutedFg, T_SM);
+        cy += kTierPx[T_SM] * 1.5f;
+    }
+    cy += 8.0f;
+
+    char jb[192];
+    snprintf(jb, sizeof jb, T("jump_project", loc), r->project.c_str());
+    cy += GoButton(dl, L, R, cy, jb, loc, *r);
+    return cy;
+}
+
+// ── 授权详情 ────────────────────────────────────────────────────────────────
+static float drawPermission(ImDrawList* dl, float L, float R, float maxBot, int loc, float cy) {
+    cy = ScreenHeader(dl, L, R, cy, loc, "perm_title");
+    const UIRow* r = SelectedRow(g_sel_key);
+    if (!r) {
+        DrawTextRun(dl, L, cy, T("perm_empty", loc), loc, kMutedFg, T_SM);
+        return cy + kTierPx[T_SM] * 1.5f;
+    }
+    cy += SourceCard(dl, L, R, cy, *r, "perm_status", kStFail, loc) + 10.0f;
+
+    DrawTextRun(dl, L, cy, T("perm_message", loc), loc, kStIdle, T_MLBL,
+                kTierPx[T_MLBL] * 0.16f);
+    cy += kHead10Line + 6.0f;
+    const std::string msg = r->question.empty() ? std::string("\xe2\x80\x94") : r->question;
+    auto mlines = WrapLines(msg, R - L - 24.0f, loc, T_FAIL, 4);
+    const float mlineH = kTierPx[T_FAIL] * 1.5f;
+    const float blockH = mlines.size() * mlineH + 2 * 10.0f;
+    dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + blockH), kSurface2, 8.0f);
+    dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(R - 0.5f, cy + blockH - 0.5f), Over(kSurface2, kHair),
+                8.0f, 0, 1.0f);
+    DrawTextRun(dl, L + 10.0f, cy + 10.0f, "$", loc, kStRun, T_FAIL);
+    for (size_t i = 0; i < mlines.size(); i++)
+        DrawTextRun(dl, L + 22.0f, cy + 10.0f + i * mlineH, mlines[i], loc, kFg, T_FAIL);
+    cy += blockH + 10.0f;
+
+    std::string tool = r->tool.empty() ? std::string("\xe2\x80\x94") : r->tool;
+    cy += KvRow(dl, L, R, cy, "perm_tool", tool, loc, true);
+    cy += KvRow(dl, L, R, cy, "det_wait", Ago(r->age, loc), loc, false);
+    cy += KvRow(dl, L, R, cy, "perm_project", r->project, loc, false);
+    cy += KvRow(dl, L, R, cy, "det_source", T("det_source_val", loc), loc, false);
+    cy += 8.0f;
+
+    for (const auto& ln : WrapLines(T("perm_hint", loc), R - L, loc, T_SM, 3)) {
+        DrawTextRun(dl, L, cy, ln, loc, kMutedFg, T_SM);
+        cy += kTierPx[T_SM] * 1.5f;
+    }
+    cy += 8.0f;
+
+    char jb[192];
+    snprintf(jb, sizeof jb, T("jump_project", loc), r->project.c_str());
+    cy += GoButton(dl, L, R, cy, jb, loc, *r);
+    return cy;
+}
+
+// ── 历史 ────────────────────────────────────────────────────────────────────
+static float drawHistory(ImDrawList* dl, float L, float R, float maxBot, int loc, float cy) {
+    const float track = kTierPx[T_MLBL] * 0.16f;
+    cy = ScreenHeader(dl, L, R, cy, loc, "nav_history");
+
+    std::vector<const UIRow*> done;
+    int turns = 0;
+    for (const auto& r : g_pd.rows) {
+        if (GroupOf(r.state) != G_DONE) continue;
+        done.push_back(&r);
+        turns += r.turns;
+    }
+    if (done.empty()) {
+        DrawTextRun(dl, L, cy, T("hist_empty", loc), loc, kMutedFg, T_SM);
+        return cy + kTierPx[T_SM] * 1.5f;
+    }
+
+    // 轨卡：今天这一段的完成量与时刻分布。数字是这一轮真数出来的行，不是估的。
+    // 没有轮次可报时这张卡不长到 90pt——上面只留一行会话数，下面直接接时间轴。
+    const float railH = turns > 0 ? 90.0f : 64.0f;
+    dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + railH), kSurface1, 12.0f);
+    dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(R - 0.5f, cy + railH - 0.5f), kHair, 12.0f, 0, 1.0f);
+    char tb[24];
+    char sb[64];
+    snprintf(sb, sizeof sb, T("hist_sum", loc), (int)done.size());
+    if (turns > 0) {
+        snprintf(tb, sizeof tb, "%d", turns);
+        DrawTextRun(dl, L + 14.0f, cy + 10.0f, tb, loc, kFg, T_NUM, -kTierPx[T_NUM] * 0.03f);
+        DrawTextRun(dl, L + 14.0f + TextWidth(tb, loc, T_NUM, -kTierPx[T_NUM] * 0.03f) + 6.0f,
+                    TextMid(cy + 26.0f, T_SM, loc), T("turns", loc), loc, kMutedFg, T_SM);
+        DrawTextRun(dl, L + 14.0f, cy + 42.0f, sb, loc, kMutedFg, T_SM);
+    } else {
+        // 一行轮次都没数出来时（WorkBuddy / ZCode 的日志没有 step-finish），
+        // 大数字位不摆 0：那是「没这个字段」，不是「零轮」。只报真有的会话数。
+        DrawTextRun(dl, L + 14.0f, cy + 10.0f, sb, loc, kMutedFg, T_SM);
+    }
+
+    const float ax0 = L + 14.0f, ax1 = R - 14.0f, aby = cy + (turns > 0 ? 68.0f : 42.0f);
+    dl->AddLine(ImVec2(ax0, aby), ImVec2(ax1, aby), kHair, 1.0f);
+    const double ws = g_pd.window_start, now = g_pd.now > 0 ? g_pd.now : std::time(nullptr);
+    const double span = now > ws ? now - ws : 1.0;
+    for (int k = 0; k < 3; k++) {
+        const float f = k * 0.5f;
+        const float x = ax0 + (ax1 - ax0) * f;
+        dl->AddLine(ImVec2(x, aby), ImVec2(x, aby + 4.0f), kHair, 1.0f);
+        const std::string clk = ClockOf(ws + span * f);
+        if (k == 0) DrawTextRun(dl, x, aby + 5.0f, clk, loc, kMicro, T_MICRO);
+        else if (k == 2) DrawTextRight(dl, x, aby + 5.0f, clk, loc, kMicro, T_MICRO);
+        else DrawTextRun(dl, x - TextWidth(clk, loc, T_MICRO) * 0.5f, aby + 5.0f, clk, loc, kMicro, T_MICRO);
+    }
+    for (size_t i = 0; i < done.size(); i++) {
+        const double at = now - done[i]->age;
+        float f = (float)((at - ws) / span);
+        if (f < 0) f = 0;
+        if (f > 1) f = 1;
+        const float x = ax0 + (ax1 - ax0) * f;
+        const float y = aby - 3.0f - (float)(i % 3) * 2.5f;
+        dl->AddCircleFilled(ImVec2(x, y), 5.0f, WithA(kStDone, 40));
+        dl->AddCircleFilled(ImVec2(x, y), 2.5f, kStDone);
+    }
+    cy += railH + 12.0f;
+
+    // 节头：「今日完成 · N」。翻过页时右沿常驻一条「回到最新」，翻页永远有出口。
+    {
+        std::string lab = UpAscii(T("hist_done", loc));
+        DrawTextRun(dl, L, cy, lab, loc, kStIdle, T_MLBL, track);
+        char nb[16];
+        snprintf(nb, sizeof nb, "%d", (int)done.size());
+        DrawTextRun(dl, L + TextWidth(lab, loc, T_MLBL, track) + 8.0f, cy, nb, loc, kMutedFg, T_MLBL);
+        if (g_hist_page > 0) {
+            const float pw = GhostPillW("hist_latest", loc);
+            const long z = Zid(loc, kHistRow, HIT_HISTMORE, 1);
+            GhostPill(dl, R - pw, cy - 4.0f, pw, loc, "hist_latest", z);
+            AddHit(g_hits, R - pw, cy - 4.0f, R, cy - 4.0f + kSegH, HIT_HISTMORE, kHistRow, 1, loc,
+                   T("hist_latest", loc), 0);
+        }
+        cy += kHead10Line + 6.0f;
+    }
+
+    // 页宽按预算算：先留翻页那一行，再尽量多摆；一行都摆不下就摆一行。
+    const float rowH = 34.0f, pagerH = 24.0f;
+    if (g_hist_page >= (int)done.size()) g_hist_page = 0;
+    int shown = (int)((maxBot - cy) / rowH);
+    if (shown < 1) shown = 1;
+    if (shown > (int)done.size() - g_hist_page) shown = (int)done.size() - g_hist_page;
+    bool more = g_hist_page + shown < (int)done.size();
+    if (more && cy + shown * rowH + pagerH > maxBot) shown = std::max(1, shown - 1);
+    more = g_hist_page + shown < (int)done.size();
+    g_hist_shown = shown;
+
+    for (int i = 0; i < shown; i++) {
+        const UIRow& r = *done[g_hist_page + i];
+        if (i) dl->AddLine(ImVec2(L, cy), ImVec2(R, cy), kHair, 1.0f);
+        const float ccx = L + 8.0f, ccy = cy + 17.0f;
+        dl->AddCircleFilled(ImVec2(ccx, ccy), 7.0f, WithA(kStDone, 34));
+        DrawCheck(dl, ccx, ccy, kStDone, 0.72f);
+        const float tx = L + 22.0f, rx = R - 8.0f;
+        DrawTextRun(dl, tx, cy + 4.0f, ClipToWidth(r.project, rx - 46.0f - tx, loc, T_TOOL),
+                    loc, kFg, T_TOOL);
+        DrawTextRun(dl, tx, cy + 20.0f, ClipToWidth(r.agent, rx - 46.0f - tx, loc, T_MICRO),
+                    loc, kMutedFg, T_MICRO);
+        DrawTextRight(dl, rx, cy + 4.0f, ClockOf(g_pd.now - r.age), loc, kTime, T_MICRO);
+        // 轮次是采集层真数出来的事件数；WorkBuddy / 部分旧 Qoder 会话没有这一步，
+        // 0 不是「零轮」而是「没这个字段」——空格子比一个会被读成零的 0 诚实。
+        if (r.turns > 0) {
+            char rb[32];
+            snprintf(rb, sizeof rb, "%d %s", r.turns, T("turns", loc));
+            DrawTextRight(dl, rx, cy + 20.0f, rb, loc, kMutedFg, T_MICRO);
+        }
+        AddHit(g_hits, L, cy, R, cy + rowH, HIT_OPEN, (int)(g_hist_page + i), 0, r, loc, std::string());
+        cy += rowH;
+    }
+    if (more) {
+        char mb[48];
+        snprintf(mb, sizeof mb, T("more", loc), (int)(done.size() - g_hist_page - shown));
+        const long z = Zid(loc, kHistRow, HIT_HISTMORE, 0);
+        dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(R - 0.5f, cy + pagerH - 0.5f),
+                    MixA(kHair, WithA(kFg, 90), TxPeek(z)), 6.0f, 0, 1.0f);
+        DrawTextRun(dl, (L + R - TextWidth(mb, loc, T_BTN)) * 0.5f, TextMid(cy + pagerH * 0.5f, T_BTN, loc),
+                    mb, loc, kMutedFg, T_BTN);
+        AddHit(g_hits, L, cy, R, cy + pagerH, HIT_HISTMORE, kHistRow, 0, loc, mb, 0);
+        cy += pagerH;
+    }
+    return cy;
+}
+
+/// 回执浮层：画在卡内底部、内容之上，2.5 秒后自己消失。它不登记命中区，
+/// 所以「它挡着的那颗按钮」在回执期间点不到——这是有意的，回执本来就是「刚发生了什么」。
+static void DrawToast(ImDrawList* dl, float L, float R, float panelBot, int loc) {
+    if (g_toast.empty() || glfwGetTime() - g_toast_at > 2.5) return;
+    const float maxw = R - 22.0f - L - 8.0f;
+    // 第二行常是一条备份路径：一行放不下就把时间戳截掉，而那正是要拿来还原的那半截。
+    // 调用方可以在 '/' 处显式换行；其余部分按词换行，仍放不下才退回裁切。
+    std::vector<std::string> sub;
+    if (!g_toast_sub.empty()) {
+        std::size_t i = 0;
+        while (i <= g_toast_sub.size() && (int)sub.size() < 3) {
+            const std::size_t e = g_toast_sub.find('\n', i);
+            const std::string part = g_toast_sub.substr(i, e == std::string::npos ? std::string::npos : e - i);
+            for (const auto& ln : WrapLines(part, maxw, loc, T_MICRO, 1)) sub.push_back(ln);
+            if (e == std::string::npos) break;
+            i = e + 1;
+        }
+    }
+    const float h = sub.empty() ? 30.0f : (22.0f + kTierPx[T_MICRO] * 1.5f * (float)sub.size() + 6.0f);
+    const float y = panelBot - kPadBottom - h;
+    dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + h), kSurface2, 9.0f);
+    dl->AddRect(ImVec2(L + 0.5f, y + 0.5f), ImVec2(R - 0.5f, y + h - 0.5f), WithA(kPrimary, 70),
+                9.0f, 0, 1.0f);
+    dl->AddCircleFilled(ImVec2(L + 13.0f, y + h * 0.5f), 2.5f, kPrimary);
+    DrawTextRun(dl, L + 22.0f, TextTop(y + 6.0f, kTierPx[T_LABEL] * 1.5f, T_LABEL, loc),
+                ClipToWidth(g_toast, maxw, loc, T_LABEL), loc, kFg, T_LABEL);
+    float sy = y + 22.0f;
+    for (const auto& ln : sub) {
+        DrawTextRun(dl, L + 22.0f, TextTop(sy, kTierPx[T_MICRO] * 1.5f, T_MICRO, loc),
+                    ln, loc, kMutedFg, T_MICRO);
+        sy += kTierPx[T_MICRO] * 1.5f;
+    }
+}
 
 static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UIRow& row,
                            int loc, double tn, bool draw, int idx) {
@@ -1830,16 +3850,20 @@ static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UI
     // 第一行右侧：await 行是「已读」按钮 + 等待确认胶囊，其余只有状态胶囊。
     // 先量右侧这一坨的实宽，标题才知道自己剩多少（否则长标题会压在胶囊下）。
     // 宽度都要带上 1px 边框：稿子是 border-box，px-[6px] 之外还有左右各 1pt 的边。
-    std::string plab = T(is_await ? "await_confirm" : StateKey(row.state), loc);
+    const bool asks_q = RowAsksQuestion(row);
+    std::string plab = T(is_await ? (asks_q ? "needs_you" : "await_confirm")
+                                  : StateKey(row.state), loc);
     float pillW = 7 + 5 + 4 + TextWidth(plab, loc, T_PILL) + 7;
     std::string readlab = (is_await && !mute) ? T("mark_read", loc) : "";
     float readW = readlab.empty() ? 0 : 7 + TextWidth(readlab, loc, T_BTN) + 7;
     float reserved = pillW + (readW ? 6.0f + readW : 0);
     // 稿子里 await 行的标题就是「AskUserQuestion 需要你确认」——工具名 + 这句话，
     // 不是转录本的最后一句人话（那句在引用块里才是它的位子）。hook 没给工具名就退回原标题。
+    // 带候选选项的那类不是「确认」而是「回答」，两句话不能混用。
     std::string ttl = row.title;
     if (is_await && !row.tool.empty()) {
-        ttl = row.tool; ttl += ' '; ttl += T("ask_confirm", loc);
+        ttl = row.tool; ttl += ' ';
+        ttl += T(asks_q ? "ask_answer" : "ask_confirm", loc);
     }
     float ty = TextTop(ry + kRowPadY, headH, T_TITLE, loc);
     // isNew 的 4px 辉光点：稿子是这一行的第一个 flex 子（gap-1.5＝6px），
@@ -2014,6 +4038,13 @@ static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UI
     return h;
 }
 
+// r20 版式：六屏都由这一个文件里的 R20Draw 出图，旧的一套 draw* 已不再接线。
+#include "r20_views.inc"
+static float g_panelH = 850.0f;   // 内容真正用到的高度：窗口收放跟着它走
+// r31 版式（R31 依赖 kRPi/RCullHits/RToast，必须在 r20 之后 include）：
+// 会话与信息架构六屏（0 总览 / 3 详情 / 5 历史 / 6 用量 / 7 账户 / 8 工具）。
+#include "r31_views.inc"
+
 static void RebuildPanel(const ap::Snapshot& s) {
     PanelData pd;
     const double now = s.scanned_at > 0 ? s.scanned_at : std::time(nullptr);
@@ -2028,7 +4059,11 @@ static void RebuildPanel(const ap::Snapshot& s) {
             has_today = has_today || (se.last_activity >= s.window_start);
             UIRow row;
             row.state = se.state;
-            row.age = now - se.last_activity;
+            // 「等你多久」问的是这次停下来的时长。hook 说得出就按信号时刻算；
+            // 否则退回日志最后一条的时间。
+            const double since = (se.state == ap::ST_AWAIT && se.await_since > 0)
+                                     ? se.await_since : se.last_activity;
+            row.age = now - since;
             row.is_new = row.age < 900;            // 15 分钟内有过动静＝稿子的 isNew
             row.inferred = se.inferred_wait;
             row.title = se.title;
@@ -2050,7 +4085,24 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.queue_pos = se.queue_pos;
             row.question = se.question;
             row.options = se.options;
+            row.option_desc = se.option_desc;
             row.tool = se.tool;
+            // 采集层已经保证 first_activity 落在今天之内；这里再扣一次「最后有动静」，
+            // 时长不为负。没有命令原文就留空，`.live` 那一行整行不画。
+            row.span_sec = (se.first_activity > 0 && se.last_activity > se.first_activity)
+                               ? se.last_activity - se.first_activity : 0.0;
+            row.last_cmd = se.last_cmd;
+            row.trigger = se.trigger;
+            row.tokens = se.tokens;
+            row.credits = se.credits;
+            row.has_tokens = se.usage.total() > 0;
+            row.has_credits = se.credits > 0;
+            row.model = se.model;
+            row.cwd = se.cwd;
+            row.children = se.children;
+            row.at = se.last_activity;
+            row.unseen = GroupOf(row.state) == G_DONE &&
+                         (long long)row.at > g_cfg.seen_until;
             if (se.state == ap::ST_FAILED) row.detail = se.error_text;   // 出错才有原文可引
             pd.rows.push_back(std::move(row));
             shown++;
@@ -2063,6 +4115,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
         // 设置屏那一行：把上面三条判据原样带过去，不再另算一套（否则同一个采集器在
         // 两块屏上一块说「本机没有」、另一块说「今天没活动」）。
         Tool tl;
+        tl.id = ag.id;
         tl.name = ag.name;
         tl.initial = InitialOf(ag.name);
         tl.available = ag.available;
@@ -2070,15 +4123,33 @@ static void RebuildPanel(const ap::Snapshot& s) {
         tl.quiet = ag.available && ag.scan_error.empty() && !has_today;
         tl.rows = shown;
         tl.hue = HueFor(ag.name);
+        tl.usage = ag.usage;
+        tl.credits = 0;
+        for (const auto& se : ag.sessions) tl.credits += se.credits;
+        tl.has_credits = tl.credits > 0;
+        tl.models = ag.models;
+        tl.hourly = ag.hourly;
+        tl.quota = ag.quota;
+        // 两种客户端形态是来源自己决定的，不是按名字猜的：ZCode / WorkBuddy 是 IDE 内的
+        // 会话，其余是命令行。屏上那个 client 小签只念这一件事。
+        tl.client = (ag.id == "zcode" || ag.id == "workbuddy") ? "IDE" : "CLI";
         pd.tools.push_back(std::move(tl));
     }
     pd.hook_live = s.hook_live;
+    pd.today_tokens = s.today_tokens;
+    pd.has_today_tokens = s.today_tokens > 0;
     // 组内按「多久以前」升序：稿子 done 组就是 4 分钟前排在 14 小时前前面
     std::sort(pd.rows.begin(), pd.rows.end(), [](const UIRow& a, const UIRow& b) {
         int ga = GroupOf(a.state), gb = GroupOf(b.state);
         if (ga != gb) return ga < gb;
         return a.age < b.age;
     });
+    // 总览顶部那张「在跑」卡：稿子只摆一个正在跑的会话。真机上可能同时有几路在跑，
+    // 取「最近有动静」的那一条当主角，其余在「其它在跑」里逐行列出——不合并、不丢行。
+    for (size_t i = 0; i < pd.rows.size(); i++) {
+        const int g = GroupOf(pd.rows[i].state);
+        if (g == G_RUN || g == G_QUEUE) { pd.hero = (int)i; break; }   // 已按 age 升序
+    }
     // 顶栏两个数按稿子口径：needs you = 需要你介入 + 失败中断（稿子样本里没有失败行，
     // 所以它的公式看不见这一档；把失败算成 0 会让面板比真相慢），running = 运行中 + 排队中。
     for (const auto& r : pd.rows) {
@@ -2091,6 +4162,14 @@ static void RebuildPanel(const ap::Snapshot& s) {
     // 今日用量是整轮口径（scan_all 已汇总），不由逐项拼出来
     pd.credits = s.today_credits;
     pd.yday_credits = s.yesterday_credits;
+    pd.now = now;
+    pd.window_start = s.window_start;
+    // 每个工具「在等」几条：R31 的工具列表要摆这一格，判据与总览队列同源。
+    for (const auto& r : pd.rows) {
+        if (GroupOf(r.state) != G_AWAIT && GroupOf(r.state) != G_FAIL) continue;
+        for (auto& t : pd.tools)
+            if (t.id == r.agent_id) { t.wait_n++; break; }
+    }
 
     g_pd = std::move(pd);
     // 状态项上摆三个数：菜单栏那一行放不下词，数字只能按「介入 · 运行 · 失败」的固定顺序排。
@@ -2207,27 +4286,35 @@ static void RunAlertRound(const ap::Snapshot& s) {
     g_alert_first = false;
 }
 
-static float g_panelH = 0.0f;   // drawPanel 每帧回填：内容真正用到的高度
+// drawPanel 每帧回填：内容真正用到的高度（R31 自适应收放；定义在 include 前供 r31 用）
 // 能摆多高的预算。必须与「窗口现在多高」解耦：窗口是按内容收的，
 // 若预算取当前窗口高，收窗→能摆更多行→再收窗会形成正反馈，每轮重扫只走一步，
 // 实拍就会拍到「内容 340pt / 窗口 285pt」这种半收敛态（实测踩过）。
-static float g_budgetH = 760.0f;
+static float g_budgetH = 850.0f;
 
-/// 窗口该收到多高：内容量出来的 g_panelH，但不许高过可视预算。
-/// 收窗和「摆稳了没」两处必须走同一个式子——实测内容 1034.5pt、预算 1034pt 时，
-/// 一边四舍五入成 1035、一边被压成 1034，出图门永远等不到两者相等，进程挂死不出图。
+/// 窗口该收到多高：r20 是固定 640 高的浮层，内容超出走屏内滚动；只有屏幕放不下时才压到预算。
 static int WantedWindowH() {
-    int want = (int)(g_panelH + 0.5f);
-    int cap = (int)(g_budgetH + 0.5f);
-    return want > cap ? cap : want;
+    // R31 的面板高跟内容走：几行会话就收成几行高（下不再挂一大截空白），
+    // 上限仍是屏预算与 850。r20 三屏画不满 640，由各自 Draw 返回值兜住。
+    float h = g_panelH;
+    if (h < 400.0f) h = 400.0f;
+    if (h > g_budgetH) h = g_budgetH;
+    if (h > kCanvasH) h = (float)kCanvasH;
+    return (int)(h + 0.5f);
 }
 
-/// 两屏的宽度不同：pin 是 #win{width:340px}，settings 是 #win{width:420px}。
-/// 换屏必须连着改窗口宽，否则 420 那一屏的内容会被 340 的窗口框裁掉右沿 80pt。
-static int WantedWindowW() { return g_view == 1 ? kSetW : kPanelW; }
+/// r20 六屏同宽：都是 340pt 的浮层（设置也是同一张卡，不再单独 420）。
+static int WantedWindowW() { return kPanelW; }
 
 static void TogglePanel(void*) {
     if (!g_win) return;
+    // 出图轮不许收面板：收了主循环就跳过 HandleInput，AGENTPING_CLICK 序列冻在半路，
+    // 窗口永远等不到那张 PPM。真点菜单栏那颗只打一行账，面板留在屏上直到拍完自收。
+    if (g_shot_to) {
+        printf("[面板] 出图轮忽略状态项切换\n");
+        fflush(stdout);
+        return;
+    }
     g_panelVisible = !g_panelVisible;
     // 打这一行是为了让总线点击可被外部核对：宿主调 Activate 只能证明「回包没报错」，
     // 证明不了面板真的动了。取证轮比对 app.log 里这行的出现次数与点击次数。
@@ -2237,16 +4324,262 @@ static void TogglePanel(void*) {
     else glfwHideWindow(g_win);
 }
 
+/// 离屏探针专用的样例快照（AGENTPING_FIXTURE=1）。
+/// 只为一件事：本机今天恰好没有待回答/待授权时，详情两屏仍能对版式。
+/// 窗口路径不读它；探针标题会写明「样例数据」，产物不会被当成实拍。
+static void LoadProbeFixture() {
+    PanelData pd;
+    struct tm tm0;
+    time_t seed = std::time(nullptr);
+    localtime_r(&seed, &tm0);
+    tm0.tm_hour = 0; tm0.tm_min = 0; tm0.tm_sec = 0;
+    const double midnight = (double)mktime(&tm0);
+    // 稿子的快照时刻是 23:35；钉住它，「多久以前」与历史刻度才能逐屏对得上。
+    const double now = midnight + 23 * 3600.0 + 35 * 60.0;
+    auto at = [&](int hh, int mm) { return now - (midnight + hh * 3600.0 + mm * 60.0); };
+
+    auto row = [&](ap::State st, const char* proj, const char* agent, const char* aid,
+                   const char* sess, double age, int turns) {
+        UIRow r;
+        r.state = st;
+        r.project = proj;
+        r.agent = agent;
+        r.agent_id = aid;
+        r.native_id = sess;
+        r.key = std::string(aid) + ":" + sess;
+        r.initial = InitialOf(agent);
+        r.hue = HueFor(agent);
+        r.age = age;
+        r.turns = turns;
+        r.inferred = false;
+        pd.rows.push_back(std::move(r));
+        return &pd.rows.back();
+    };
+
+    UIRow* live = row(ap::ST_WORKING, "image-tools", "Qoder CLI", "qoder", "a1b2c3d4", 12.0, 77);
+    live->title = "【样例】多 Agent 监控工具调研";   // R31RowName 标题优先
+    live->span_sec = 4 * 3600.0 + 12 * 60.0;      // .live「连续 4h 12m」
+    live->last_cmd = "rg -n \"safe-delete\" src/"; // .live 的 `$ cmd`
+    live->children = {                             // 任务下挂着的子代理对话（展开用样例）
+        {"c-a1", "你是调研员。收集三款同类产品的定价页与收费方式。", true, now - 300},
+        {"c-a2", "你是 UI 调研员。只读它们的设置屏，列出可借鉴的三处。", false, now - 4320},
+        {"c-a3", "你是数据整理员。把上面的结论合成一张对比表。", false, now - 7800},
+    };
+    (void)live;
+
+    UIRow* q1 = row(ap::ST_AWAIT, "budget-app", "Qoder CLI", "qoder", "a1", at(22, 46), 0);
+    q1->children = {
+        {"c-b1", "你是产品调研员。读这三款产品的公开文档，找出各自的限制。", false, now - 900},
+        {"c-b2", "你是技术调研员。对比三种本地存储方案的迁移成本。", false, now - 1500},
+    };
+    q1->question = "这批改动要一起提交吗？还是先拆成两笔？";
+    q1->options = {"一起提交", "拆成两笔", "先不提交"};
+    q1->option_desc = {"一次进主干", "按功能与测试分开", "留在工作区等明天"};
+
+    UIRow* q2 = row(ap::ST_AWAIT, "image-tools", "Qoder CLI", "qoder", "b2", at(8, 35), 0);
+    q2->question = "这个模块的旧版本还挂在别处，怎么处理？";
+    q2->options = {"先搬再删", "只留新的", "两个都停"};
+    q2->option_desc = {"补齐后再移除", "旧的继续挂着", "等下周再说"};
+
+    UIRow* p1 = row(ap::ST_AWAIT, "image-tools", "Qoder CLI", "qoder", "c3", at(22, 28), 0);
+    p1->tool = "Bash";
+    p1->question = "rm '/tmp_cache.txt'";
+    p1->trigger = "Dangerous rm operation detected";
+    UIRow* p2 = row(ap::ST_AWAIT, "budget-app", "Qoder CLI", "qoder", "d4", at(14, 35), 0);
+    p2->tool = "Bash";
+    p2->question = "cd /Users/you/projects/mobile-app";
+    p2->trigger = "Allow Bash to run";
+    UIRow* p3 = row(ap::ST_AWAIT, "photo-sorter", "Claude Code", "claude", "e5", at(10, 35), 0);
+    p3->tool = "Write";
+    p3->question = "write ~/…/app-icon.svg";
+    p3->trigger = "Writing to paths outside the workspace";
+    (void)p1; (void)p2; (void)p3;
+
+    const struct { const char* proj; const char* agent; const char* aid; const char* sess;
+                   int hh, mm; int turns; } kDone[] = {
+        {"budget-app", "Qoder CLI", "qoder", "h1", 22, 57, 331},
+        {"kitchen-timer", "Claude Code", "claude", "h2", 21, 17, 16},
+        {"image-tools", "Qoder CLI", "qoder", "h3", 19, 3, 28},
+        {"poetry-site", "Claude Code", "claude", "h4", 16, 48, 18},
+        {"photo-sorter", "Claude Code", "claude", "h5", 14, 22, 196},
+        {"budget-app", "Qoder CLI", "qoder", "h6", 12, 5, 31},
+        {"habit-box", "Claude Code", "claude", "h7", 10, 40, 130},
+        {"image-tools", "Qoder CLI", "qoder", "h8", 8, 12, 17},
+    };
+    for (const auto& d : kDone) {
+        UIRow* r2 = row(ap::ST_RESTING, d.proj, d.agent, d.aid, d.sess, at(d.hh, d.mm), d.turns);
+        r2->at = midnight + (d.hh * 3600.0 + d.mm * 60.0);   // 完成时刻：未读点按它对水位线
+        r2->unseen = (d.hh >= 14);                           // 演示：14 点后的算「还没看过」
+    }
+
+    // 行级用量也各留缺口：Qoder 只有 Credits（JSONL 没有 token 明细 → has_tokens 假），
+    // Claude 只有 tokens —— 与本机真实数据同形状，「缺哪格整格不画」才有得验。
+    for (auto& r : pd.rows) {
+        if (r.agent_id == "claude") {
+            r.has_tokens = true;
+            r.tokens = 18000 + (r.turns * 137) % 220000;
+        } else if (r.agent_id == "qoder") {
+            r.has_credits = true;
+            r.credits = 12.5 + (double)(r.turns % 60) * 1.7;
+        }
+    }
+    // 六路采集器全摆出来（导轨横向滚动、全部工具列表才摆得满），并按第 7 节的
+    // 「缺数据」规矩故意留缺口：
+    //   qoder     只有 Credits，没有 token 明细 → 拆解/按模型/peek tokens 整列不画
+    //   zcode     只有 5 小时额度，没有周额度 → 额度卡单列占满
+    //   workbuddy 额度读数是一小时前拍的 → 整卡走「待更新」红字 + r_stale_note
+    //   codex     有 token 但缓存两档为 0 → 拆解照画、0 值显示 0（稿子 js 的行为）
+    //   opencode  只有缓存写入一档非零
+    auto tool = [&](const char* id, const char* name, bool avail, bool quiet, int rows) {
+        Tool tl;
+        tl.id = id;
+        tl.name = name;
+        tl.initial = InitialOf(name);
+        tl.available = avail;
+        tl.quiet = quiet;
+        tl.rows = rows;
+        tl.hue = HueFor(name);
+        pd.tools.push_back(std::move(tl));
+        return &pd.tools.back();
+    };
+    {
+        Tool* t = tool("qoder", "Qoder CLI", true, false, 8);
+        t->has_credits = true;
+        t->credits = 469.72;
+    }
+    {
+        Tool* t = tool("claude", "Claude Code", true, false, 5);
+        t->usage.input = 1234567;
+        t->usage.output = 84521;
+        t->usage.cache_read = 5678901;
+        t->usage.cache_write = 210944;
+        t->models = {{"claude-opus-4-6", 4200000}, {"claude-sonnet-4-5", 2600000},
+                     {"claude-haiku-4-5", 309933}};
+        for (int i = 9; i <= 22; i++)
+            t->hourly[(size_t)i] =
+                (long)(120000.0 + 900000.0 * std::exp(-std::abs(i - 14) / 4.0));
+        t->hourly[14] = 1200000;
+        t->quota.known = true;
+        t->quota.plan = "Max 20x";
+        t->quota.five.known = true;
+        t->quota.five.used = 0.34;
+        t->quota.five.resets_at = now + 2 * 3600.0 + 16 * 60.0;
+        t->quota.five.window_min = 300;
+        t->quota.five.seen_at = now - 120.0;
+        t->quota.week.known = true;
+        t->quota.week.used = 0.12;
+        t->quota.week.resets_at = now + 3 * 86400.0;
+        t->quota.week.window_min = 10080;
+        t->quota.week.seen_at = now - 120.0;
+    }
+    {
+        Tool* t = tool("codex", "Codex", true, false, 0);
+        t->usage.input = 89012;
+        t->usage.output = 43210;
+        t->models = {{"gpt-5.2-codex", 132222}};
+        t->hourly[11] = 40000;
+        t->hourly[12] = 61000;
+        t->hourly[13] = 31222;
+    }
+    {
+        Tool* t = tool("zcode", "ZCode", true, false, 0);
+        t->client = "IDE";    // 稿子 providers：zcode 是 IDE
+        t->quota.known = true;
+        t->quota.plan = "Pro";
+        t->quota.five.known = true;
+        t->quota.five.used = 0.05;
+        t->quota.five.resets_at = now + 3600.0 + 5 * 60.0;
+        t->quota.five.window_min = 300;
+        t->quota.five.seen_at = now - 45.0;
+    }
+    {
+        Tool* t = tool("workbuddy", "WorkBuddy", true, false, 0);
+        t->client = "IDE";    // 稿子 providers：workbuddy 是 IDE
+        t->quota.known = true;
+        t->quota.plan = "Team";
+        t->quota.five.known = true;
+        t->quota.five.used = 0.71;
+        t->quota.five.resets_at = now + 47 * 60.0;
+        t->quota.five.window_min = 300;
+        t->quota.five.seen_at = now - 3600.0;    // 一小时前的读数 → 整卡「待更新」
+        t->quota.week.known = true;
+        t->quota.week.used = 0.44;
+        t->quota.week.resets_at = now + 2 * 86400.0;
+        t->quota.week.window_min = 10080;
+        t->quota.week.seen_at = now - 3600.0;
+    }
+    {
+        Tool* t = tool("opencode", "OpenCode", true, false, 0);
+        t->usage.cache_write = 51200;
+        t->models = {{"qwen3-coder-plus", 51200}};
+        t->hourly[20] = 51200;
+    }
+    // Codex 也要一条完成记录：完成记录屏 / 详情屏才有第二个工具可点。
+    row(ap::ST_RESTING, "kitchen-timer", "Codex", "codex", "h9", at(11, 8), 9);
+
+    pd.now = now;
+    pd.window_start = midnight;
+    pd.has_today_tokens = true;
+    pd.today_tokens = 0;
+    for (const auto& t : pd.tools) pd.today_tokens += t.usage.total();
+    pd.hero = 0;
+    pd.needs = 5;
+    pd.await_n = 2;
+    pd.run = 1;
+    pd.live = 6;
+    pd.credits = 469.72;    // Qoder 一路自记计数（不是金额），口径说明沿用 cost_note
+    g_pd = std::move(pd);
+    g_pd_seq = g_seq.load();
+}
+
 int main(int argc, char** argv) {
-    bool windowed = false, dump = false;
+    bool windowed = false, dump = false, hook_status = false;
+    std::string hook_install, hook_uninstall;
     std::vector<std::string> pos;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--window")) windowed = true;
         else if (!strcmp(argv[i], "--dump")) dump = true;
+        else if (!strcmp(argv[i], "--hook-status")) hook_status = true;
+        else if (!strcmp(argv[i], "--install-hook") && i + 1 < argc) hook_install = argv[++i];
+        else if (!strcmp(argv[i], "--uninstall-hook") && i + 1 < argc) hook_uninstall = argv[++i];
         else pos.push_back(argv[i]);
     }
     // 无参数＝从访达双击：出窗口。带参数＝离屏探针，按老用法渲一帧存 PPM。
-    if (pos.empty() && !dump) windowed = true;
+    if (pos.empty() && !dump && !hook_status && hook_install.empty() && hook_uninstall.empty())
+        windowed = true;
+
+    // 接线走命令行：与面板里那颗按钮调的是同一个 ap::install_hook（同一份字节、同一套备份）。
+    // 退出码沿用全仓口径：0 成功 / 1 失败（原因打到 stderr）/ 2 用法错。
+    if (hook_status || !hook_install.empty() || !hook_uninstall.empty()) {
+        if (!hook_install.empty() && !hook_uninstall.empty()) {
+            fprintf(stderr, "--install-hook 与 --uninstall-hook 不能同时给\n");
+            return 2;
+        }
+        if (hook_status) {
+            for (const auto& h : ap::probe_hooks()) {
+                printf("%-10s %-14s supported=%d installed=%d stale=%d occupied=%d  %s%s%s\n",
+                       h.id.c_str(), h.name.c_str(), h.supported ? 1 : 0, h.installed ? 1 : 0,
+                       h.stale ? 1 : 0, h.occupied ? 1 : 0,
+                       h.config.empty() ? "-" : h.config.c_str(),
+                       h.note.empty() ? "" : "  # ", h.note.c_str());
+            }
+            return 0;
+        }
+        std::string backup, err;
+        const bool ok = !hook_install.empty()
+                            ? ap::install_hook(hook_install, &backup, &err)
+                            : ap::uninstall_hook(hook_uninstall, &backup, &err);
+        const std::string& who = hook_install.empty() ? hook_uninstall : hook_install;
+        if (!ok) {
+            fprintf(stderr, "%s %s 失败：%s\n", hook_install.empty() ? "撤销" : "接线", who.c_str(),
+                    err.empty() ? "未知原因" : err.c_str());
+            return 1;
+        }
+        printf("%s %s 完成", hook_install.empty() ? "撤销" : "接线", who.c_str());
+        if (!backup.empty()) printf("；原配置备份在 %s", backup.c_str());
+        printf("\n");
+        return 0;
+    }
 
     // 界面语言：先读系统，再让环境变量盖上去。
     // 顺序是有意的——AGENTPING_LANG 是取证口（同一次构建要能拍出六张不同语言的图），
@@ -2307,7 +4640,12 @@ int main(int argc, char** argv) {
     // 设置盘的八个开关在窗口建起来之前就要落进 g_cfg：常驻置顶是建窗 hint，
     // 先开窗再改会让他在启动瞬间看见一次「本该置顶却没置顶」的闪。
     g_cfg = ap::load_alert_cfg();
-    if (const char* v = getenv("AGENTPING_VIEW")) g_view = atoi(v);
+    if (const char* v = getenv("AGENTPING_VIEW")) {
+        g_view = atoi(v);
+        // 探针要拍「停在该屏」的样子：底部标签条的高亮跟 g_tab 走，不同步就每屏都亮总览。
+        // R31 的根屏标签是 会话(0)/用量(6)，历史(5) 与设置(1) 也各认各的。
+        g_tab = (g_view == 1) ? 1 : (g_view == 5) ? 5 : (g_view == 6) ? 6 : 0;
+    }
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
     glfwWindowHint(GLFW_FLOATING, g_cfg.on_top ? GLFW_TRUE : GLFW_FALSE);
@@ -2318,10 +4656,10 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    const int H = windowed ? (int)kCanvasH : 1620;
-    // 探针改两行：上排 6 张 pin（340＋34 间距＝pitch 374），下排 6 张设置屏（420＋14＝pitch 434）。
-    // 宽度取两行里更宽的那条：6×434＋14＝2618。
-    const int offW = windowed ? kPanelW : 2620;
+    const int H = windowed ? (int)kCanvasH : 920;
+    // 探针改两行：六语一排（416 面板＋24 间距＝pitch 440）。
+    // 宽度＝14＋6×440＝2654，向上取 2660；高 ≥850＋tile 顶偏移 50 → 920。
+    const int offW = windowed ? kPanelW : 2660;
     GLFWwindow* win = glfwCreateWindow(offW, H, "Agent Ping", nullptr, nullptr);
     if (!win) return 2;
     g_win = win;
@@ -2387,442 +4725,68 @@ int main(int argc, char** argv) {
 #else
     ImGui_ImplOpenGL3_Init("#version 130");
 #endif
+    // 屏头/菜单栏的品牌图是 GL 纹理，必须在上下文就绪之后建一次。
+    BrandUpload();
 
     std::thread scanner(ScanLoop);
 
     auto drawPanel = [&](float x, float y, float w, int loc, int view) {
         ImGui::SetNextWindowPos(ImVec2(x, y));
-        // ImGui 的裁剪矩形就是窗口尺寸。稿子的 760 是画布高，但 maxBot 允许摆到屏幕预算
-        // 高（本机实测 919pt）；只按 760 裁的话，760 之后的行会算进 g_panelH、把窗口撑大，
-        // 自己却被裁掉——屏幕上留一段没有任何解释的死白。
-        ImGui::SetNextWindowSize(ImVec2(w, g_budgetH > kCanvasH ? g_budgetH : kCanvasH));
-        // 名字必须带上屏别：探针一帧里同一语会 Begin 两次（pin + 设置），
-        // 撞了同一个窗口 ID 就是两次 Begin 一个 End，ImGui 会把两屏内容叠进同一块裁剪矩形。
-        char wname[32]; snprintf(wname, sizeof wname, "%s##%s", view == 1 ? "set" : "pin",
+        // r20 是固定 640 高的浮层：宽度恒 340，内容超出走屏内滚动，窗口不跟着内容收放。
+        ImGui::SetNextWindowSize(ImVec2(w, (float)WantedWindowH()));
+        // 名字必须带上屏别与语种：探针一帧里同一语会 Begin 两次，撞了窗口 ID 就会叠裁剪矩形。
+        char wname[32]; snprintf(wname, sizeof wname, "%s##%s", ViewTag(view),
                                  kLocTag[loc % kLocales]);
         ImGui::Begin(wname, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        // AGENTPING_TN=<秒>：把动画时钟钉死在指定位相。pb-halo 1.9s 一轮，随机相位下
-        // 单帧量出来的辉光宽度分不清是「画窄了」还是「正好赶上暗的那一下」，取证要能钉住。
+        // AGENTPING_TN=<秒>：把动画时钟钉死在指定位相，取证才量得准呼吸/转圈的某一相。
         static const char* kTnLock = getenv("AGENTPING_TN");
         const double tn = kTnLock ? atof(kTnLock) : glfwGetTime();
-        // #win 是 border-box：1px 边在 340pt 之内，正文离外沿是 1+12 而不是 12。
-        const float kB = 1.0f;
-        const float L = x + kB + kPadX, R = x + w - kB - kPadX;
-        const float track = kTierPx[T_MICRO] * 0.16f;         // draft 的 letter-spacing:.16em
-        const float maxBot = y + g_budgetH - kB - kPadBottom;   // 超出这块就不摆，改用「还有 N 条」
-        float cy = y + kB + kPadTop;
 
-        // ── 设置屏（r14/settings.html，420 宽）：整屏自己收口，不走下面 pin 列表那套 ──
-        if (view == 1) {
-            std::vector<SecBox> secs;
-            g_panelH = drawSettings(dl, L, R, maxBot, loc, cy, &secs) - y + kB + kPadBottom;
-            CardFrame(x, y, w, g_panelH, &secs);
-            ImGui::Dummy(ImVec2(w, g_panelH));
-            ImGui::End();
-            return;
-        }
-
-        // 稿子 render.mjs 的 PIN_GROUPS：需要你介入 / 运行中 / 排队中 / 失败中断 / 今日已结束。
-        int cnt[G_N] = {};
-        for (const auto& r : g_pd.rows) cnt[GroupOf(r.state)]++;
-        int live_total = 0;
-        for (int i = 0; i < G_N; i++) live_total += cnt[i];
-
-        // ── 切到设置屏的入口 ──────────────────────────────────────────────────
-        // 稿子那屏靠页面外层 nav（pin.html 顶上一排链接）切屏，这块面板没有外层，
-        // 所以入口自己占卡顶一行、右沿对齐，与设置屏那侧的「返回」落在同一个角。
-        // 代价：pin 首屏比稿子多一行 34.5pt（22.5 胶囊 + 12 间距），整屏往下挪这么多。
-        {
-            const float pw = GhostPillW("set_title", loc);
-            const long z = Zid(loc, kNavRow, HIT_SETTINGS, 0);
-            GhostPill(dl, R - pw, cy, pw, loc, "set_title", z);
-            AddHit(g_hits, R - pw, cy, R, cy + kSegH, HIT_SETTINGS, kNavRow, 0, loc,
-                   T("set_title", loc), 0);
-            cy += kSegH + kSectionGap;
-        }
-
-        // ── 表头（draft: grid gap-2.5 + num-xl 26pt + micro-label + 可选的环比脚行）──
-        // 第三格按 render.mjs 的条件式：今天没有任何消耗记录就整格不摆（不是摆个 0）。
-        // 脚行「↑ +59.9% 较昨日」只在昨天同窗也有记录时才摆 —— 单边有数算不出环比。
-        char ns[12], rs[12], cost[32];
-        snprintf(ns, sizeof ns, "%d", g_pd.needs);
-        snprintf(rs, sizeof rs, "%d", g_pd.run);
-        // fmtCost（stubs/agent-types.js）：≥100 取整、<100 留一位小数，单位是 cr 不是 $
-        snprintf(cost, sizeof cost, g_pd.credits >= 100.0 ? "%.0f\xc2\xa0""cr" : "%.1f\xc2\xa0""cr",
-                 g_pd.credits);
-        const bool has_cost = g_pd.credits > 0;
-        int nc = has_cost ? 3 : 2;
-        const char* nums[3] = {ns, rs, cost};
-        const char* hkeys[3] = {"grp_await", "grp_run", "cost"};
-        ImU32 hcols[3] = {kStAwait, kStRun, kFg};
-        const float numH = kTierPx[T_NUM] * 0.92f;
-        const float cellW = (R - L - 10.0f * (nc - 1)) / (float)nc;
-        const double delta = (has_cost && g_pd.yday_credits > 0)
-                             ? (g_pd.credits - g_pd.yday_credits) / g_pd.yday_credits * 100.0 : 0.0;
-        const bool has_delta = has_cost && g_pd.yday_credits > 0;
-        const bool up = delta >= 0;
-        char foot[64] = "";
-        if (has_delta) snprintf(foot, sizeof foot, "%s %+.1f%% %s", up ? "\xe2\x86\x91" : "\xe2\x86\x93",
-                                delta, T("vs_yesterday", loc));
-        for (int i = 0; i < nc; i++) {
-            float cx = L + i * (cellW + 10.0f);
-            // 第三格（成本）右对齐到内容边 R，前两格照稿子左对齐在 cx。
-            // 为什么只有这一格改：稿子是中文，"75.5 cr" 与 "↓ -75.3% 较昨日" 都落在格内；
-            // 换成英/德后同一格要念 "Today cost" / "Heutige Kosten" 和 "vs yesterday" /
-            // "vs gestern"。修前口径可复算：把下面 right 临时改成 false 重出图，
-            // 同一把尺子量到墨迹右缘 x=679px（R=654px，越出 12.5pt），产物留在
-            // evidence/2026-10-08-locale/prefix-mac-*.ppm ＋ measure-mac-prefix.txt。
-            // 右对齐把数字与脚行都收进 R 以内，且不靠裁字／不靠缩写保住原词。
-            const bool right = (i == 2);
-            const float anchor_x = right ? R : cx;
-            if (right)
-                DrawTextRight(dl, anchor_x, TextTop(cy, numH, T_NUM, loc), nums[i], loc, hcols[i],
-                              T_NUM, -kTierPx[T_NUM] * 0.03f);
-            else
-                DrawTextRun(dl, cx, TextTop(cy, numH, T_NUM, loc), nums[i], loc, hcols[i], T_NUM,
-                            -kTierPx[T_NUM] * 0.03f);
-            // micro-label 是 leading-none（行框＝字号），脚行是 body 的 1.5 倍行框。
-            DrawTextRun(dl, cx, TextTop(cy + numH + 4.0f, kTierPx[T_MICRO], T_MICRO, loc),
-                        UpAscii(T(hkeys[i], loc)), loc, kMicro, T_MICRO, track);
-            // 脚行颜色：稿子的 pin 屏写死琥珀，StatBand 屏按涨跌分琥珀/绿。
-            // 我们的真值是跌（今日 53.5 cr / 昨日 2086.6 cr），跌的行配琥珀箭头自相矛盾，
-            // 所以按 StatBand 那条条件式走。
-            if (i == 2 && has_delta)
-                DrawTextRight(dl, R, TextTop(cy + numH + 4.0f + kTierPx[T_MICRO] + 4.0f,
-                                             kTierPx[T_SM] * 1.5f, T_SM, loc),
-                              foot, loc, up ? kStAwait : kStDone, T_SM, -kTierPx[T_SM] * 0.01f);
-        }
-        cy += numH + 4.0f + kTierPx[T_MICRO] + (has_delta ? 4.0f + kTierPx[T_SM] * 1.5f : 0.0f)
-              + kSectionGap;
-
-        // ── 状态构成条 + 计数胶囊：本轮真有的状态才画，一条都没有就整块不摆 ──
-        if (live_total > 0) {
-            const float pillGap = 10.0f;
-            float pwid[G_N], pillsW = 0; int pn = 0;
-            for (int i = 0; i < G_N; i++) if (cnt[i]) {
-                char nb[8]; snprintf(nb, sizeof nb, "%d", cnt[i]);
-                pwid[pn] = 7 + 6 + 4 + TextWidth(nb, loc, T_PILL) + 7;
-                pillsW += pwid[pn]; pn++;
+        // 接线状态六屏共用（导航那颗的琥珀点也要它）；读两份小配置，两秒缓存。
+        RefreshHooks(false);
+        // 详情两屏要指一行具体会话。从别的屏直接切过来（探针按 VIEW 切）时自己挑第一条真有的，
+        // 没有就照实画空态——不编一行假会话来填版面。
+        if ((view == 3 || view == 4) && (g_sel_key.empty() || !SelectedRow(g_sel_key))) {
+            g_sel_key.clear();
+            g_sel_kind = view == 3 ? 1 : 2;
+            for (const auto& r : g_pd.rows) {
+                if (r.state != ap::ST_AWAIT || r.inferred) continue;
+                if (view == 3 ? !RowAsksQuestion(r) : RowAsksQuestion(r)) continue;
+                if (view == 4 && r.tool.empty() && r.question.empty()) continue;
+                g_sel_key = r.key;
+                g_sel_copy = r;
+                break;
             }
-            pillsW += pillGap * (pn - 1);
-            // 稿子是一行里「条 flex-1 + 胶囊 shrink-0」；六语的胶囊文案更长，放不下就让条独占一行
-            bool wrap = (R - L - pillGap - pillsW) < 60.0f;
-            float barW = wrap ? (R - L) : (R - L - pillGap - pillsW);
-            // 稿子这行是 flex items-center：胶囊 15.5 最高、定义了行框，6px 的条在其内居中。
-            float barY = wrap ? cy : cy + (kPillH - kBarH) * 0.5f;
-            dl->AddRectFilled(ImVec2(L, barY), ImVec2(L + barW, barY + kBarH), W(23), kBarH * 0.5f);
-            // 稿子是「容器 rounded-full + overflow-hidden，段本身 h-full rounded-full」：
-            // 段与段之间不留缝，只有整条的两端是圆的。逐段各自取整圆角会在接缝处露出底色。
-            float sx = L;
-            int drawn = 0;
-            for (int i = 0; i < G_N; i++) if (cnt[i]) {
-                ImU32 c = GrpColor(i);
-                float segW = barW * (float)cnt[i] / (float)live_total;
-                int left = (drawn == 0), right = (drawn == pn - 1);
-                ImDrawFlags f = left && right ? ImDrawFlags_RoundCornersAll
-                              : left ? ImDrawFlags_RoundCornersLeft
-                              : right ? ImDrawFlags_RoundCornersRight
-                              : ImDrawFlags_RoundCornersNone;
-                dl->AddRectFilled(ImVec2(sx, barY), ImVec2(sx + segW, barY + kBarH), c, kBarH * 0.5f, f);
-                sx += segW; drawn++;
-            }
-            float py = wrap ? cy + kBarH + 8.0f : cy;
-            float cxx = wrap ? L : L + barW + pillGap;
-            for (int k = 0, i = 0; i < G_N; i++) if (cnt[i]) {
-                char nb[8]; snprintf(nb, sizeof nb, "%d", cnt[i]);
-                ImU32 c = GrpColor(i);
-                GradRound(dl, cxx, py, pwid[k], kPillH, kPillH * 0.5f,
-                          WithA(c, 56), WithA(c, 18), WithA(c, 102));
-                dl->AddCircleFilled(ImVec2(cxx + 7 + 3, py + kPillH * 0.5f), 3.0f, c);
-                DrawTextRun(dl, cxx + 7 + 6 + 4, TextTop(py + 3.0f, kTierPx[T_PILL], T_PILL, loc),
-                            nb, loc, c, T_PILL);
-                cxx += pwid[k] + pillGap; k++;
-            }
-            cy = (wrap ? py + kPillH : cy + kPillH) + kSectionGap;
         }
 
-        // ── 采集器分档（draft 的 filter chips）：数字＝本轮该采集器真摆了几行。
-        //    跳转还没从 Swift 搬过来，所以这里是读数条，不是能点的筛选器。
-        if (!g_pd.chips.empty()) {
-            // 外层高度不是拍的：border 1 + py-[3px] + 行框（正文 11px × body 行高 1.5＝16.5）+ 3 + 1 ＝ 24.5。
-            const float chipH = kTierPx[T_CHIP] * 1.5f + 2 * 3.0f + 2 * 1.0f, chipGap = 6.0f;
-            const float badgeH = kTierPx[T_MICRO] * 1.5f;   // 9 × 1.5，px-1 只加宽不加高
-            float cx = L, lineY = cy;
-            auto chip = [&](const std::string& name, const std::string& initial, int n, ImU32 hue, bool active) {
-                char nb[8]; snprintf(nb, sizeof nb, "%d", n);
-                float nameW = TextWidth(name, loc, T_CHIP); if (nameW > 92.0f) nameW = 92.0f;
-                float badgeW = 4 + TextWidth(nb, loc, T_MICRO) + 4;
-                float wch = 9 + (active ? 0.0f : 13.0f + 6.0f) + nameW + 6.0f + badgeW + 9.0f;
-                if (cx + wch > R && cx > L) { cx = L; lineY += chipH + 4.0f; }
-                ImU32 fg = active ? kInk : hue;
-                // 稿子：选中格＝白底 .92 + 反色字 + hairline 边；未选中＝**透明底** + 色相 55% 边。
-                if (active) dl->AddRectFilled(ImVec2(cx, lineY), ImVec2(cx + wch, lineY + chipH), W(235), chipH * 0.5f);
-                dl->AddRect(ImVec2(cx + 0.5f, lineY + 0.5f), ImVec2(cx + wch - 0.5f, lineY + chipH - 0.5f),
-                            active ? W(235) : WithA(hue, 140), chipH * 0.5f, 0, 1.0f);
-                float acy = lineY + chipH * 0.5f, nx = cx + 9.0f;
-                if (!active) {
-                    float acx = nx + 6.5f;
-                    GradCircle(dl, ImVec2(acx, acy), 6.5f, WithA(hue, 66), WithA(hue, 20), WithA(hue, 140));
-                    float iw = TextWidth(initial, loc, T_GLYPH_SM);
-                    DrawTextRun(dl, acx - iw * 0.5f, TextMid(acy, T_GLYPH_SM, loc), initial, loc, hue, T_GLYPH_SM);
-                    nx += 13.0f + 6.0f;
-                }
-                DrawTextRun(dl, nx, TextTop(lineY + 4.0f, kTierPx[T_CHIP] * 1.5f, T_CHIP, loc),
-                            ClipToWidth(name, nameW, loc, T_CHIP), loc, fg, T_CHIP);
-                float bx = cx + wch - 9.0f - badgeW;
-                dl->AddRectFilled(ImVec2(bx, acy - badgeH * 0.5f), ImVec2(bx + badgeW, acy + badgeH * 0.5f),
-                                  active ? WithA(kInk, 26) : W(20), badgeH * 0.5f);
-                DrawTextRun(dl, bx + 4.0f, TextTop(acy - badgeH * 0.5f, badgeH, T_MICRO, loc),
-                            nb, loc, fg, T_MICRO);
-                cx += wch + chipGap;
-            };
-            chip(T("all", loc), std::string(), live_total, kFg, true);
-            for (const auto& c : g_pd.chips) chip(c.name, c.initial, c.n, c.hue, false);
-            cy = lineY + chipH + kSectionGap;
-        }
-
-        // ── 预算先扣干净，分组只能填剩下的。三笔账都要在账上：卡脚那三块（今天没活动／
-        //    读不通／口径脚注）、每一组的组头、每一条「还有 N 条」。修前只扣了第一块和一组
-        //    间距（grpBot = maxBot - tail - kGroupGap），组头和入口都不算：容器灌 13 条假会话
-        //    实测 g_panelH=1098.8pt 而窗口被 WantedWindowH() 按屏高压到 1054pt ⇒ 底部整条
-        //    口径脚注画在窗口外、被 ImGui 的裁剪矩形切掉，超预算的会话行既不摆也不报。
-        //    窗口挂的是 NoScrollbar（浮层没有第二条路），所以「摆不下的必须报，报了的必须有出路」。
-        const float kFootLine = kTierPx[T_SM] * 1.5f;
-        float tail = 0.0f;
-        if (!g_pd.quiet.empty()) tail += kFootLine + 8.0f;
-        tail += (float)g_pd.errors.size() * (kFootLine + 8.0f);
-        if (g_pd.credits > 0) tail += kTierPx[T_MICRO] + 8.0f;
-        // 入口那一行＝正文 1.5 倍行框 + 4pt 落点 + 前面那 6pt 行距。
-        const float kMoreH = kFootLine + 4.0f + kRowGap;
-        const float kGrpHdrH = kTierPx[T_MICRO] + kLabelRowGap;   // 组头是 leading-none 的一行 + 6
-        // 「一组跑不掉的最低开销」kMoreH＝一条带组名的行（19）＋它下面那档行距（6）。每组都按这一份
-        // 预留，轮到自己就不再预留自己那份；余额线量的是「从已画到的位置 cy 往下还留给后面几组」，
-        // 所以组头、入口、组间距这些真实开销不用另记一笔——cy 走到哪儿，余额线就在哪儿起算。
-        // 为什么不能按最大开销（组头 15＋间距 16＋入口 25＝56.5）预留：10:1x 那轮 mac40 点名帧实测
-        // 运行组被后面三组那 169.5pt 的预扣挤成 '!'（并进一条没组名的折行入口），而它后面那几组轮到
-        // 自己时又把额度拿了回去，屏幕底部还空着 59pt——预扣按组序退，中间那组替后面所有组受罚。
-        // 为什么「每组一条」这份必须含那 6pt 分隔：10:3x 复算同一帧，被点名那组摆到余额线后加的是
-        // 16pt 组间距，下一组只剩 9.5pt 摆它那 19pt 的名字行 ⇒ 又走成 '!'。分隔算进份内之后，
-        // 每组轮到时恰好拿到 25pt，紧凑一行（19＋6）刚好装得下，'!' 只在屏面连一行都放不下时才走。
-        int grp_n = 0, last_grp = -1;
-        for (int i = 0; i < G_N; i++) if (cnt[i]) { last_grp = i; grp_n++; }
-        // 另有两笔扣死、不参与退还：① 点名那屏顶部那条「返回总览」是这块版面唯一那条回路，不能
-        // 是「预算不够就不画」的装饰；② 尾部那条折行入口画在循环之外，可能替两组以上收账。
-        const int extra_lines = (g_focus >= 0 ? 1 : 0) + (grp_n > 1 ? 1 : 0);
-        float grpBot = 0.0f;      // 余额线，每轮重算，见循环开头
-
-        //    一条可点的「还有 N 条」：整行是命中区，悬停给与会话行同一层过渡底色（稿子的
-        //    hover:bg-menu-accent）。row 位＝kFoldRow＋组号；点下去把版面换给那一组，在同一组上
-        //    连着点＝往后翻一页（改的是 g_focus/g_page，重画由下一帧的 g_relayout 走）。
-        auto MoreLine = [&](int grp, int n) {
-            const long z = Zid(loc, kFoldRow + grp, HIT_MORE, 0);
-            const float k = TxPeek(z);
-            if (k > 0.001f)
-                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
-                                  MixA(kBg, kHoverRow, k), 7.0f);
-            char buf[48]; snprintf(buf, sizeof buf, T("more", loc), n);
-            DrawTextRun(dl, L + kRowPl + kAvatarD + kColGap, TextTop(cy, kFootLine, T_SM, loc),
-                        buf, loc, MixA(kTime, kFg, k), T_SM);
-            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_MORE, kFoldRow + grp, 0, loc, buf, 0);
-            cy += kFootLine + 4.0f;
-        };
-
-        // ── 预算紧到连组头都摆不下时的紧凑一行：「组名 · 还有 N 条」合成一行、同一个命中区。
-        //    为什么非要带组名：03:25 的 mac40 平铺帧实拍里，尾部三组（排队·失败·已结束）被并成
-        //    一条没有名字的「还有 5 条」，点下去只换到排队那 2 条——屏面上没有任何地方写着
-        //    「这 5 条其实来自三组」，等于把截断从「看不见」改成了「看得见但对不上账」。
-        auto CompactLine = [&](int grp, int n) {
-            const long z = Zid(loc, kFoldRow + grp, HIT_MORE, 0);
-            const float k = TxPeek(z);
-            if (k > 0.001f)
-                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
-                                  MixA(kBg, kHoverRow, k), 7.0f);
-            float ex = DrawTextRun(dl, L, TextTop(cy, kFootLine, T_MICRO, loc),
-                                   UpAscii(T(kGrpKey[grp], loc)), loc, kMicro, T_MICRO, track) + 6.0f;
-            ex = DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_MICRO, loc), "·", loc, W(44),
-                             T_MICRO, track) + 6.0f;
-            char buf[48]; snprintf(buf, sizeof buf, T("more", loc), n);
-            DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_SM, loc), buf, loc, MixA(kTime, kFg, k), T_SM);
-            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_MORE, kFoldRow + grp, 0, loc, buf, 0);
-            cy += kFootLine + 4.0f;
-        };
-
-        // ── 一组在这一帧摆不出组头时的出路，两条分支只此一处（两条都要在诊断账上留痕）：
-        //    摆得下紧凑一行就自己带组名，连一行都摆不下才并进尾部那条折行入口（'!'，无名）。
-        //    无名那条是最后手段：条数还在账上、点下去只换到宿主组，其它组在屏面上没有名字。
-        int fold_grp = -1, fold_n = 0, fold_mask = 0, agg_mask = 0;
-        auto FallbackLine = [&](int i) {
-            if (cy + kFootLine + 4.0f <= grpBot) {
-                fold_mask |= 1 << i;
-                CompactLine(i, cnt[i]);
-                if (i != last_grp || fold_n > 0) cy += kRowGap;
-                return;
-            }
-            if (fold_grp < 0) fold_grp = i;
-            agg_mask |= 1 << i;
-            fold_n += cnt[i];
-        };
-
-        // ── 按状态分组；空组不渲染（他的空态门：没有真实输出就不摆这个表面）
-        //    平铺时每组装到「每组上限」或「预算」为止，剩下的收进本组那条入口；一旦某组被
-        //    点名，版面整块让给它——其它组只留一行「组名 · 还有 N 条」，点它自己的那行就换回去。
-        //    这样每一颗点下去都有动静：屏幕是硬上限时，出路只能是「换一组看」，不是滚动。
-        if (g_focus >= 0 && (g_focus >= G_N || !cnt[g_focus])) { g_focus = -1; g_page = 0; }
-        if (g_focus >= 0 && g_page >= cnt[g_focus]) g_page = 0;   // 翻到头回到这组的头一页
-        const int focus = g_focus;
-        // 点名＝版面整块换给一组，那就必须留一条明写在屏面上的回路：这块浮层挂 NoScrollbar，
-        // 既没有滚动条也没有返回手势。修前 focus 一旦 ≥0，唯一的复位路是「那一组自己清空」——
-        // 点进 12 条的运行组之后，平铺版面再也回不来（探针 s13 那轮就是这么撞出这个形状的）。
-        if (focus >= 0) {
-            const char* back = T("back_overview", loc);
-            const long z = Zid(loc, kFoldRow + G_N, HIT_BACKOV, 0);
-            const float k = TxPeek(z);
-            if (k > 0.001f)
-                dl->AddRectFilled(ImVec2(L, cy), ImVec2(R, cy + kFootLine),
-                                  MixA(kBg, kHoverRow, k), 7.0f);
-            DrawTextRun(dl, L, TextTop(cy, kFootLine, T_SM, loc), back, loc, MixA(kTime, kFg, k), T_SM);
-            AddHit(g_hits, L, cy, R, cy + kFootLine, HIT_BACKOV, kFoldRow + G_N, 0, loc, back, 0);
-            // 03:25 那轮实拍读图：只留 4pt 时这行与下面那行组头在图上几乎连成一块，而它是面板级
-            // 控件、不属于这一组 ⇒ 再加一档行距（额度本来就按整条 kMoreH 预留的，不会顶掉预算）。
-            cy += kFootLine + 4.0f + kRowGap;
-        }
-        for (int i = 0; i < G_N; i++) g_shown[i] = 0;
-        for (int i = 0; i < G_N; i++) {
-            if (!cnt[i]) continue;
-            // 余额线每轮重算：这条线以下才许摆下一组的名字行，量的是「从线到屏幕底还留着后面
-            // 每组一条（25pt）加那两条扣死的线」。后面每走过一组就放回一份，所以这条线只会下移，
-            // 不会把已经摆下去的行重新变成被裁掉。
-            int later = 0;
-            for (int j = i + 1; j < G_N; j++) if (cnt[j]) later++;
-            grpBot = maxBot - tail - (float)(extra_lines + later) * kMoreH;
-            // 点名那一屏上其它组的唯一职责是「点我换到这组」，不需要组头（版面整块已让给被点名那组）
-            // ⇒ 一律走紧凑一行。修前它们走「组头 15 ＋ 入口 19 ＋ 间距 16」那 50pt：mac40 的 click1
-            // 帧实测 运行＋排队 两组挤成一条没有组名的「还有 7 条」（点下去只换到运行，另外 2 条在账上
-            // 看得见、在屏上对不上是谁），而窗口底部还空着 44pt。按每组一行算只要 4×25＝100pt。
-            if (focus >= 0 && i != focus) { FallbackLine(i); continue; }
-            // 这组画完后面还要不要留分隔：后面还有组就必须留（16pt 组间距）；最后一组且没有
-            // 折行入口要收账就不留（那 16pt 谁都不挨着，是纯空额，单组平铺时 extra_lines＝0、
-            // 没有余额冲抵，它正好把脚注整块挤出窗口）。分隔放不放，额度就按放不放来算。
-            const float tail_sep = (i != last_grp || fold_n > 0) ? kGroupGap : 0.0f;
-            // 连「组头＋一条带组名的入口」都摆不下的组不摆半截标题：退成紧凑一行（组名＋条数
-            // 同一个命中区，19pt），再塞不下才走 FallbackLine 那条无名出路。
-            if (cy + kGrpHdrH + kFootLine + 4.0f + tail_sep > grpBot) { FallbackLine(i); continue; }
-            // 上一道闸只保证「组头＋入口」摆得下，不保证中间真能塞进一行会话。10-08 复算平铺帧
-            // 读到过这种形状：mac13 的排队／失败／已结束三组各画了一条组头，下面一行会话都没有，
-            // 紧跟一条「还有 N 条」——组头报的数与入口报的数是同一个数，等于用 40pt 说了紧凑一行
-            // 19pt 就能说完的话。所以先按行循环里同一道闸量一次第一颗候选行（DrawSessionRow 末参
-            // false 是干跑，只量高不落笔），量出摆不下就直接退紧凑一行。
-            const bool paged = (focus == i);      // 被点名那组不受「每组上限」管：整屏都是它的额度
-            float first_need = 0.0f;
-            {
-                int sk = paged ? g_page : 0;
-                for (size_t ri = 0; ri < g_pd.rows.size(); ri++) {
-                    const UIRow& r = g_pd.rows[ri];
-                    if (GroupOf(r.state) != i) continue;
-                    if (sk > 0) { sk--; continue; }
-                    first_need = DrawSessionRow(dl, L, R, cy, r, loc, tn, false, (int)ri);
+        // 账户屏同理：探针直接 VIEW=7 进来时挑第一路有额度的工具，没有就照实画空态。
+        if (view == 7 && (g_r31_account.empty() || !R31ToolOf(g_r31_account))) {
+            g_r31_account.clear();
+            for (const auto& t : g_pd.tools) {
+                if (!t.present()) continue;
+                if (t.quota.known && (t.quota.five.known || t.quota.week.known)) {
+                    g_r31_account = t.id;
                     break;
                 }
             }
-            if (first_need <= 0.0f ||
-                cy + kGrpHdrH + first_need + (kRowGap + kFootLine + 4.0f + tail_sep) > grpBot) {
-                FallbackLine(i); continue;
-            }
-            // 组头 = .micro-label 一行：标签 ·（opacity .45 叠在 white/38 上＝alpha 44） 计数，
-            // 三段共用 9px mono + .16em 字距（计数也在同一个 div 里，不是更亮的独立样式）。
-            float mh = kTierPx[T_MICRO];   // .micro-label 是 leading-none，行框＝字号
-            float endX = DrawTextRun(dl, L, TextTop(cy, mh, T_MICRO, loc),
-                                     UpAscii(T(kGrpKey[i], loc)), loc, kMicro, T_MICRO, track) + 6.0f;
-            char nb[8]; snprintf(nb, sizeof nb, "%d", cnt[i]);
-            endX = DrawTextRun(dl, endX, TextTop(cy, mh, T_MICRO, loc), "·", loc, W(44), T_MICRO, track) + 6.0f;
-            DrawTextRun(dl, endX, TextTop(cy, mh, T_MICRO, loc), nb, loc, kMicro, T_MICRO, track);
-            cy += kGrpHdrH;
-            int sk = g_page, shown = 0, rest = 0;
-            for (size_t ri = 0; ri < g_pd.rows.size(); ri++) {
-                const UIRow& r = g_pd.rows[ri];
-                if (GroupOf(r.state) != i) continue;
-                if (sk > 0) { sk--; rest++; continue; }
-                float need = DrawSessionRow(dl, L, R, cy, r, loc, tn, false, (int)ri);
-                // 放行之前要扣三笔：这行自己前面的行距、这行的高、以及它之后那条入口加尾部分隔
-                // （6＋19＋tail_sep）。第三笔在「已经拒过一行」之后照样要扣——行高是不等的
-                // （带待回答块的比别的高），拒掉高的之后还会放进矮的，不扣这几行就把本组那条入口
-                // 的位置吃干净：10:5x 复算 mac40 的 click1，介入组 r10 被拒之后 r11 仍摆到 y 794..846、
-                // 入口 852..867，画完组间距后 cy 已在余额线下方，于是运行和排队两组一起掉进 '!'，
-                // 而屏幕底部还空着 44pt。
-                if ((!paged && shown >= g_cfg.max_rows) ||
-                    cy + (shown ? kRowGap : 0.0f) + need +
-                        (kRowGap + kFootLine + 4.0f + tail_sep) > grpBot) { rest++; continue; }
-                if (shown) cy += kRowGap;               // 稿子里每组是 space-y-1.5
-                DrawSessionRow(dl, L, R, cy, r, loc, tn, true, (int)ri);
-                cy += need; shown++;
-            }
-            g_shown[i] = shown;
-            if (rest > 0) { if (shown) cy += kRowGap; MoreLine(i, rest); }
-            if (tail_sep > 0.0f) cy += tail_sep;
-        }
-        if (fold_n > 0) MoreLine(fold_grp, fold_n);
-
-        // 每组一行「总数/摆出/收起」，供外部把三条判据算成数字而不是看图猜。尾巴上的标记
-        // 说的是这组这一帧是怎么摆的：'~'＝退成了紧凑一行（组名＋条数同一行），'!'＝连那一行
-        // 都塞不下、条数并进了最后那条折行入口。两种都是「没摆组头」，命中区表里看不出区别，
-        // 所以必须在账上留痕，否则外部只能靠数行数猜版面走的是哪条路。
-        // 每一组被并进来都要打点，不只打那条入口的宿主组：03:25 那轮尾部三组里只有第一组有标记，
-        // 另外两组在账上跟「静默丢掉」长得一模一样——数得出总和少了、数不出是谁少了。
-        // 收在这一帧而不是点击那帧：入口点下去之后版面整块换人，账要能对上新旧两帧。
-        {
-            int off = 0;
-            g_fold_diag[0] = 0;
-            for (int i = 0; i < G_N; i++) if (cnt[i]) {
-                char mk = 0;
-                if (fold_mask & (1 << i)) mk = '~';
-                else if (agg_mask & (1 << i)) mk = '!';
-                off += snprintf(g_fold_diag + off, sizeof g_fold_diag - off, " %s=%d/%d/%d%c",
-                                kGrpKey[i], cnt[i], g_shown[i], cnt[i] - g_shown[i], mk ? mk : ' ');
-            }
+            if (g_r31_account.empty())
+                for (const auto& t : g_pd.tools)
+                    if (t.present() && (t.usage.total() > 0 || t.has_credits)) { g_r31_account = t.id; break; }
         }
 
-        // 今天没活动的采集器收成一行；读不通的源单独一条 —— 两者长得不一样，混报就是骗他
-        // 这两行稿子里没有对应物（我们的数据比他的样本多），排版按同一套行框模型走：
-        // 行框＝正文 10px×1.5，9px 的 micro-label 在其内居中。高度已在 grpBot 之前预留。
-        const float kFootMicroTop = (kFootLine - kTierPx[T_MICRO]) * 0.5f;
-        if (!g_pd.quiet.empty()) {
-            std::string q;
-            for (size_t i = 0; i < g_pd.quiet.size(); i++) { if (i) q += " · "; q += g_pd.quiet[i]; }
-            float ex = DrawTextRun(dl, L, TextTop(cy + kFootMicroTop, kTierPx[T_MICRO], T_MICRO, loc),
-                                   UpAscii(T("quiet_agents", loc)), loc, kMicro, T_MICRO, track) + 8.0f;
-            DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_SM, loc),
-                        ClipToWidth(q, R - ex, loc, T_SM), loc, W(60), T_SM);
-            cy += kFootLine + 8.0f;
-        }
-        for (const auto& err : g_pd.errors) {
-            float ex = DrawTextRun(dl, L, TextTop(cy + kFootMicroTop, kTierPx[T_MICRO], T_MICRO, loc),
-                                   UpAscii(T("unreadable", loc)), loc, WithA(kStFail, 210),
-                                   T_MICRO, track) + 8.0f;
-            DrawTextRun(dl, ex, TextTop(cy, kFootLine, T_SM, loc),
-                        ClipToWidth(err, R - ex, loc, T_SM), loc, WithA(kStFail, 150), T_SM);
-            cy += kFootLine + 8.0f;
-        }
-
-        // 口径脚注：只在 cr 那一格真画了的时候跟一条，否则是凭空多一行废话。
-        if (g_pd.credits > 0) {
-            float lh = kTierPx[T_MICRO];
-            DrawTextRun(dl, L, TextTop(cy, lh, T_MICRO, loc),
-                        ClipToWidth(T("cost_note", loc), R - L, loc, T_MICRO),
-                        loc, W(52), T_MICRO, track);
-            cy += lh + 8.0f;
-        }
-
-        g_panelH = cy - y + kB + kPadBottom;
-        // 卡框：#win{border-radius:16px; border:1px solid var(--hairline)}。
-        // 画进 background 层——它在所有窗口之前合成，所以末尾补画也不会盖住行内容。
-        // --hairline = oklch(.95 .02 250 / 9%) → sRGB(229,240,252) 带 9% 透明度。
-        CardFrame(x, y, w, g_panelH);
+        // 分屏路由（§2.3.1）：设置 / 接线 / 授权聚焦仍是 r20 版面（产品未要求重做），
+        // 其余六屏走 R31。两者都要回写 g_bodyTop/g_bodyBot/g_contentH/g_scrollMax。
+        if (view == 1 || view == 2 || view == 4)
+            g_panelH = R20Draw(dl, x, y, w, (float)WantedWindowH(), loc, view, tn);
+        else
+            g_panelH = R31Draw(dl, x, y, w, (float)WantedWindowH(), loc, view, tn);
         ImGui::Dummy(ImVec2(w, g_panelH));
         ImGui::End();
     };
+
 
     if (windowed) {
         // 主显示器拿不到时不能拿窗口尺寸当屏幕宽——实测那样会把面板摆到 x=-14，
@@ -2851,7 +4815,12 @@ int main(int argc, char** argv) {
         }
 #endif
         if (!mw || !mh) { mw = 1440; mh = 900; }   // 两条路都空（没有窗口服务器）时的最后兜底
-        glfwSetWindowPos(win, mx + mw - offW - 14, my + 34);   // 贴着菜单栏右下方
+        // 拖动过的位置优先（在屏内才用）；没拖过＝贴着菜单栏右下方
+        if (g_cfg.win_x >= mx - 60 && g_cfg.win_x + offW <= mx + mw + 60 &&
+            g_cfg.win_y >= my && g_cfg.win_y <= my + mh - 120)
+            glfwSetWindowPos(win, g_cfg.win_x, g_cfg.win_y);
+        else
+            glfwSetWindowPos(win, mx + mw - offW - 14, my + 34);
         g_budgetH = (float)(mh - 34 - my - 12);   // 从 y=34 到屏底再留 12pt
         int px, py; glfwGetWindowPos(win, &px, &py);
         printf("[窗口] %d 个显示器，可视 %dx%d@(%d,%d) → 面板落在 (%d,%d)\n",
@@ -2889,6 +4858,34 @@ int main(int argc, char** argv) {
         while (!glfwWindowShouldClose(win)) {
             glfwPollEvents();
             sb_pump();
+#ifdef __APPLE__
+            // AGENTPING_REAL_CLICK="x,y"：在 HID 层发一次真鼠标按下/抬起（与用户的物理鼠标
+            // 同一条系统路径，区别于 AGENTPING_CLICK 的合成按下）。诊断「真点击不生效」用。
+            static const char* kRealClick = getenv("AGENTPING_REAL_CLICK");
+            static bool realClickDone = false;
+            if (kRealClick && !realClickDone && glfwGetTime() > 2.5 && g_seq.load() >= 1) {
+                static int rcPhase = 0;
+                float rx2 = 0, ry2 = 0;
+                if (sscanf(kRealClick, "%f,%f", &rx2, &ry2) == 2) {
+                    const CGPoint pt = CGPointMake(rx2, ry2);
+                    if (rcPhase == 0) {
+                        CGEventRef dn = CGEventCreateMouseEvent(nullptr, kCGEventLeftMouseDown, pt, (CGMouseButton)0);
+                        CGEventPost(kCGHIDEventTap, dn);
+                        CFRelease(dn);
+                        rcPhase = 1;
+                        fprintf(stderr, "[真点击] 按下 @ (%.0f,%.0f)\n", rx2, ry2);
+                    } else if (rcPhase == 1 && glfwGetTime() > 2.65) {
+                        CGEventRef up = CGEventCreateMouseEvent(nullptr, kCGEventLeftMouseUp, pt, (CGMouseButton)0);
+                        CGEventPost(kCGHIDEventTap, up);
+                        CFRelease(up);
+                        rcPhase = 2;
+                        realClickDone = true;
+                        fprintf(stderr, "[真点击] 抬起\n");
+                    }
+                } else realClickDone = true;
+                fflush(stderr);
+            }
+#endif
             if (hold_until > 0.0 && glfwGetTime() >= hold_until) {
                 printf("[状态项] 挂总线 %.0fms 后收摊（AGENTPING_SNI_HOLD）\n", hold_ms);
                 fflush(stdout);
@@ -2920,7 +4917,64 @@ int main(int argc, char** argv) {
             ImGui::NewFrame();
             // 输入排在绘制之前：这一帧的悬停/按下用的是上一帧登记的命中区，
             // 算完过渡值才画，命中那一帧就亮（滞后的 16ms 比 150ms 的过渡短一个数量级）。
+            // ── 标题栏拖动（无边框窗口没有系统拖动条）：按住表头空白拖动＝移动窗口 ──
+            // 拖过 4pt 就把这一击作废（g_drag_moved，HandleInput 跳过它的 DoAction）；
+            // 松手把位置写进设置盘，下次启动还落在拖到的地方。取证轮（SHOT/点击序列）不参与。
+            {
+                const ImGuiIO& io = ImGui::GetIO();
+                static bool dragArm = false, dragMoved = false;
+                static ImVec2 dragWin0(0, 0), dragMouse0(0, 0);
+                const bool down = io.MouseDown[0] && !g_shot_to && g_click_seq.empty() &&
+                                  g_panelVisible;
+                int wx0 = 0, wy0 = 0;
+                glfwGetWindowPos(win, &wx0, &wy0);
+                const ImVec2 mp = io.MousePos;
+                bool onHit = false;
+                for (const auto& h2 : g_hits)
+                    if (mp.x >= h2.x0 && mp.x < h2.x1 && mp.y >= h2.y0 && mp.y < h2.y1) {
+                        onHit = true;
+                        break;
+                    }
+                const bool inHead = (mp.y <= 54.0f);
+                if (down && !dragArm && inHead && !onHit) {
+                    dragArm = true;
+                    dragMoved = false;
+                    dragWin0 = ImVec2((float)wx0, (float)wy0);
+                    dragMouse0 = GlobalCursorNow();       // 全局坐标：挪窗口不改写它，无反馈回路
+                }
+                if (dragArm && !down) dragArm = false;    // 没拖就松手＝一次普通空白点击
+                if (dragArm && down) {
+                    const ImVec2 g2 = GlobalCursorNow();
+                    if (g2.x > -1.0e5f) {
+                        const float dx = g2.x - dragMouse0.x, dy = g2.y - dragMouse0.y;
+                        if (dragMoved || dx * dx + dy * dy > 16.0f) {
+                            dragMoved = true;
+                            g_drag_moved = true;
+                            glfwSetWindowPos(win, (int)std::lround(dragWin0.x + dx),
+                                             (int)std::lround(dragWin0.y + dy));
+                        }
+                    }
+                }
+                if (!down && dragMoved) {                 // 拖完松手：落盘位置，放行下一击
+                    dragMoved = false;
+                    g_cfg.win_x = wx0;
+                    g_cfg.win_y = wy0;
+                    std::string err;
+                    if (!ap::save_alert_cfg(g_cfg, &err))
+                        fprintf(stderr, "[窗口] 位置没存下：%s\n", err.c_str());
+                }
+            }
             HandleInput(ImGui::GetIO(), glfwGetTime());
+            g_drag_moved = false;
+            {   // 滚动缓动：每帧向目标推近 24%，差半像素内贴齐——滚轮不再是瞬移
+                g_scroll[g_view] += (g_scrollTarget[g_view] - g_scroll[g_view]) * 0.24f;
+                if (std::fabs(g_scrollTarget[g_view] - g_scroll[g_view]) < 0.5f)
+                    g_scroll[g_view] = g_scrollTarget[g_view];
+                g_scroll[g_view] = std::fmin(g_scrollMax[g_view],
+                                             std::fmax(0.0f, g_scroll[g_view]));
+                g_scrollTarget[g_view] = std::fmin(g_scrollMax[g_view],
+                                                   std::fmax(0.0f, g_scrollTarget[g_view]));
+            }
             g_hits.clear();
             // 重扫描落地就重摆行。必须放在 NewFrame 之后：RebuildPanel 里要量字宽，
             // 而量字宽会在图集还没建起来时就把字形烘进去（图集此时 RendererHasTextures
@@ -2964,6 +5018,11 @@ int main(int argc, char** argv) {
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             glfwSwapBuffers(win);
+            static float lastPanelH = 0.0f;
+            if (std::fabs(g_panelH - lastPanelH) > 1.0f) {   // 内容高变了：窗口跟着收/放
+                lastPanelH = g_panelH;
+                g_relayout = true;
+            }
             if (g_relayout && g_panelH > 0) {   // 内容行数变了就把窗口收到刚好包住
                 int cw, ch; glfwGetWindowSize(win, &cw, &ch);
                 int px0, py0; glfwGetWindowPos(win, &px0, &py0);
@@ -2979,7 +5038,7 @@ int main(int argc, char** argv) {
                     // 只在尺寸变了时报，不然 3 秒一轮的重扫会把日志刷满。
                     int px, py; glfwGetWindowPos(win, &px, &py);
                     printf("[窗口] 内容 %dx%d @ (%d,%d)｜%s屏\n", wantW, want, px, py,
-                           g_view == 1 ? "设置" : "pin");
+                           ViewName(g_view));
                     fflush(stdout);
                     // 高度已经与预算解耦，正常一帧就收敛；留 6 帧余量给异步生效，超了就放弃本轮，
                     // 免得系统真不给高（屏太小）时逐帧硬设尺寸刷日志。
@@ -2990,8 +5049,11 @@ int main(int argc, char** argv) {
                 }
             }
             // 行高稳住 2 秒（＝连续两轮重扫没改行数）才回读，不然拍到的是半截列表。
+            // AGENTPING_CLICK 序列没走完也不拍：否则「A;B;C」三连点只会拍到 A 之后那一屏。
             int cw_now, ch_now; glfwGetWindowSize(win, &cw_now, &ch_now);
-            if (shot_to && g_seq.load() >= 2 && glfwGetTime() - lastResize > 2.0 &&
+            const bool clicksDone = g_click_seq.empty() ||
+                                    (g_click_at >= (int)g_click_seq.size() && g_click_gap == 0);
+            if (shot_to && g_seq.load() >= 2 && glfwGetTime() - lastResize > 2.0 && clicksDone &&
                 ch_now == WantedWindowH() && cw_now == WantedWindowW()) {   // 窗口收到＝「该摆的高度」才算摆稳；被屏高截断也算稳，否则拍到被裁的一截
                 int sw, sh; glfwGetFramebufferSize(win, &sw, &sh);
                 std::vector<unsigned char> pix((size_t)sw * sh * 4);
@@ -3043,14 +5105,12 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // 离屏探针：先等第一轮真扫描落地，再六语并排渲一帧存 PPM。
-    // 两行各自的预算必须按「内容自然高」算，不能拍脑袋给大：
-    // ImGui 的裁剪矩形＝ max(预算, kCanvasH 760)，而 pin 屏末尾那段（「还有 N 条」+ 卡脚，实测 56pt）
-    // 不受 maxBot 约束、总会多摆一截 —— 预算给到 720 时内容就涨到 776，底部 16pt 被裁剪矩形吃掉，
-    // 实拍会拍到卡脚凭空缺一截（不是没画，是被裁了）。所以两行预算都压在 760 之内。
-    const float kPinY = 60.0f, kSetY = 846.0f;
-    const float kPinBudget = 700.0f, kSetBudget = 740.0f;
-    g_budgetH = kPinBudget;
+    // 离屏探针：一屏一跑（AGENTPING_VIEW 0–8），六语横向并排渲一帧存 PPM。
+    // 面板现在是固定 416×850 的浮层，内容超出走屏内滚动；探针这里把预算给足，
+    // 让 WantedWindowH() 落到 850 —— 与真窗口同高，量出来的版面才有可比性。
+    // kTileGap 必须 > kPanelW(416)，否则相邻 tile 压叠 62pt，六语并排图整张作废。
+    const float kTileY = 50.0f, kTileGap = 440.0f;
+    g_budgetH = 850.0f;
     for (int i = 0; i < 400 && g_seq.load() == 0; i++) usleep(50000);
     for (int pass = 0; pass < 3; pass++) {
         glClearColor(0, 0, 0, 1);   // 探针窗口不透明：底色清成纯黑，卡框边缘才量得准
@@ -3061,9 +5121,10 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lk(g_mtx);
             g_pd_seq = seq;
             RebuildPanel(g_snap);
+            if (getenv("AGENTPING_FIXTURE")) LoadProbeFixture();   // 只影响探针这一段
         }
         ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2(offW, H));
+        ImGui::SetNextWindowSize(ImVec2((float)offW, (float)H));
         ImGui::Begin("root", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                                       ImGuiWindowFlags_NoBackground);
@@ -3073,21 +5134,18 @@ int main(int argc, char** argv) {
         { std::lock_guard<std::mutex> lk(g_mtx); when = (time_t)g_snap.scanned_at; }
         strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&when));
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.55f, 1),
-            "Agent Ping · 单壳 Dear ImGui 版 · 活数据扫描于 %s · 上排 pin／下排设置，各六语并排", stamp);
+            "Agent Ping · 单壳 Dear ImGui 版 · 屏 %d（%s）· 活数据扫描于 %s · 六语并排 416×850%s",
+            g_view, ViewTag(g_view), stamp,
+            getenv("AGENTPING_FIXTURE") ? " · 样例数据（AGENTPING_FIXTURE）" : "");
         ImGui::PopFont();
         ImGui::End();
         for (int loc = 0; loc < kLocales; loc++) {
-            g_budgetH = kPinBudget;
-            drawPanel(14 + loc * 374.0f, kPinY, (float)kPanelW, loc, 0);
-            const float ph = g_panelH;
-            g_budgetH = kSetBudget;
-            drawPanel(14 + loc * 434.0f, kSetY, (float)kSetW, loc, 1);
-            // 两行各自量一次：超过 760 会被 ImGui 裁剪矩形吃掉，超过行距会叠进下一行。
-            if (pass == 0) printf("[探针] 语%d pin %.1fpt｜设置 %.1fpt（裁剪矩形 760，行距 %.0f）%s\n",
-                                  loc, ph, g_panelH, kSetY - kPinY,
-                                  (ph > 760.0f || ph > kSetY - kPinY || g_panelH > 760.0f)
-                                      ? "＝溢出，本行不可信" : "");
+            drawPanel(14.0f + loc * kTileGap, kTileY, (float)kPanelW, loc, g_view);
+            if (pass == 0) printf("[探针] 屏%d 语%d 内容 %.1fpt / 可视 %.1fpt / 滚动上限 %.1fpt\n",
+                                  g_view, loc, g_contentH[g_view],
+                                  g_bodyBot[g_view].y - g_bodyTop[g_view].y, g_scrollMax[g_view]);
         }
+
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(win);

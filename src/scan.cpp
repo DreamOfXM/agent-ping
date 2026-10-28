@@ -120,6 +120,7 @@ std::string first_line(const std::string& s) {
 // ── transcript（Qoder CLI 与 Claude Code 同构） ───────────────────────────────
 struct Raw {
     double last_ts = 0;
+    double first_ts = 0;     // 头部第一条时间戳：`.live` 的「连续」从这里起算
     bool has_voiced = false;
     bool voiced_user = false;
     std::string stop;
@@ -129,8 +130,13 @@ struct Raw {
     std::string log_title;   // customTitle / agentName
     std::string cwd;
     std::string prompt;      // 首条 user 正文首行
+    std::string last_cmd;    // 尾部最后一条 tool_use 的真命令
     long tokens = 0;
     double credits = 0;
+    UsageParts usage;                  // 今天（或窗内）四档；tokens 与它同一口径
+    std::string model;                 // 窗内用得最多的模型
+    std::map<std::string, long> models;
+    std::array<long, 24> hourly{};     // 本机 0–23 点
     long y_tokens = 0;      // 昨天同一个窗内的量，只喂表头的「较昨日」
     double y_credits = 0;
     int turns = 0;          // 窗内人打出去的指令条数（排掉工具回执）
@@ -194,6 +200,23 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
                 else if (r.queue_live > 0) r.queue_live--;
             }
         }
+        // `.live` 的 `$ cmd`：只认 tool_use 里真带出来的那一截原文。挑第一个非空的
+        // command → file_path → pattern → description；都没有就不画这一行。
+        const Json* msg = rec.at("message");
+        const Json* content = msg ? msg->at("content") : nullptr;
+        if (content && content->kind == Json::ARR) {
+            for (const Json& blk : content->arr) {
+                const std::string* bt = blk.str_at("type");
+                if (!bt || *bt != "tool_use") continue;
+                const Json* in = blk.at("input");
+                if (!in) continue;
+                std::string cmd;
+                for (const char* k : {"command", "file_path", "pattern", "description"}) {
+                    if (const std::string* v = in->str_at(k)) if (!v->empty()) { cmd = *v; break; }
+                }
+                if (!cmd.empty()) r.last_cmd = first_line(cmd);
+            }
+        }
     }
 
     if (last_voiced) {
@@ -214,6 +237,7 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
     HeadFacts hf = head_facts(path);
     if (r.cwd.empty()) r.cwd = hf.cwd;
     r.prompt = first_line(hf.prompt);
+    r.first_ts = hf.first_ts;
 
     // 一次回扫同时拿「今天」和「昨天」：窗起点只差一天，分两趟就把同一批字节读两遍。
     const double ysince = since - 86400;
@@ -228,13 +252,37 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
                 const Json* v = u->at(k);
                 return (v && v->kind == Json::NUM) ? (long)v->num : 0;
             };
-            long tk = num("input_tokens") + num("cache_read_input_tokens") +
-                      num("cache_creation_input_tokens");
+            UsageParts p;
+            p.input = num("input_tokens");
+            p.output = num("output_tokens");
+            p.cache_read = num("cache_read_input_tokens");
+            p.cache_write = num("cache_creation_input_tokens");
             const Json* c = u->at("credits");
             double cr = (c && c->kind == Json::NUM) ? c->num : 0;
             // 没有 timestamp 的记录（ts==0）留在今天这一侧，口径与改动前一致
-            if (ts == 0 || ts >= since) { r.tokens += tk; r.credits += cr; }
-            else { r.y_tokens += tk; r.y_credits += cr; }
+            if (ts == 0 || ts >= since) {
+                r.usage.input += p.input;
+                r.usage.output += p.output;
+                r.usage.cache_read += p.cache_read;
+                r.usage.cache_write += p.cache_write;
+                r.tokens += p.total();
+                r.credits += cr;
+                if (ts > 0) {
+                    std::time_t tt = (std::time_t)ts;
+                    std::tm tv;
+                    localtime_r(&tt, &tv);
+                    r.hourly[tv.tm_hour] += p.total();
+                }
+                if (msg) {
+                    if (const std::string* m = msg->str_at("model")) {
+                        if (!m->empty() && *m != "<synthetic>")
+                            r.models[*m] += p.total();
+                    }
+                }
+            } else {
+                r.y_tokens += p.total();
+                r.y_credits += cr;
+            }
         });
     }
     // 轮数：一轮＝一条人打出来的 user 记录。工具回执也是 type=="user"，但它带
@@ -254,6 +302,9 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
             r.spark.push_back(s == r.slots.end() ? 0 : s->second);
         }
     }
+    long best = 0;
+    for (const auto& kv : r.models)
+        if (kv.second > best) { best = kv.second; r.model = kv.first; }
 
     out = r;
     cache()[path] = Entry{st.mtime, st.size, since, r};
@@ -309,9 +360,28 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
             s.state = derive(r, now, s.inferred_wait);
             s.turns = r.turns;
             s.spark = r.spark;
+            // 「连续」只在起点也落在今天时成立；跨夜就从今天零点起算，免得把昨天的
+            // 时间算进「连续」。面板那边拿到的是秒数，画不画由它按 span_sec>0 判。
+            s.first_activity = r.first_ts >= since ? r.first_ts : 0;
+            s.last_cmd = r.last_cmd;
             s.queue_pos = (s.state == ST_QUEUED) ? r.queue_live : 0;
             s.tokens = r.last_ts >= since ? r.tokens : 0;
             s.credits = r.last_ts >= since ? r.credits : 0;
+            if (r.last_ts >= since) {
+                s.usage = r.usage;
+                s.model = r.model;
+                snap.usage.input += r.usage.input;
+                snap.usage.output += r.usage.output;
+                snap.usage.cache_read += r.usage.cache_read;
+                snap.usage.cache_write += r.usage.cache_write;
+                for (const auto& kv : r.models) {
+                    bool found = false;
+                    for (auto& m : snap.models)
+                        if (m.name == kv.first) { m.tokens += kv.second; found = true; break; }
+                    if (!found) snap.models.push_back({kv.first, kv.second});
+                }
+                for (int h = 0; h < 24; h++) snap.hourly[h] += r.hourly[h];
+            }
             if (y_tokens) *y_tokens += r.y_tokens;
             if (y_credits) *y_credits += r.y_credits;
             s.project = r.cwd.empty() ? dir : basename_last(r.cwd);
@@ -326,6 +396,8 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
             snap.sessions.push_back(std::move(s));
         }
     }
+    std::sort(snap.models.begin(), snap.models.end(),
+              [](const ModelUse& a, const ModelUse& b) { return a.tokens > b.tokens; });
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
     return snap;
@@ -362,6 +434,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
     walk(root, files);
     std::map<std::string, Session> latest;
     std::map<std::string, long> merged_tokens;
+    std::map<std::string, UsageParts> merged_usage;
 
     for (const std::string& path : files) {
         std::string base = basename_last(path);
@@ -389,16 +462,22 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
             }
         }
 
-        double last_ts = 0;
+        double last_ts = 0, first_ts = 0;
         State outcome = ST_RESTING;
         bool have_outcome = false, failed = false;
-        std::string project = "Codex", title, err;
+        std::string project = "Codex", title, err, last_cmd;
         long tokens = 0;
         long prev_total = 0;
+        UsageParts prev_parts, total_parts;
+        std::array<long, 24> hourly{};
+        std::map<std::string, long> models;
+        std::string model;
+        Quota quota;
 
         for (const Json& r : recs) {
             double d = json_date_at(r, "timestamp");
             if (d > last_ts) last_ts = d;
+            if (d > 0 && (first_ts == 0 || d < first_ts)) first_ts = d;
             const Json* p = r.at("payload");
             if (!p) continue;
             const std::string* rtype = r.str_at("type");
@@ -411,6 +490,16 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
             }
             const std::string* pt = p->str_at("type");
             if (!pt) continue;
+            // `.live` 的 `$ cmd`：Codex 的 function_call 把参数放在 JSON 字符串里，
+            // 只认 shell 调用的 command 那一格；解不开就跳过，不拿工具名顶替。
+            if (rtype && *rtype == "response_item" && *pt == "function_call") {
+                const std::string* args = p->str_at("arguments");
+                Json aj;
+                if (args && json_parse(args->c_str(), args->size(), aj)) {
+                    if (const std::string* c = aj.str_at("command"))
+                        if (!c->empty()) last_cmd = first_line(*c);
+                }
+            }
             if (*pt == "task_started") { outcome = ST_WORKING; have_outcome = true; }
             else if (*pt == "task_complete") {
                 const Json* e = p->at("error");
@@ -418,23 +507,88 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
                 outcome = failed ? ST_FAILED : ST_NEEDS_USER;
                 have_outcome = true;
                 if (failed) err = brief_error(*e);
+            } else if (*pt == "turn_context") {
+                if (const std::string* m = p->str_at("model")) if (!m->empty()) model = *m;
             } else if (*pt == "token_count") {
                 const Json* info = p->at("info");
                 const Json* tot = info ? info->at("total_token_usage") : nullptr;
                 if (!tot) tot = info;
-                long cur = 0;
-                if (tot) {
-                    const Json* v = tot->at("input_tokens");
-                    if (v && v->kind == Json::NUM) cur = (long)v->num;
+                auto pick = [](const Json* o, const char* k) -> long {
+                    const Json* v = o ? o->at(k) : nullptr;
+                    return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+                };
+                auto read_parts = [&](const Json* o) {
+                    UsageParts p;
+                    if (!o) return p;
+                    // Codex 的 input_tokens 自带 cached；做差后才是「未被缓存的输入」。
+                    const long raw_in = pick(o, "input_tokens");
+                    p.cache_read = pick(o, "cached_input_tokens");
+                    p.input = raw_in > p.cache_read ? raw_in - p.cache_read : 0;
+                    p.cache_write = pick(o, "cache_write_input_tokens");
+                    p.output = pick(o, "output_tokens");
+                    return p;
+                };
+                UsageParts cur = read_parts(tot);
+                UsageParts delta;
+                if (cur.total() >= prev_parts.total()) {
+                    delta.input = cur.input - prev_parts.input;
+                    delta.output = cur.output - prev_parts.output;
+                    delta.cache_read = cur.cache_read - prev_parts.cache_read;
+                    delta.cache_write = cur.cache_write - prev_parts.cache_write;
+                } else {
+                    // 上下文被压缩过：这一轮的总量从头起算，用事件自带的增量。
+                    delta = read_parts(info ? info->at("last_token_usage") : nullptr);
                 }
-                long delta = cur - prev_total;
-                if (delta < 0) {                       // 上下文被压缩过，那一轮从 last 重新起算
-                    const Json* last = info ? info->at("last_token_usage") : nullptr;
-                    const Json* v = last ? last->at("input_tokens") : nullptr;
-                    delta = (v && v->kind == Json::NUM) ? (long)v->num : cur;
+                prev_parts = cur;
+                if (d >= since && delta.total() > 0) {
+                    total_parts.input += delta.input;
+                    total_parts.output += delta.output;
+                    total_parts.cache_read += delta.cache_read;
+                    total_parts.cache_write += delta.cache_write;
+                    std::time_t tt = (std::time_t)d;
+                    std::tm tv;
+                    localtime_r(&tt, &tv);
+                    hourly[tv.tm_hour] += delta.total();
                 }
-                prev_total = cur;
-                if (d >= since) tokens += delta;
+                if (!model.empty()) models[model] += (d >= since ? delta.total() : 0);
+
+                const Json* rl = p->at("rate_limits");
+                if (rl) {
+                    auto window = [&](const char* k, QuotaWindow& w) {
+                        const Json* s = rl->at(k);
+                        if (!s) return;
+                        const Json* up = s->at("used_percent");
+                        if (!up || up->kind != Json::NUM) return;
+                        if (d <= w.seen_at) return;
+                        w.known = true;
+                        // Codex 的 used_percent 是 0–100 的数；内部统一存 0–1 的占比。
+                        w.used = up->num / 100.0;
+                        if (w.used < 0) w.used = 0;
+                        if (w.used > 1) w.used = 1;
+                        const Json* rs = s->at("resets_at");
+                        w.resets_at = (rs && rs->kind == Json::NUM) ? rs->num : 0;
+                        const Json* wm = s->at("window_minutes");
+                        w.window_min = (wm && wm->kind == Json::NUM) ? (int)wm->num : 0;
+                        w.seen_at = d;
+                    };
+                    window("primary", quota.five);
+                    window("secondary", quota.week);
+                    // 主窗口不一定是 5 小时（历史上有 reserve 档），按声明的分钟数归位。
+                    if (quota.five.known && quota.five.window_min > 0 &&
+                        quota.five.window_min != 300 && quota.five.window_min < 1440) {
+                        quota.five.window_min = 300;   // 非 300 的短窗仍归「5 小时」一栏，只在说明里写实际分钟
+                    }
+                    if (const std::string* pl = rl->str_at("plan_type")) if (!pl->empty()) quota.plan = *pl;
+                    const Json* cr = rl->at("credits");
+                    if (cr) {
+                        const Json* bal = cr->at("balance");
+                        if (bal && bal->kind == Json::NUM) {
+                            quota.credits_balance = bal->num;
+                            quota.credits_known = true;
+                        }
+                    }
+                    quota.known = quota.five.known || quota.week.known || quota.credits_known;
+                }
             }
             if (rtype && *rtype == "response_item" && *pt == "message") {
                 const std::string* role = p->str_at("role");
@@ -452,24 +606,60 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
         }
         if (last_ts <= 0) continue;
 
+        snap.usage.input += total_parts.input;
+        snap.usage.output += total_parts.output;
+        snap.usage.cache_read += total_parts.cache_read;
+        snap.usage.cache_write += total_parts.cache_write;
+        for (int h = 0; h < 24; h++) snap.hourly[h] += hourly[h];
+        for (const auto& kv : models) {
+            if (kv.second <= 0) continue;
+            bool found = false;
+            for (auto& m : snap.models)
+                if (m.name == kv.first) { m.tokens += kv.second; found = true; break; }
+            if (!found) snap.models.push_back({kv.first, kv.second});
+        }
+        if (quota.five.seen_at > snap.quota.five.seen_at) snap.quota.five = quota.five;
+        if (quota.week.seen_at > snap.quota.week.seen_at) snap.quota.week = quota.week;
+        if (quota.credits_known && !snap.quota.credits_known) {
+            snap.quota.credits_balance = quota.credits_balance;
+            snap.quota.credits_known = true;
+        }
+        if (!quota.plan.empty()) snap.quota.plan = quota.plan;
+        snap.quota.known = snap.quota.five.known || snap.quota.week.known || snap.quota.credits_known;
+
+        long best = 0;
+        std::string top_model;
+        for (const auto& kv : models)
+            if (kv.second > best) { best = kv.second; top_model = kv.first; }
+
         Session s;
         s.id = "codex-" + sid;
         s.project = project;
         s.title = title.empty() ? project : title;
         s.last_activity = last_ts;
+        s.first_activity = (first_ts >= since) ? first_ts : 0;
+        s.last_cmd = last_cmd;
         s.state = have_outcome ? outcome : ST_RESTING;
         s.error_text = err;
-        s.tokens = tokens;
+        s.tokens = total_parts.total();
+        s.usage = total_parts;
+        s.model = top_model;
         s.credits = 0;                                 // Codex 没有 credits 字段，不编
         auto it = latest.find(s.id);
         if (it == latest.end()) {
             merged_tokens[s.id] = s.tokens;
+            merged_usage[s.id] = s.usage;
             latest[s.id] = std::move(s);
         } else {
             // 同一个 session_id 的多次 resume：状态与标题取最新那次，词元取并集。
             merged_tokens[s.id] += s.tokens;
+            merged_usage[s.id].input += s.usage.input;
+            merged_usage[s.id].output += s.usage.output;
+            merged_usage[s.id].cache_read += s.usage.cache_read;
+            merged_usage[s.id].cache_write += s.usage.cache_write;
             if (s.last_activity >= it->second.last_activity) {
                 s.tokens = 0;
+                s.usage = UsageParts{};
                 it->second = std::move(s);
             }
         }
@@ -477,9 +667,12 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
 
     for (auto& kv : latest) {
         kv.second.tokens = merged_tokens[kv.first];
+        kv.second.usage = merged_usage[kv.first];
         if (now - kv.second.last_activity > kNeedsUserStale) kv.second.state = ST_RESTING;
         snap.sessions.push_back(kv.second);
     }
+    std::sort(snap.models.begin(), snap.models.end(),
+              [](const ModelUse& a, const ModelUse& b) { return a.tokens > b.tokens; });
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
     return snap;
@@ -539,18 +732,58 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     sqlite3_exec(db, "PRAGMA query_only=1;", nullptr, nullptr, nullptr);
 
     // 窗内词元与写入时刻按 message 聚合；只看「最新一条 message」会把一整天的用量漏掉。
-    struct Win { long tokens = 0; };
+    struct Win { UsageParts parts; };
     std::map<std::string, Win> wins;
     {
         std::ostringstream q;
-        q << "select session_id, sum(coalesce(json_extract(data,'$.tokens.input'), 0) "
-             "+ coalesce(json_extract(data,'$.tokens.cache.read'), 0)) "
+        q << "select session_id, "
+             "sum(coalesce(json_extract(data,'$.tokens.input'), 0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.output'), 0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.cache.read'), 0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.cache.write'), 0)) "
              "from message where time_created >= " << (long long)(since * 1000) << " group by session_id;";
         sqlite3_stmt* st = nullptr;
         if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK)
-            while (sqlite3_step(st) == SQLITE_ROW)
-                wins[col_text(st, 0)].tokens = (long)sqlite3_column_double(st, 1);
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                Win w;
+                w.parts.input = (long)sqlite3_column_double(st, 1);
+                w.parts.output = (long)sqlite3_column_double(st, 2);
+                w.parts.cache_read = (long)sqlite3_column_double(st, 3);
+                w.parts.cache_write = (long)sqlite3_column_double(st, 4);
+                wins[col_text(st, 0)] = w;
+            }
         sqlite3_finalize(st);
+    }
+    // 按本机小时分桶：一条 group by 就够了，别为 24 格再读一遍表。
+    {
+        std::ostringstream q;
+        q << "select cast(strftime('%H', time_created/1000, 'unixepoch', 'localtime') as integer) h, "
+             "sum(coalesce(json_extract(data,'$.tokens.input'), 0) "
+             "+ coalesce(json_extract(data,'$.tokens.output'), 0) "
+             "+ coalesce(json_extract(data,'$.tokens.cache.read'), 0) "
+             "+ coalesce(json_extract(data,'$.tokens.cache.write'), 0)) "
+             "from message where time_created >= " << (long long)(since * 1000) << " group by h;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK)
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const int h = (int)sqlite3_column_int64(st, 0);
+                if (h >= 0 && h < 24) snap.hourly[h] += (long)sqlite3_column_double(st, 1);
+            }
+        sqlite3_finalize(st);
+    }
+
+    // 轮次 = 这个会话真发出去的 user_prompt 条数（与 qoder 数「不带 toolUseResult 的
+    // user 记录」同一口径）。App 的标题列不数这个，界面上的「第 N 轮」全靠它。
+    std::map<std::string, int> turns;
+    {
+        std::ostringstream q;
+        q << "select session_id, count(*) from message "
+             "where json_extract(data,'$.semantics.kind') = 'user_prompt' group by session_id;";
+        sqlite3_stmt* tst = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &tst, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(tst) == SQLITE_ROW) turns[col_text(tst, 0)] = sqlite3_column_int(tst, 1);
+            sqlite3_finalize(tst);
+        }
     }
 
     // sess_subagent_agent_* 是主会话派生的子代理，完工会并回主会话，单独列会把一张卡占满。
@@ -580,6 +813,7 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         Session s;
         s.id = "zcode-" + sid;
         s.title = title;
+        s.turns = turns.count(sid) ? turns[sid] : 0;
         // 没绑项目的会话落在 ~/.zcode/workspace/default，取末级目录只会印出 "default"。
         s.project = (dir.empty() || dir.find("/.zcode/workspace/") != std::string::npos)
                         ? "未绑定项目" : basename_last(dir);
@@ -588,7 +822,14 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         s.last_activity = (double)upd / 1000.0;
         s.state = ST_RESTING;
         auto w = wins.find(sid);
-        s.tokens = w == wins.end() ? 0 : w->second.tokens;
+        if (w != wins.end()) {
+            s.usage = w->second.parts;
+            s.tokens = s.usage.total();
+            snap.usage.input += s.usage.input;
+            snap.usage.output += s.usage.output;
+            snap.usage.cache_read += s.usage.cache_read;
+            snap.usage.cache_write += s.usage.cache_write;
+        }
 
         Json j;
         if (!data.empty() && json_parse(data.data(), data.size(), j)) {
@@ -608,6 +849,56 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         snap.sessions.push_back(std::move(s));
     }
     sqlite3_finalize(st);
+
+    // 子代理对话（subagent_child）：主任务派出去的调研员/执行者，挂在 parent 下。
+    // 上面主列表把它们滤掉了（单独列会占满面板），这里按归属收回——每个父会话最多
+    // 带 8 条，够面板展开用。判态与主列表同一套：末条响应 completed 为空 = 还在跑。
+    {
+        const char* csql =
+            "select s.parent_id, s.id, s.title, s.time_updated, "
+            "(select m.data from message m where m.session_id = s.id "
+            " and json_extract(m.data,'$.semantics.kind') = 'assistant_response' "
+            " order by m.time_created desc, m.sequence desc limit 1) "
+            "from session s where s.task_type = 'subagent_child' and s.time_deleted is null "
+            "order by s.time_updated desc limit 300;";
+        sqlite3_stmt* cst = nullptr;
+        std::map<std::string, int> by_parent;   // 父 sid → snap.sessions 下标
+        for (size_t i = 0; i < snap.sessions.size(); i++)
+            if (snap.sessions[i].id.rfind("zcode-", 0) == 0)
+                by_parent[snap.sessions[i].id.substr(6)] = (int)i;
+        if (sqlite3_prepare_v2(db, csql, -1, &cst, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(cst) == SQLITE_ROW) {
+                auto it = by_parent.find(col_text(cst, 0));
+                if (it == by_parent.end()) continue;
+                Session& parent = snap.sessions[(size_t)it->second];
+                if (parent.children.size() >= 8) continue;
+                Session::Child c;
+                c.id = col_text(cst, 1);
+                c.title = col_text(cst, 2);
+                c.updated = sqlite3_column_int64(cst, 3) / 1000.0;
+                Json j;
+                const std::string data = col_text(cst, 4);
+                c.running = true;
+                if (!data.empty() && json_parse(data.data(), data.size(), j)) {
+                    const Json* time = j.at("time");
+                    const Json* completed = time ? time->at("completed") : nullptr;
+                    if (completed && completed->kind == Json::NUM && completed->num > 0) {
+                        c.running = false;
+                        c.updated = completed->num / 1000.0;
+                    }
+                }
+                if (now - c.updated > 1800.0) c.running = false;   // 半小时没动静就别装活跃
+                if (c.title.empty()) c.title = "(子任务)";
+                parent.children.push_back(std::move(c));
+            }
+            sqlite3_finalize(cst);
+        }
+        if (getenv("AGENTPING_SCAN_TRACE")) {
+            int n = 0;
+            for (const auto& se : snap.sessions) n += (int)se.children.size();
+            fprintf(stderr, "[scan] zcode 会话 %zu 条，挂上子对话 %d 条\n", snap.sessions.size(), n);
+        }
+    }
     sqlite3_close(db);
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
@@ -731,13 +1022,43 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
             }
             if (!archived) workbuddy_judge(tail, now, s);
             if (s.last_activity >= since) {
-                scan_window(it->second, since, "\"usage\"", [&](const Json& rec, double) {
+                scan_window(it->second, since, "\"usage\"", [&](const Json& rec, double ts) {
                     const Json* pd = rec.at("providerData");
                     const Json* u = pd ? pd->at("usage") : nullptr;
                     if (!u) return;
-                    // inputTokens 实测已含缓存命中，不能再加一遍
-                    const Json* v = u->at("inputTokens");
-                    if (v && v->kind == Json::NUM) s.tokens += (long)v->num;
+                    auto num = [&](const Json* o, const char* k) -> long {
+                        const Json* v = o ? o->at(k) : nullptr;
+                        return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+                    };
+                    UsageParts p;
+                    // input_tokens 实测已含缓存命中，不能再加一遍
+                    p.cache_read = num(u, "cache_read_input_tokens");
+                    const long raw_in = num(u, "input_tokens");
+                    p.input = raw_in > p.cache_read ? raw_in - p.cache_read : 0;
+                    p.output = num(u, "output_tokens");
+                    p.cache_write = num(u, "cache_write_input_tokens");
+                    s.usage.input += p.input;
+                    s.usage.output += p.output;
+                    s.usage.cache_read += p.cache_read;
+                    s.usage.cache_write += p.cache_write;
+                    s.tokens += p.total();
+                    if (ts > 0) {
+                        std::time_t tt = (std::time_t)ts;
+                        std::tm tv;
+                        localtime_r(&tt, &tv);
+                        snap.hourly[tv.tm_hour] += p.total();
+                    }
+                    if (pd) {
+                        if (const std::string* m = pd->str_at("model")) {
+                            if (!m->empty()) {
+                                bool found = false;
+                                for (auto& mu : snap.models)
+                                    if (mu.name == *m) { mu.tokens += p.total(); found = true; break; }
+                                if (!found) snap.models.push_back({*m, p.total()});
+                                if (s.model.empty() || p.total() > 0) s.model = *m;
+                            }
+                        }
+                    }
                 });
             }
             if (now - s.last_activity > kNeedsUserStale && s.state != ST_FAILED) {
@@ -745,6 +1066,10 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
                 s.inferred_wait = false;
             }
         }
+        snap.usage.input += s.usage.input;
+        snap.usage.output += s.usage.output;
+        snap.usage.cache_read += s.usage.cache_read;
+        snap.usage.cache_write += s.usage.cache_write;
         snap.sessions.push_back(std::move(s));
     }
     sqlite3_finalize(st);
@@ -775,6 +1100,24 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
 
     const long long cutoff_ms = (long long)((now - kDaysBack * 86400) * 1000);
     const long long since_ms = (long long)(since * 1000);
+    // 按本机小时分桶；用量在 part 上，message 那一侧没有 tokens。
+    {
+        std::ostringstream q;
+        q << "select cast(strftime('%H', p.time_created/1000, 'unixepoch', 'localtime') as integer) h, "
+             "sum(coalesce(json_extract(p.data,'$.tokens.input'), 0) "
+             "+ coalesce(json_extract(p.data,'$.tokens.output'), 0) "
+             "+ coalesce(json_extract(p.data,'$.tokens.cache.read'), 0) "
+             "+ coalesce(json_extract(p.data,'$.tokens.cache.write'), 0)) "
+             "from part p where p.time_created >= " << since_ms
+          << " and json_extract(p.data,'$.type') = 'step-finish' group by h;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK)
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const int h = (int)sqlite3_column_int64(st, 0);
+                if (h >= 0 && h < 24) snap.hourly[h] += (long)sqlite3_column_double(st, 1);
+            }
+        sqlite3_finalize(st);
+    }
     // 一条语句拿齐一行要的东西：part 有 session_id 索引，60 条相关子查询量不出来。
     std::ostringstream q;
     q << "select s.id, coalesce(s.title, ''), coalesce(s.directory, ''), s.time_updated, "
@@ -789,7 +1132,13 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
          " and json_extract(m.data,'$.role') = 'user' and m.time_created >= " << since_ms << "), "
          "(select p.data from part p where p.session_id = s.id "
          " and json_extract(p.data,'$.type') = 'tool' "
-         " order by p.time_created desc, p.id desc limit 1) "
+         " order by p.time_created desc, p.id desc limit 1), "
+         "(select json_object('i', ifnull(sum(json_extract(p.data,'$.tokens.input')), 0), "
+         " 'o', ifnull(sum(json_extract(p.data,'$.tokens.output')), 0), "
+         " 'r', ifnull(sum(json_extract(p.data,'$.tokens.cache.read')), 0), "
+         " 'w', ifnull(sum(json_extract(p.data,'$.tokens.cache.write')), 0)) from part p "
+         " where p.session_id = s.id and json_extract(p.data,'$.type') = 'step-finish' "
+         " and p.time_created >= " << since_ms << ") "
          "from session s where coalesce(s.time_archived, 0) = 0 "
          "and s.time_updated >= " << cutoff_ms << " order by s.time_updated desc limit 60;";
     sqlite3_stmt* st = nullptr;
@@ -815,7 +1164,25 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
         if (s.title.empty()) s.title = s.project;
         s.cwd = dir;
         s.last_activity = (double)upd / 1000.0;
-        s.tokens = (long)sqlite3_column_int64(st, 5);
+        // 四档分项在第 8 列；旧的第 5 列不含 output，只作为解析失败时的兜底。
+        std::string parts_json = col_text(st, 8);
+        Json pj;
+        if (!parts_json.empty() && json_parse(parts_json.data(), parts_json.size(), pj)) {
+            auto pnum = [&](const char* k) -> long {
+                const Json* v = pj.at(k);
+                return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+            };
+            s.usage.input = pnum("i");
+            s.usage.output = pnum("o");
+            s.usage.cache_read = pnum("r");
+            s.usage.cache_write = pnum("w");
+        }
+        s.tokens = s.usage.total();
+        if (s.tokens == 0) s.tokens = (long)sqlite3_column_int64(st, 5);
+        snap.usage.input += s.usage.input;
+        snap.usage.output += s.usage.output;
+        snap.usage.cache_read += s.usage.cache_read;
+        snap.usage.cache_write += s.usage.cache_write;
         s.turns = (int)sqlite3_column_int64(st, 6);
         // 库里没有 credits 这一档（cost 是美元），而表头那格是 cr，不混。
         s.credits = 0;
@@ -926,7 +1293,8 @@ std::string hook_one_line(const std::string& s, std::size_t max_cp) {
 ///   details.message            —— 「Allow Bash to run: …」这类短提示
 ///   details.input.questions[]  —— AskUserQuestion：{question, header, options[{label,description}]}
 /// input 实测见过字典、也见过写成字符串，两种都接。
-void hook_question(const Json& obj, std::string& q, std::vector<std::string>& opts) {
+void hook_question(const Json& obj, std::string& q, std::vector<std::string>& opts,
+                   std::vector<std::string>& desc) {
     const Json* det = obj.at("details");
     const std::string* top_msg = obj.str_at("message");
     if (!det || det->kind != Json::OBJ) {
@@ -957,13 +1325,16 @@ void hook_question(const Json& obj, std::string& q, std::vector<std::string>& op
     if (os && os->kind == Json::ARR)
         for (std::size_t i = 0; i < os->arr.size() && opts.size() < 3; i++) {
             const std::string* lb = os->arr[i].str_at("label");
-            if (lb && !lb->empty()) opts.push_back(hook_one_line(*lb, 24));
+            if (!lb || lb->empty()) continue;
+            opts.push_back(hook_one_line(*lb, 48));
+            const std::string* ds = os->arr[i].str_at("description");
+            desc.push_back(ds ? hook_one_line(*ds, 120) : std::string());
         }
 }
 
 struct HookSig {
-    std::string agent, session, question, tool;
-    std::vector<std::string> options;
+    std::string agent, session, question, tool, reason;
+    std::vector<std::string> options, option_desc;
     double at = 0;
     bool needs_approval = false;
 };
@@ -1002,7 +1373,14 @@ void apply_hook_signals(Snapshot& snap, double now) {
             if (const std::string* t = obj.str_at("tool_name")) g.tool = *t;
             else if (const std::string* t = obj.str_at("toolName")) g.tool = *t;
         }
-        hook_question(obj, g.question, g.options);
+        hook_question(obj, g.question, g.options, g.option_desc);
+        // 「触发说明」只认批准类信号自带的说明原文；问句不算说明，别把问句复读一遍。
+        if (g.needs_approval) {
+            const std::string* m = obj.str_at("message");
+            if (!m && det) m = det->str_at("message");
+            if (!m) m = obj.str_at("reason");
+            if (m && !m->empty()) g.reason = hook_one_line(*m, 90);
+        }
         sigs.push_back(std::move(g));
     }
     std::sort(sigs.begin(), sigs.end(), [](const HookSig& a, const HookSig& b) { return a.at > b.at; });
@@ -1038,11 +1416,17 @@ void apply_hook_signals(Snapshot& snap, double now) {
                     g.agent.c_str(), utf8_clip(s.title, 18, "").c_str(), s.last_activity - g.at);
             continue;
         }
-        s.state = g.needs_approval ? ST_AWAIT : ST_NEEDS_USER;
+        // 带问句或候选项的信号就是「它停下来在问你」——归介入组；纯 idle 提示仍按
+        // 「这一轮无错收尾、球回到你这边」计入已完成。不这么分，AskUserQuestion 会掉进
+        // 「今日已结束」，问题原文和选项在屏上却没有一条能点进去的详情。
+        const bool asks = g.needs_approval || !g.question.empty() || !g.options.empty();
+        s.state = asks ? ST_AWAIT : ST_NEEDS_USER;
+        if (asks) s.await_since = g.at;
         s.inferred_wait = false;              // CLI 亲口说的，就不再是推断
         if (!g.question.empty()) s.question = g.question;
-        if (!g.options.empty()) s.options = g.options;
+        if (!g.options.empty()) { s.options = g.options; s.option_desc = g.option_desc; }
         if (!g.tool.empty()) s.tool = g.tool;
+        if (!g.reason.empty()) s.trigger = g.reason;
         landed++;
     }
     snap.hook_landed = landed;
@@ -1102,6 +1486,20 @@ std::string snapshot_dump(const Snapshot& s) {
                  (int)a.available, a.sessions.size(),
                  a.scan_error.empty() ? "" : " scanError=", a.scan_error.c_str());
         out += buf;
+        if (a.usage.total() > 0 || a.quota.known) {
+            std::string top = a.models.empty() ? "" : a.models.front().name;
+            snprintf(buf, sizeof buf, "  usage in=%ld out=%ld cr=%ld cw=%ld total=%ld model=%s",
+                     a.usage.input, a.usage.output, a.usage.cache_read, a.usage.cache_write,
+                     a.usage.total(), top.c_str());
+            out += buf;
+            if (a.quota.known) {
+                snprintf(buf, sizeof buf, " | 5h=%.1f%%(reset %.0f, %dmin) wk=%.1f%%(reset %.0f) plan=%s",
+                         a.quota.five.used * 100, a.quota.five.resets_at, a.quota.five.window_min,
+                         a.quota.week.used * 100, a.quota.week.resets_at, a.quota.plan.c_str());
+                out += buf;
+            }
+            out += "\n";
+        }
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
             snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s\n",
@@ -1113,5 +1511,7 @@ std::string snapshot_dump(const Snapshot& s) {
     }
     return out;
 }
+
+std::string hook_inbox_dir() { return hook_dir(); }
 
 }  // namespace ap

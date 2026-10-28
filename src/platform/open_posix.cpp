@@ -102,3 +102,21 @@ extern "C" int ap_open(const char* agent_id, const char* session_id, char* reaso
     Say(reason, out_len, "三条退路全落空（Linux 侧落点未实机验证）");
     return 1;
 }
+
+// ap_open 的加 cwd 版。Linux 侧 cwd 同样不参与落点：这里没有「按工作区打开」的 URL，
+// 参数保留只为让 core 侧的调用形状与 macOS 一致（同一个阶梯、同一套 reason）。
+extern "C" int ap_open2(const char* agent_id, const char* session_id, const char* cwd,
+                        char* reason, int out_len) {
+    (void)cwd;
+    return ap_open(agent_id, session_id, reason, out_len);
+}
+
+// ZCode 的会话级落点在 macOS 上是替用户敲 ⌘K（AX 投键，见 open_macos.mm）。
+// 本平台没有等价能力：ZCode 没有会话级 URL，也没有能驱动别的 App 检索框的通用通道
+// （xdotool 那类要真桌面会话在场，本机从未在有桌面的 Linux 上跑过，不敢当作可用）。
+// 返回非 0 并写清原因，调用方按 open.h 的契约退回上面的阶梯——不静默、也不谎称跳到了。
+extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
+    (void)title;
+    Say(reason, out_len, "本平台没有 ⌘K 驱动，落点退回唤起或打开记录目录");
+    return 1;
+}

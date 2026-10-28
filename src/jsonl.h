@@ -38,6 +38,8 @@ std::vector<Json> tail_records(const std::string& path,
 struct HeadFacts {
     std::string cwd;
     std::string prompt;   // 空 = 没有可用的人类正文（注入块不算）
+    /// 头部第一条带 timestamp 的记录时刻。`.live` 的「连续」从这里起算；0 = 头部没读到时间。
+    double first_ts = 0;
 };
 HeadFacts head_facts(const std::string& path, std::size_t max_bytes = 256 * 1024);
 

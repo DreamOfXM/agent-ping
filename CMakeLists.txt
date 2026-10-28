@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(agent_ping_cpp CXX)
+project(agent_ping_cpp VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,7 @@ if(APPLE)
   set_source_files_properties(${NOTIFY_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(LANG_SRC src/platform/lang_macos.mm)
   set_source_files_properties(${LANG_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(AUTOSTART_SRC src/platform/autostart_macos.mm)
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
   set(PLATFORM_LIBS ${COCOA_LIB} ${IOKIT_LIB} ${OPENGL_LIB} ${COREGRAPHICS_LIB} ${USERNOTIFICATIONS_LIB})
 else()
@@ -58,6 +59,7 @@ else()
   set(OPEN_SRC src/platform/open_posix.cpp)
   set(NOTIFY_SRC src/platform/notify_posix.cpp)
   set(LANG_SRC src/platform/lang_posix.cpp)
+  set(AUTOSTART_SRC src/platform/autostart_posix.cpp)
   set(PLATFORM_LIBS ${OPENGL_LIB})
   if(LIBDBUS_FOUND)
     set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
@@ -81,13 +83,16 @@ add_executable(pin_imgui_shell
   src/jsonl.cpp
   src/scan.cpp
   src/alert.cpp
+  src/hook_install.cpp
   ${STATUSBAR_SRC}
   ${OPEN_SRC}
   ${NOTIFY_SRC}
   ${LANG_SRC}
+  ${AUTOSTART_SRC}
   ${IMGUI_SRC}
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1")
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})
