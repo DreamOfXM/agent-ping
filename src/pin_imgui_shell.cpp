@@ -9,6 +9,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
+#include "misc/freetype/imgui_freetype.h"
 #include "platform/statusbar.h"
 #include "platform/open.h"
 #include "platform/notify.h"
@@ -548,6 +549,10 @@ static const Key kStr[] = {
                         "코딩 세션을 시작하면 여기에 표시됩니다."}},
     {"r_done_today",   {"今日完成", "Done today", "Heute erledigt", "Completate oggi",
                         "本日完了", "오늘 완료"}},
+    {"r_view_done",    {"查看今天的完成记录 %d", "Review today’s %d completed sessions",
+                        "Heute %d abgeschlossene Sitzungen ansehen",
+                        "Rivedi le %d sessioni completate oggi",
+                        "本日の完了記録 %d 件を見る", "오늘 완료 기록 %d개 보기"}},
     {"r_show_all",     {"查看全部会话", "Show all sessions", "Alle Sitzungen zeigen",
                         "Mostra tutte le sessioni", "すべてのセッションを表示", "모든 세션 보기"}},
     {"r_search",       {"搜索会话", "Search sessions", "Sitzungen suchen", "Cerca sessioni",
@@ -852,8 +857,8 @@ static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false
                                         false, false, false, false,
                                         false, false, false, false, false};
 // 稿子里的粗体只有两处落在 mono 上（num-xl 600、「N 轮」semibold），本机有
-// JetBrainsMono-SemiBold 可以直接对应。头像首字母（ToolGlyph）也是 600，但它的 family
-// 走 --font-sans，而 NotoSans 系只有常规字重 —— 那两档只能按常规画，差异记在 RESULT.md。
+// JetBrainsMono-SemiBold 可以直接对应。sans 侧的 500/600/650 没有第二份文件，
+// 靠 g_fontB 那张「同一文件 + 轮廓加粗」的烘焙出来（见下面的 FaceFont）。
 static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false, false, false,
                                         false, false, false, false,
                                         false, false, false, false, false, false,
@@ -863,8 +868,8 @@ static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false
                                         false, false, false, false, false, false,
                                         false, false, false, false,
                                         false, false, false, false, false};
-// 0＝400 / 1＝500 / 2＝600。字体包里的 sans 只有 Regular 一档，500/600 在绘制时按
-// 半个像素的横向重描补出来（见 DrawTextRun）；mono 档有真 SemiBold，不再叠这一层。
+// 0＝400 / 1＝500 / 2＝600。字体包里的 sans 只有 Regular 一档，>0 的档在烘焙时多烘一张
+// 轮廓加粗的脸（g_fontB，见 FaceFont）；mono 档有真 SemiBold，不再烘这一张。
 static const unsigned char kTierW[TIER_N] = {0, 2, 0, 0, 0, 1, 1, 1,
                                              0, 1, 0, 0,
                                              1, 0, 1, 1, 1, 2,
@@ -884,6 +889,14 @@ static bool FaceUsed(int t, int f) {
     return true;
 }
 static ImFont* g_font[TIER_N][FACE_N] = {};
+// 粗体另烘一份：stb 没法给轮廓加粗，只能画两遍错开一格（会留下双线/灰边）。
+// 这一份走 FreeType 加载器 + FT_GlyphSlot_Embolden —— 在栅格化之前把轮廓向外撑
+// em/24 像素，边缘只 AA 一次。只有非等宽的真粗档才有；等宽档用自带的 SemiBold 文件。
+static ImFont* g_fontB[TIER_N][FACE_N] = {};
+static ImFont* FaceFont(int tier, int face) {
+    ImFont* b = g_fontB[tier][face];
+    return b ? b : g_font[tier][face];
+}
 static std::set<unsigned int> g_cover[FACE_N];   // 该字体 cmap 实际有的码点
 // ImGui/stb 的 size_pixels 不是 CSS 的 font-size：它按「行高」解释，
 // 即 (hhea.ascender - hhea.descender) / unitsPerEm 个 em。不换算的话同一份稿子
@@ -982,7 +995,7 @@ static float TextWidth(const std::string& text, int locale, int tier, float trac
     float w = 0;
     for (const auto& r : SplitRuns(text.c_str(), locale, tier)) {
         float px = Bake(tier, r.face);
-        w += g_font[tier][r.face]->CalcTextSizeA(px, 1e9f, 0.0f, r.text.c_str()).x + track;
+        w += FaceFont(tier, r.face)->CalcTextSizeA(px, 1e9f, 0.0f, r.text.c_str()).x + track;
     }
     if (!text.empty()) w -= track;
     return w > 0 ? w : 0;
@@ -992,33 +1005,17 @@ static float TextHeight(int tier) { return kTierPx[tier] * 1.2f; }
 
 // 绝对定位写一行：混排下 ImGui 的 SameLine 会把 x 记账搞乱（实测字形重叠），
 // 而且这一版面板要画卡框/胶囊/条码，本来就得自己管坐标。
-// sans 的 500/600 没有真字重：右移 0.35/0.55pt 再描一遍，2x 帧缓冲里就是半像素级加粗。
-static float SynthWeight(int tier) {
-    if (MonoTier(tier) && kTierBold[tier]) return 0.0f;   // 真 SemiBold，别再叠
-    // 0.35/0.55 看起来像「加粗」，实际几乎不生效：RenderText 会把起笔截到整点，
-    // 亚像素偏移只在零头恰好进位时才多画一格 —— 同一段文字有的粗有的没粗。
-    // 现在第二遍走 TextNoPixelSnap，偏移就是真偏移；0.5pt = 2× 屏上 1 个设备像素。
-    return kTierW[tier] == 1 ? 0.5f : (kTierW[tier] == 2 ? 0.75f : 0.0f);
-}
 static float DrawTextRun(ImDrawList* dl, float x, float y, const std::string& text, int locale,
                          ImU32 col, int tier, float track = 0.0f) {
     float cx = x;
     float ref_asc = AscentPx(tier, RefFace(tier, locale));
-    const float synth = SynthWeight(tier);
     for (const auto& r : SplitRuns(text.c_str(), locale, tier)) {
+        ImFont* f = FaceFont(tier, r.face);
         float px = Bake(tier, r.face);
-        ImVec2 sz = g_font[tier][r.face]->CalcTextSizeA(px, 1e9f, 0.0f, r.text.c_str());
-        const ImVec2 pos(cx, y + ref_asc - AscentPx(tier, r.face));
-        // 第一遍按 ImGui 的常规对齐落点；第二遍从同一个整点起笔、只横向偏 synth，
-        // 两遍之间关掉像素对齐，偏移量才不随这一行的零头变化。
-        const float bx = (float)(int)pos.x, by = (float)(int)pos.y;
-        dl->AddText(g_font[tier][r.face], px, ImVec2(bx, by), col, r.text.c_str());
-        if (synth > 0.0f) {
-            const ImDrawListFlags saved = dl->Flags;
-            dl->Flags |= ImDrawListFlags_TextNoPixelSnap;
-            dl->AddText(g_font[tier][r.face], px, ImVec2(bx + synth, by), col, r.text.c_str());
-            dl->Flags = saved;
-        }
+        ImVec2 sz = f->CalcTextSizeA(px, 1e9f, 0.0f, r.text.c_str());
+        // 行框顶对齐到整点：字形的横向零头随 advance 走，起笔落在整点上才不会被图集重采样一次。
+        const float bx = (float)(int)cx, by = (float)(int)(y + ref_asc - AscentPx(tier, r.face));
+        dl->AddText(f, px, ImVec2(bx, by), col, r.text.c_str());
         cx += sz.x + track;
     }
     if (!text.empty()) cx -= track;
@@ -1502,28 +1499,91 @@ static ImU32 Over(ImU32 base, ImU32 src) {
     return MixA(base, (src & 0x00FFFFFFu) | (255u << 24), a);
 }
 
+// 圆角矩形 + 竖向渐变。
+// 旧版用 20 条横带近似：带宽 h/20 只要大于圆角半径，带心就落在圆角区之外，整条第一带
+// 会被当成直边填满 —— 850 高的面板是 42pt/带、23pt 圆角，四角直接成了直角（实测窗
+// 左上像素＝面板色，光边弧露在方角里侧）。横带在几何上就写不准：圆顶处切线与 x 轴
+// 平行，带高再小，那条带的横向偏差仍是 √(2r·带高)，20 带缩到 200 带也还有 3pt 方肩。
+// 这里按角度铺圆角、整条轮廓一次填：顶点色由 y 插值（线性函数在三角形内插值仍是同一
+// 函数，渐变是精确的），抗锯齿沿用 ImGui 自己的做法 —— 内圈顶点沿内法线缩半个 fringe、
+// 外圈顶点外扩半个 fringe 且 alpha=0。
 static void GradRound(ImDrawList* dl, float x, float y, float w, float h, float r,
                       ImU32 rgbTop, ImU32 rgbBot, ImU32 border) {
-    const int kN = 20;
-    float rr = r > h * 0.5f ? h * 0.5f : r;
-    float rr2 = r > w * 0.5f ? w * 0.5f : r;
-    for (int i = 0; i < kN; i++) {
-        float t0 = (float)i / kN, t1 = (float)(i + 1) / kN;
-        float by0 = y + h * t0, by1 = y + h * t1;
-        float bym = 0.5f * (by0 + by1) - (y + h * 0.5f);      // 到竖向圆心的距离
-        float inset = 0.0f;
-        float lim = h * 0.5f - rr;
-        if (std::fabs(bym) > lim) {                            // 落在上下圆角区
-            float d = std::fabs(bym) - lim;
-            if (d >= rr) { inset = rr2; }
-            else inset = rr - std::sqrt(rr * rr - d * d);
+    if (w <= 0.0f || h <= 0.0f) return;
+    float rr = r;
+    if (rr > h * 0.5f) rr = h * 0.5f;
+    if (rr > w * 0.5f) rr = w * 0.5f;
+    if (rr < 0.0f) rr = 0.0f;
+    auto colAt = [&](float yy) {
+        float t = (yy - y) / h;
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        return MixA(rgbTop, rgbBot, t);
+    };
+    if (rr < 0.75f) {
+        dl->AddRectFilledMultiColor(ImVec2(x, y), ImVec2(x + w, y + h),
+                                    rgbTop, rgbTop, rgbBot, rgbBot);
+    } else {
+        const float kPi = 3.14159265358979f;
+        int seg = (int)(rr * 1.6f) + 2;               // 每 90°：r=23 → 38 段，弦高 < 0.01pt
+        if (seg < 6) seg = 6;
+        if (seg > 48) seg = 48;
+        enum { kMaxPts = 4 + 4 * 49 };
+        ImVec2 pts[kMaxPts];
+        int n = 0;
+        auto arc = [&](float cx, float cy, float a0, float a1) {
+            for (int i = 0; i <= seg && n < kMaxPts; i++) {
+                const float a = a0 + (a1 - a0) * (float)i / (float)seg;
+                pts[n++] = ImVec2(cx + std::cos(a) * rr, cy + std::sin(a) * rr);
+            }
+        };
+        arc(x + rr, y + rr, kPi, kPi * 1.5f);             // 左上 → 上沿起点
+        arc(x + w - rr, y + rr, kPi * 1.5f, kPi * 2.0f);  // 右上 → 右沿起点
+        arc(x + w - rr, y + h - rr, 0.0f, kPi * 0.5f);    // 右下 → 下沿起点
+        arc(x + rr, y + h - rr, kPi * 0.5f, kPi);         // 左下 → 回到起点
+        const float aa = dl->_FringeScale * 0.5f;
+        dl->PrimReserve((n - 2) * 3 + n * 6, n * 2);
+        const unsigned int base = dl->_VtxCurrentIdx;
+        const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+        for (int i = 0; i < n; i++) {
+            const ImVec2& p0 = pts[(i + n - 1) % n];
+            const ImVec2& p1 = pts[i];
+            const ImVec2& p2 = pts[(i + 1) % n];
+            // 顶点法线取前后两条边的外法线均值（顺时针路径里 (dy,-dx) 朝外）。
+            float nx = 0.0f, ny = 0.0f;
+            for (int k = 0; k < 2; k++) {
+                const ImVec2& a = k == 0 ? p0 : p1;
+                const ImVec2& b = k == 0 ? p1 : p2;
+                float ex = b.y - a.y, ey = -(b.x - a.x);
+                const float d2 = ex * ex + ey * ey;
+                const float inv = d2 > 1e-6f ? 1.0f / std::sqrt(d2) : 0.0f;
+                nx += ex * inv;
+                ny += ey * inv;
+            }
+            const float d2 = nx * nx + ny * ny;
+            const float inv = d2 > 1e-6f ? aa / std::sqrt(d2) : 0.0f;
+            nx *= inv;
+            ny *= inv;
+            const ImU32 ci = colAt(p1.y);
+            dl->PrimWriteVtx(ImVec2(p1.x - nx, p1.y - ny), uv, ci);                 // 内圈
+            dl->PrimWriteVtx(ImVec2(p1.x + nx, p1.y + ny), uv, ci & 0x00FFFFFFu);   // 外圈 alpha=0
         }
-        float x0 = x + inset, x1 = x + w - inset;
-        if (x1 - x0 < 0.5f) continue;
-        dl->AddRectFilled(ImVec2(x0, by0), ImVec2(x1, by1), MixA(rgbTop, rgbBot, 0.5f * (t0 + t1)));
+        for (int i = 2; i < n; i++) {
+            dl->PrimWriteIdx((ImDrawIdx)base);
+            dl->PrimWriteIdx((ImDrawIdx)(base + ((i - 1) << 1)));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i << 1)));
+        }
+        for (int i = 0; i < n; i++) {
+            const int i0 = i, i1 = (i + 1) % n;
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i1 << 1)));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i0 << 1)));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i0 << 1) + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i0 << 1) + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i1 << 1) + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(base + (i1 << 1)));
+        }
     }
     if (border)
-        dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f), border, r, 0, 1.0f);
+        dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f), border, rr, 0, 1.0f);
 }
 
 // 圆形头像底：稿子是 22px 圆 + linear-gradient(180deg, hue 26%, hue 8%) + 55% 描边。
@@ -4528,6 +4588,16 @@ static void LoadProbeFixture() {
     pd.run = 1;
     pd.live = 6;
     pd.credits = 469.72;    // Qoder 一路自记计数（不是金额），口径说明沿用 cost_note
+    // 空态探针：只留完成记录，队列真空才有得验（AGENTPING_EMPTY=1，仅探针路径）。
+    if (getenv("AGENTPING_EMPTY")) {
+        pd.rows.erase(std::remove_if(pd.rows.begin(), pd.rows.end(),
+                                     [](const UIRow& r) { return GroupOf(r.state) != G_DONE; }),
+                      pd.rows.end());
+        pd.needs = 0;
+        pd.await_n = 0;
+        pd.run = 0;
+        pd.live = 0;
+    }
     g_pd = std::move(pd);
     g_pd_seq = g_seq.load();
 }
@@ -4692,6 +4762,10 @@ int main(int argc, char** argv) {
     AddChromeText(chrome);
     ImVector<ImWchar> ranges; chrome.BuildRanges(&ranges);
     char path[1024];
+    // 整张图集统一走 FreeType 加载器：1.93 还不支持逐字体换加载器
+    // （imgui_draw.cpp:3127 明确断言 LoaderInit 必须为空）。默认的 stb 没有给轮廓
+    // 加粗的能力，粗档只能靠画两遍错开一格，收尾处会留下双线/灰边。
+    io.Fonts->SetFontLoader(ImGuiFreeType::GetFontLoader());
     int baked = 0;
     for (int t = 0; t < TIER_N; t++) {
         for (int f = 0; f < FACE_N; f++) {
@@ -4701,6 +4775,18 @@ int main(int argc, char** argv) {
             g_font[t][f] = io.Fonts->AddFontFromFileTTF(path, Bake(t, f), &fc, ranges.Data);
             if (!g_font[t][f]) { fprintf(stderr, "字体加载失败 %s @%.1fpx\n", path, Bake(t, f)); return 2; }
             baked++;
+            // 粗档的第二张脸：同一份文件、同一个大小，只多一个「给轮廓加粗」的标志。
+            // 等宽档不烘 —— 它本来就有 JetBrains Mono SemiBold。
+            if (kTierW[t] > 0 && !MonoTier(t)) {
+                ImFontConfig fb; fb.SizePixels = Bake(t, f);
+                fb.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_Bold;
+                g_fontB[t][f] = io.Fonts->AddFontFromFileTTF(path, Bake(t, f), &fb, ranges.Data);
+                if (!g_fontB[t][f]) {
+                    fprintf(stderr, "粗体字形加载失败 %s @%.1fpx\n", path, Bake(t, f));
+                    return 2;
+                }
+                baked++;
+            }
         }
     }
 
@@ -4713,8 +4799,10 @@ int main(int argc, char** argv) {
         glfwGetFramebufferSize(win, &fw, &fh);
         float dens = wh > 0 ? (float)fh / (float)wh : 1.0f;
         for (int t = 0; t < TIER_N; t++)
-            for (int f = 0; f < FACE_N; f++)
+            for (int f = 0; f < FACE_N; f++) {
                 if (g_font[t][f]) g_font[t][f]->CurrentRasterizerDensity = dens;
+                if (g_fontB[t][f]) g_fontB[t][f]->CurrentRasterizerDensity = dens;
+            }
         printf("[字形] %d 档字号 × %d 字体＝烘了 %d 张，栅格密度 %.1fx（窗口 %dx%d / 帧缓冲 %dx%d）\n",
                TIER_N, FACE_N, baked, dens, ww, wh, fw, fh);
     }
@@ -4728,7 +4816,16 @@ int main(int argc, char** argv) {
     // 屏头/菜单栏的品牌图是 GL 纹理，必须在上下文就绪之后建一次。
     BrandUpload();
 
-    std::thread scanner(ScanLoop);
+    // AGENTPING_FIXTURE：用探针样例数据顶掉活扫描（空态、定数版面的实拍验证要走这条）。
+    const bool use_fixture = getenv("AGENTPING_FIXTURE") != nullptr;
+    std::thread scanner;
+    if (use_fixture) {
+        LoadProbeFixture();
+        g_seq.fetch_add(2);          // 实拍条件要求 g_seq≥2
+        g_pd_seq = g_seq.load();
+    } else {
+        scanner = std::thread(ScanLoop);
+    }
 
     auto drawPanel = [&](float x, float y, float w, int loc, int view) {
         ImGui::SetNextWindowPos(ImVec2(x, y));
@@ -4980,7 +5077,7 @@ int main(int argc, char** argv) {
             // 而量字宽会在图集还没建起来时就把字形烘进去（图集此时 RendererHasTextures
             // 还是 false，走的是旧的全量预烘路），实测整屏文字会掉到一成亮度。
             long seq = g_seq.load();
-            if (seq != g_pd_seq) {
+            if (seq != g_pd_seq && !use_fixture) {
                 g_pd_seq = seq;
                 std::lock_guard<std::mutex> lk(g_mtx);
                 RebuildPanel(g_snap);
@@ -5081,8 +5178,9 @@ int main(int argc, char** argv) {
                 time_t when = (time_t)g_snap.scanned_at;
                 char stamp[32];
                 strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&when));
-                // 左上/左下角的 alpha：圆角外应当是 0；圆角内（顶行、横向 20pt 处）应当是 255。
-                int tl = pix[(sh - 1) * sw * 4 + 3], tlin = pix[(sh - 1) * sw * 4 + 40 * 4 + 3];
+                // 左上/左下角的 alpha：圆角外应当是 0；圆角内应当是 255。
+                // 取样点横向 30pt：面板半径 23pt，顶行在 20pt 处正好压在抗锯齿边上（实测 170）。
+                int tl = pix[(sh - 1) * sw * 4 + 3], tlin = pix[(sh - 1) * sw * 4 + 60 * 4 + 3];
                 int bl = pix[3];
                 printf("[实拍] %s (%dx%d，窗口帧缓冲原样) 数据扫描于 %s｜内容高 g_panelH=%.1fpt，"
                        "窗口内容框 %dx%dpt｜alpha 左上=%d 左下=%d 圆角内=%d（左上 0 才说明透明浮层真的生效）\n",
@@ -5100,7 +5198,7 @@ int main(int argc, char** argv) {
             }
         }
         g_quit.store(true);
-        scanner.join();
+        if (scanner.joinable()) scanner.join();
         FT_Done_FreeType(ft);
         return 0;
     }
@@ -5145,6 +5243,13 @@ int main(int argc, char** argv) {
                                   g_view, loc, g_contentH[g_view],
                                   g_bodyBot[g_view].y - g_bodyTop[g_view].y, g_scrollMax[g_view]);
         }
+        if (pass == 0 && getenv("AGENTPING_HITS"))
+            for (const auto& hh : g_hits)
+                if (hh.act == HIT_HISTORY31)
+                    printf("[命中区] 完成记录入口 x %.0f..%.0f y %.0f..%.0f 「%s」｜正文框 %.0f..%.0f\n",
+                           hh.x0, hh.x1, hh.y0, hh.y1, hh.label.c_str(),
+                           g_bodyTop[g_view].y, g_bodyBot[g_view].y);
+        if (pass == 0 && getenv("AGENTPING_HITS")) fflush(stdout);
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -5163,12 +5268,12 @@ int main(int argc, char** argv) {
       struct stat st_out;
       if (!opened || ::stat(out, &st_out) != 0 || st_out.st_size <= 0) {
           fprintf(stderr, "[输出] 没写成：%s——本轮不算出图\n", out);
-          g_quit.store(true); scanner.join(); FT_Done_FreeType(ft);
+          g_quit.store(true); if (scanner.joinable()) scanner.join(); FT_Done_FreeType(ft);
           return 1;
       } }
     printf("[输出] %s (%dx%d)\n", out, w, h);
     g_quit.store(true);
-    scanner.join();
+    if (scanner.joinable()) scanner.join();
     FT_Done_FreeType(ft);
     return 0;
 }

@@ -90,6 +90,9 @@ add_executable(pin_imgui_shell
   ${LANG_SRC}
   ${AUTOSTART_SRC}
   ${IMGUI_SRC}
+  # 粗体字形要真加粗轮廓（FT_GlyphSlot_Embolden）才不糊：只给 pin_imgui_shell 编进来，
+  # i18n_probe 只量覆盖，不需要加载器。
+  ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
 target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1")

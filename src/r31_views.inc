@@ -12,19 +12,17 @@
 //  ③ 每行点击就跳会话；ⓘ 才进详情。稿子把「跳转」和「看详情」分成两颗，这里照抄。
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── 色板：scene.dark 的 18 个变量，逐条照抄 ────────────────────────────────
+// ── 色板：scene.dark 的变量，逐条照抄 ──────────────────────────────────────
+// --glass / --spec / --shade 三条不在表里：它们已被 R31Glass 的九层配方取代。
 static const ImU32 k31Fg       = IM_COL32(240, 242, 247, 255);  // --fg #F0F2F7
 static const ImU32 k31Sec      = IM_COL32(192, 198, 208, 255);  // --secondary #C0C6D0
 static const ImU32 k31Muted    = IM_COL32(168, 177, 191, 255);  // --muted #A8B1BF
 static const ImU32 k31Faint    = IM_COL32(137, 149, 164, 255);  // --faint #8995A4
-static const ImU32 k31Glass    = IM_COL32(242, 248, 255, 9);    // --glass 3.6%
 static const ImU32 k31Hover    = IM_COL32(235, 243, 255, 20);   // --hover 8%
 static const ImU32 k31Sel      = IM_COL32(216, 230, 255, 27);   // --selected 10.5%
 static const ImU32 k31Line     = IM_COL32(213, 229, 249, 32);   // --line 12.5%
 static const ImU32 k31LineSoft = IM_COL32(213, 229, 249, 17);   // 分隔线的弱一档
 static const ImU32 k31Rim      = IM_COL32(231, 241, 255, 64);   // --rim 25%
-static const ImU32 k31Spec     = IM_COL32(255, 255, 255, 46);   // --spec 18%
-static const ImU32 k31Shade    = IM_COL32(0, 0, 0, 70);         // --shade 25%
 static const ImU32 k31Badge    = IM_COL32(255, 255, 255, 15);   // --badge 6%
 static const ImU32 k31Sweep    = IM_COL32(255, 255, 255, 158);  // --sweep 62%
 static const ImU32 k31Blue     = IM_COL32(172, 208, 255, 255);  // --blue #ACD0FF
@@ -33,10 +31,10 @@ static const ImU32 k31Green    = IM_COL32(141, 227, 191, 255);  // --green #8DE3
 static const ImU32 k31White    = IM_COL32(255, 255, 255, 255);
 
 // 面板底：稿子是 rgba(28,34,43,.46) 压在一张壁纸上再磨砂。这里没有壁纸也没有模糊，
-// 46% 会让桌面上的任何亮色透进来、正文对比度掉到读不动，所以压到 98% 再把上下
-// 差出 15 个亮度点，保留稿子那层「不是一块死色」的渐变。
-static const ImU32 k31PanelTop = IM_COL32(36, 44, 56, 232);
-static const ImU32 k31PanelBot = IM_COL32(19, 24, 31, 232);
+// 46% 会让桌面上的任何亮色透进来、正文对比度掉到读不动。2026-10-28 定稿压成实色，
+// 上下差 17 个亮度点；上半段再由 R31Frame 那层 150pt 白纱提回来。
+static const ImU32 k31PanelTop = IM_COL32(24, 31, 42, 255);
+static const ImU32 k31PanelBot = IM_COL32(7, 10, 15, 255);
 static ImU32 R31PanelAt(float yy, float top, float h) {
     float t = h > 1.0f ? (yy - top) / h : 0.0f;
     if (t < 0.0f) t = 0.0f;
@@ -266,22 +264,313 @@ static float R31FmtN(ImDrawList* dl, float x, float y, const char* fmt, long n, 
 }
 
 // ── 材质：一块玻璃卡 ────────────────────────────────────────────────────────
-// 稿子的 .glass = 3.6% 白底 + inset 上受光 / 下阴影 / .5px 描边。磨砂那一层拿不到，
-// 但让卡读起来像玻璃的其实是这三条线，不是模糊。
+// 一块「液态玻璃」在 ImDrawList 里拆成九层，每层都是一个可数的量：
+//   ① 底纱 veil     —— 把面板色提亮多少。玻璃主体要尽量透，靠边而不是靠底
+//   ② 顶沿受光 spec —— 光从上沿打进来，往下两三成高度衰减
+//   ③ 光边 rim      —— 描边一律是光：上沿最亮、两侧次之、下沿最弱（下沿也接光，只是弱）
+//   ④ 内阴影 shade  —— 下沿内侧压暗，卡才有厚度。放在光边里侧，不做成暗描边
+//   ⑤ 上角镜边 arc  —— 圆角处那一小段更亮，读成透镜边缘
+//   ⑥ 外投影 shadow —— 让卡离面板浮起来。面板压成实色后，层级主要靠这层
+//   ⑦ 边缘折射带    —— 左右内侧 2~3px 的弱光带，模拟看穿玻璃边缘时被压缩的背景
+//   ⑧ 面板光场 field—— 面板内建一盏很弱的聚光，玻璃才有东西可反（仍在面板内部）
+//   ⑨ 左上镜面池    —— 窄高光在卡面左上聚成一小滩；液态玻璃读起来「有液体」就靠它
+// 拿不到的是真折射：那要采样窗口背后的像素。这里做的是同一套光学线索，不是
+// backdrop-filter 的等价物——这一条在 README 里明写。
+//
+// 两条来自实拍的修正：
+//  · 全环「上亮下暗」在第一版被量成 38→62→17 的亮暗夹线，读起来是塑料倒角。
+//    改成描边全亮、暗只在内侧，才像玻璃。
+//  · 主体均匀提亮会变成一块雾面板：glass 的辨识度在边上，所以清玻把 veil 压到 2%、
+//    把 rim/arc/镜面池抬上去（2026-10-28 拍板：所有 UI 组件统一清玻）。
+struct RGlass31 {
+    float veil;      // ① 底纱（0..1，叠向冷白）
+    float tintB;     // 冷色分量：0 中性白，1 偏蓝
+    float spec;      // ② 顶沿受光峰值（0..255）
+    float specF;     // ② 受光带高（占 h 的比例）
+    float rim;       // ③ 上沿光边（0..255）
+    float rimS;      // ③ 两侧 = rim × rimS
+    float rimB;      // ③ 下沿 = rim × rimB
+    float shade;     // ④ 下沿内阴影（0..255）
+    float shadowA;   // ⑥ 外投影浓度（0..1）
+    float shadowB;   // ⑥ 外投影 blur（pt）
+    float shadowDy;  // ⑥ 外投影下移（pt）
+    float lens;      // ⑦ 边缘折射带（0..255）
+    float gloss;     // ⑨ 左上镜面池（0..255）
+    float specR;     // ② 受光带右端 = spec × specR（<1 就是左亮右暗的方向光）
+    float lift;      // 额外提亮/压暗（-1..1），烟熏玻璃用负值
+    float field;     // ⑧ 面板光场强度（0 关）
+};
+static const RGlass31 kG31Clear = [] {
+    RGlass31 g{};
+    g.veil = 0.020f; g.tintB = 0.40f;
+    g.spec = 46.0f;  g.specF = 0.09f; g.specR = 0.55f;
+    g.rim = 190.0f;  g.rimS = 0.55f;  g.rimB = 0.32f;
+    g.shade = 8.0f;
+    g.shadowA = 0.22f; g.shadowB = 16.0f; g.shadowDy = 2.0f + 16.0f * 0.22f;
+    g.lens = 12.0f;  g.gloss = 10.0f;
+    g.lift = 0.00f;  g.field = 0.30f;
+    return g;
+}();
+
+// 面板几何与当前配色：R31Frame 每帧回填，玻璃按卡中心采样「我背后是什么颜色」。
+static float g31PX0 = 0.0f, g31PY0 = 0.0f, g31PW = 416.0f, g31PH = 850.0f;
+static ImU32 g31PTop = k31PanelTop, g31PBot = k31PanelBot;
+static ImU32 R31PanelNow(float yy) {
+    float t = g31PH > 1.0f ? (yy - g31PY0) / g31PH : 0.0f;
+    if (t < 0.0f) t = 0.0f; if (t > 1.0f) t = 1.0f;
+    return MixA(g31PTop, g31PBot, t);
+}
+// ⑧ 面板光场：左上偏中一盏很弱的椭圆聚光，归一到 0..1。画与采样用同一条式子。
+static const float kFieldCX = 0.30f, kFieldCY = 0.16f;
+static const float kFieldSX = 0.24f, kFieldSY = 0.18f;
+static float R31FieldAt(float px, float py) {
+    const float cx = g31PX0 + g31PW * kFieldCX, cy = g31PY0 + g31PH * kFieldCY;
+    const float sx = g31PW * kFieldSX, sy = g31PH * kFieldSY;
+    const float dx = (px - cx) / sx, dy = (py - cy) / sy;
+    const float d2 = dx * dx + dy * dy;
+    return d2 > 9.0f ? 0.0f : std::exp(-0.5f * d2);
+}
+static ImU32 R31Brighten(ImU32 c, float t) {
+    if (t >= 0.0f) return MixA(c, IM_COL32(255, 255, 255, 255), t);
+    return MixA(c, IM_COL32(0, 0, 0, 255), -t);
+}
+static float R31InsetAt(float yy, float top, float h, float r) {
+    float rr = r > h * 0.5f ? h * 0.5f : r;
+    float d = (yy < top + h * 0.5f) ? (top + rr - yy) : (yy - (top + h - rr));
+    if (d <= 0.0f || rr <= 0.0f) return 0.0f;
+    if (d >= rr) return rr;
+    return rr - std::sqrt(rr * rr - d * d);
+}
+// 一条贴着圆角内侧的渐隐色带：top=true 从上沿往下衰减，false 从下沿往上。
+static void R31Band(ImDrawList* dl, float x, float y, float w, float h, float r,
+                    float bandH, ImU32 col, bool top, float power) {
+    if (bandH <= 0.5f || ((col >> 24) & 0xFF) == 0) return;
+    const int N = 10;
+    const int a0 = (int)(col >> 24);
+    for (int i = 0; i < N; i++) {
+        const float t0 = (float)i / N, t1 = (float)(i + 1) / N;
+        const float y0 = top ? y + bandH * t0 : y + h - bandH * t1;
+        const float y1 = top ? y + bandH * t1 : y + h - bandH * t0;
+        const float ins = std::max(R31InsetAt(y0, y, h, r), R31InsetAt(y1, y, h, r));
+        const float f = std::pow(1.0f - 0.5f * (t0 + t1), power);
+        const int a = (int)(a0 * f + 0.5f);
+        if (a <= 0) continue;
+        dl->AddRectFilled(ImVec2(x + ins, y0), ImVec2(x + w - ins, y1),
+                          (col & 0x00FFFFFFu) | ((ImU32)a << 24));
+    }
+}
+// 一枚软椭圆光斑：从外到内叠实心椭圆，每层补齐还差的覆盖率，得到平滑的高斯衰减。
+static void R31Blob(ImDrawList* dl, ImVec2 c, float rx, float ry, ImU32 col, int N = 18) {
+    const float A = (float)(col >> 24) / 255.0f;
+    if (A <= 0.002f) return;
+    float done = 0.0f;
+    for (int i = 0; i < N; i++) {
+        const float t = 1.0f - (float)i / N;
+        const float a = A * std::exp(-0.5f * std::pow(t * 1.9f, 2.0f));
+        if (a <= done) continue;
+        const int al = (int)(255.0f * (a - done) / (1.0f - done) + 0.5f);
+        if (al <= 0) continue;
+        dl->AddEllipseFilled(c, ImVec2(rx * t, ry * t),
+                             (col & 0x00FFFFFFu) | ((ImU32)al << 24), 0.0f, 48);
+        done += (1.0f - done) * ((float)al / 255.0f);
+    }
+}
+// 圆角光边一笔画完：直边与圆弧共用同一条中心线，alpha 沿轮廓连续插值
+// （上沿最亮 → 两侧 → 下沿）。旧版是四条 AddLine + 四个 PathStroke 圆弧，
+// 上沿 alpha 190、两侧 104、下沿 61、圆弧 110，每过一个切点亮度就跳一档，
+// 2x 上看得见「两截拼起来」的接缝（2026-10-28 实拍角部放大 8 倍）。
+// 顶点四层：内 fringe（alpha 0）/ 内沿 / 外沿 / 外 fringe（alpha 0），
+// 两侧各扩半个 fringe，圆弧段数随半径走，弦高 < 0.02pt。
+static void R31StrokeRound(ImDrawList* dl, float x, float y, float w, float h, float r,
+                           int aTop, int aSide, int aBot, float th) {
+    if (w <= 1.0f || h <= 1.0f) return;
+    float rr = r;
+    if (rr < 0.5f) {   // 直角框不参与插值：那种尺寸的框是发丝线，没有角可拼
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(255, 255, 255, aTop), 0.0f, 0, th);
+        return;
+    }
+    if (rr > h * 0.5f) rr = h * 0.5f;
+    if (rr > w * 0.5f) rr = w * 0.5f;
+    const float kPi = 3.14159265358979f;
+    struct Node { float x, y, a; };
+    std::vector<Node> path;
+    auto push = [&](float px, float py, float pa) { path.push_back(Node{px, py, pa}); };
+    auto arc = [&](float cx, float cy, float a0, float a1, float aA, float aB) {
+        int seg = (int)(rr * 1.2f) + 4;
+        if (seg < 6) seg = 6;
+        if (seg > 24) seg = 24;
+        for (int i = 0; i <= seg; i++) {
+            const float t = (float)i / (float)seg;
+            const float a = a0 + (a1 - a0) * t;
+            push(cx + std::cos(a) * rr, cy + std::sin(a) * rr, aA + (aB - aA) * t);
+        }
+    };
+    const float fT = (float)aTop, fS = (float)aSide, fB = (float)aBot;
+    push(x + rr, y, fT);
+    push(x + w - rr, y, fT);
+    arc(x + w - rr, y + rr, -kPi * 0.5f, 0.0f, fT, fS);
+    push(x + w, y + h - rr, fS);
+    arc(x + w - rr, y + h - rr, 0.0f, kPi * 0.5f, fS, fB);
+    push(x + rr, y + h, fB);
+    arc(x + rr, y + h - rr, kPi * 0.5f, kPi, fB, fS);
+    push(x, y + rr, fS);
+    arc(x + rr, y + rr, kPi, kPi * 1.5f, fS, fT);
+    path.pop_back();                    // 尾点与首点重合，去掉
+    const int n = (int)path.size();
+    if (n < 4) return;
+
+    const float aa = dl->_FringeScale * 0.5f;
+    const float half = th * 0.5f;
+    dl->PrimReserve(n * 18, n * 4);
+    const unsigned int base = dl->_VtxCurrentIdx;
+    const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+    for (int i = 0; i < n; i++) {
+        const Node& p0 = path[(size_t)((i + n - 1) % n)];
+        const Node& p1 = path[(size_t)i];
+        const Node& p2 = path[(size_t)((i + 1) % n)];
+        float nx = 0.0f, ny = 0.0f;
+        for (int k = 0; k < 2; k++) {
+            const Node& a = k == 0 ? p0 : p1;
+            const Node& b = k == 0 ? p1 : p2;
+            const float ex = b.y - a.y, ey = -(b.x - a.x);
+            const float d2 = ex * ex + ey * ey;
+            if (d2 > 1e-6f) {
+                const float inv = 1.0f / std::sqrt(d2);
+                nx += ex * inv;
+                ny += ey * inv;
+            }
+        }
+        const float d2 = nx * nx + ny * ny;
+        const float inv = d2 > 1e-6f ? 1.0f / std::sqrt(d2) : 0.0f;
+        nx *= inv;
+        ny *= inv;
+        const int al = (int)(p1.a + 0.5f);
+        const ImU32 ci = IM_COL32(255, 255, 255, al);
+        const ImU32 c0 = ci & 0x00FFFFFFu;
+        const float inA = half + aa, ouA = half;
+        dl->PrimWriteVtx(ImVec2(p1.x + nx * inA, p1.y + ny * inA), uv, c0);
+        dl->PrimWriteVtx(ImVec2(p1.x + nx * ouA, p1.y + ny * ouA), uv, ci);
+        dl->PrimWriteVtx(ImVec2(p1.x - nx * ouA, p1.y - ny * ouA), uv, ci);
+        dl->PrimWriteVtx(ImVec2(p1.x - nx * inA, p1.y - ny * inA), uv, c0);
+    }
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        const unsigned int a0 = base + (unsigned int)(i * 4);
+        const unsigned int b0 = base + (unsigned int)(j * 4);
+        for (int s = 0; s < 3; s++) {   // 三条带：外 AA / 实心 / 内 AA
+            dl->PrimWriteIdx((ImDrawIdx)(a0 + s));
+            dl->PrimWriteIdx((ImDrawIdx)(a0 + s + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(b0 + s));
+            dl->PrimWriteIdx((ImDrawIdx)(b0 + s));
+            dl->PrimWriteIdx((ImDrawIdx)(a0 + s + 1));
+            dl->PrimWriteIdx((ImDrawIdx)(b0 + s + 1));
+        }
+    }
+}
 static void R31Glass(ImDrawList* dl, float x, float y, float w, float h, float r,
                      float hover = 0.0f, ImU32 border = 0) {
-    const ImU32 fill = hover > 0.01f ? MixA(k31Glass, k31Hover, hover) : k31Glass;
-    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), fill, r);
-    const float ix = r * 0.72f;
-    if (w > ix * 2.0f + 2.0f) {
-        dl->AddRectFilled(ImVec2(x + ix, y + 1.0f), ImVec2(x + w - ix, y + 1.8f), k31Spec);
-        dl->AddRectFilled(ImVec2(x + ix, y + h - 1.6f), ImVec2(x + w - ix, y + h - 1.0f), k31Shade);
+    const RGlass31& g = kG31Clear;
+    // 尺寸分档：26pt 以下（小胶囊）只留底纱+光边。
+    const bool tiny = h < 26.0f;
+
+    ImU32 pc = R31PanelNow(y + h * 0.5f);
+    if (g.field > 0.0f) pc = R31Brighten(pc, g.field * 0.16f * R31FieldAt(x + w * 0.5f, y + h * 0.5f));
+    if (g.lift != 0.0f) pc = R31Brighten(pc, g.lift);
+
+    // ⑥ 外投影先画，随后被不透明底纱盖住内部——所以底纱必须算成不透明色。
+    if (g.shadowA > 0.001f && !tiny) {
+        const float sy = y + g.shadowDy;
+        GlowRect(dl, ImVec2(x + 1.0f, sy), ImVec2(x + w - 1.0f, sy + h), r, g.shadowB, 0.0f,
+                 IM_COL32(0, 0, 0, (int)(g.shadowA * 255.0f + 0.5f)));
     }
-    dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f),
-                border ? border : k31Line, r, 0, 1.0f);
+
+    const ImU32 tintCol = IM_COL32((int)(248.0f - 12.0f * g.tintB), (int)(251.0f - 5.0f * g.tintB),
+                                   255, 255);
+    float va = g.veil + hover * 0.045f;
+    if (va > 0.55f) va = 0.55f;
+    // 上亮下暗的竖向渐变：玻璃整体是弯的，不是一个平色块
+    GradRound(dl, x, y, w, h, r, MixA(pc, tintCol, va), MixA(pc, tintCol, va * 0.45f), 0);
+
+    // ⑨ 左上镜面池（先于受光带画，受光带压在它上沿）。必须裁到卡形里，否则溢出到面板上。
+    if (!tiny && g.gloss > 0.5f) {
+        dl->PushClipRect(ImVec2(x + 1.0f, y + 1.0f), ImVec2(x + w - 1.0f, y + h - 1.0f), true);
+        R31Blob(dl, ImVec2(x + w * 0.18f, y + h * 0.14f), w * 0.20f, h * 0.20f,
+                IM_COL32(255, 255, 255, (int)(g.gloss + 0.5f)));
+        dl->PopClipRect();
+    }
+    // ② 顶沿受光：上沿最亮、指数衰减；左亮右暗＝光从左上方打过来。
+    // 分 8 条画而不是一整块四角渐变：四角渐变的竖向是线性的，在带底会留一道看得见的台阶。
+    if (!tiny && g.spec > 0.5f) {
+        const float spH = std::min(h * g.specF, 20.0f);
+        const float ins = std::min(r * 0.72f, w * 0.15f);
+        const int N = 8;
+        if (w > ins * 2.0f + 2.0f && spH > 1.0f) {
+            for (int i = 0; i < N; i++) {
+                const float t0 = (float)i / N, t1 = (float)(i + 1) / N;
+                const float f0 = std::pow(1.0f - t0, 2.6f), f1 = std::pow(1.0f - t1, 2.6f);
+                const int al0 = (int)(g.spec * f0 + 0.5f), ar0 = (int)(g.spec * g.specR * f0 + 0.5f);
+                const int al1 = (int)(g.spec * f1 + 0.5f), ar1 = (int)(g.spec * g.specR * f1 + 0.5f);
+                if (al0 <= 0 && ar0 <= 0) break;
+                dl->AddRectFilledMultiColor(
+                    ImVec2(x + ins, y + 1.0f + spH * t0), ImVec2(x + w - ins, y + 1.0f + spH * t1),
+                    IM_COL32(255, 255, 255, al0), IM_COL32(255, 255, 255, ar0),
+                    IM_COL32(255, 255, 255, ar1), IM_COL32(255, 255, 255, al1));
+            }
+        }
+    }
+    // ⑦ 边缘折射带：左右内侧的弱光（不做暗侧，暗只留给内侧阴影）
+    if (!tiny && g.lens > 0.5f && h > r * 2.0f) {
+        const float lw = std::min(2.5f, w * 0.018f);
+        dl->AddRectFilled(ImVec2(x + 1.0f, y + r), ImVec2(x + 1.0f + lw, y + h - r),
+                          IM_COL32(255, 255, 255, (int)(g.lens * 0.30f)), 1.0f);
+        dl->AddRectFilled(ImVec2(x + w - 1.0f - lw, y + r), ImVec2(x + w - 1.0f, y + h - r),
+                          IM_COL32(255, 255, 255, (int)(g.lens * 0.22f)), 1.0f);
+    }
+    // ④ 下沿内阴影（厚度）：画在光边里侧
+    if (!tiny && g.shade > 0.5f)
+        R31Band(dl, x, y, w, h, r, std::min(h * 0.12f, 9.0f),
+                IM_COL32(0, 0, 0, (int)(g.shade + 0.5f)), false, 2.2f);
+
+    // ③ 光边（一笔画完整圈：上沿最亮 → 两侧 → 下沿，过角时 alpha 连续过渡）
+    if (border) {
+        dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f),
+                    border, r, 0, 1.0f);
+    } else {
+        const int aT = (int)(g.rim + 0.5f), aS = (int)(g.rim * g.rimS + 0.5f);
+        const int aB = (int)(g.rim * g.rimB + 0.5f);
+        R31StrokeRound(dl, x + 0.5f, y + 0.5f, w - 1.0f, h - 1.0f,
+                       r > 0.5f ? r - 0.5f : 0.0f, aT, aS, aB, 1.1f);
+    }
 }
 static void R31Frame(ImDrawList* dl, float x, float y, float w, float h, double tn = 0.0) {
+    g31PX0 = x; g31PY0 = y; g31PW = w; g31PH = h; g31PTop = k31PanelTop; g31PBot = k31PanelBot;
     GradRound(dl, x, y, w, h, k31PaneR, k31PanelTop, k31PanelBot, 0);
+    // 上沿 150pt 的一层白纱：面板上半段比下半段透一点，不是一块死色。
+    // 必须跟着面板圆角走：方矩形会在弧外的透明区留下一撮白（4% 也看得见方肩）。
+    GradRound(dl, x + 1.0f, y + 1.0f, w - 2.0f, 149.0f, k31PaneR,
+              IM_COL32(255, 255, 255, 10), IM_COL32(255, 255, 255, 0), 0);
+    // ⑧ 面板光场：玻璃在这块底上才「有东西可反」。画在面板内部，桌面再怎么变都不影响。
+    {
+        const float fs = kG31Clear.field;
+        if (fs > 0.001f) {
+            const ImVec2 c(x + w * kFieldCX, y + h * kFieldCY);
+            const float rx = w * kFieldSX * 3.0f, ry = h * kFieldSY * 3.0f;   // 3σ 外径，与 R31FieldAt 同一条式子
+            const float A = 0.16f * fs;
+            dl->PushClipRect(ImVec2(x + 1.0f, y + 1.0f), ImVec2(x + w - 1.0f, y + h - 1.0f), true);
+            float done = 0.0f;
+            for (int i = 0; i < 40; i++) {
+                const float t = 1.0f - (float)i / 40.0f;               // 1 → 0.025
+                const float a = A * std::exp(-0.5f * std::pow(t * 3.0f, 2.0f));
+                if (a <= done) continue;
+                const int al = (int)(255.0f * (a - done) / (1.0f - done) + 0.5f);
+                if (al <= 0) continue;
+                dl->AddEllipseFilled(c, ImVec2(rx * t, ry * t),
+                                     IM_COL32(236, 244, 255, al), 0.0f, 64);
+                done += (1.0f - done) * ((float)al / 255.0f);
+            }
+            dl->PopClipRect();
+        }
+    }
     // ::after 的 inset 0 0 0 .5px var(--rim)
     dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f),
                 k31Rim, k31PaneR, 0, 1.0f);
@@ -291,9 +580,10 @@ static void R31Frame(ImDrawList* dl, float x, float y, float w, float h, double 
                 IM_COL32(0, 0, 0, 96), 1.0f);
     // ── 液体玻璃质感（系统 backdrop-blur 拿不到，这是可做的近似）──
     // ① 顶部 18pt 镜面反光：受光渐弱，像一块玻璃上沿
-    dl->AddRectFilledMultiColor(ImVec2(x + 8.0f, y + 1.0f), ImVec2(x + w - 8.0f, y + 19.0f),
-                                IM_COL32(255, 255, 255, 26), IM_COL32(255, 255, 255, 26),
-                                IM_COL32(255, 255, 255, 0), IM_COL32(255, 255, 255, 0));
+    // 端点收成圆角：这条带从 x+8 起画，而 y=1 处面板弧已经内缩了 16pt，
+    // 直角会在透明底上露出 10% 的白角（r=8.5 的弧落在面板弧内侧 0.5pt）。
+    GradRound(dl, x + 8.0f, y + 1.0f, w - 16.0f, 18.0f, 8.5f,
+              IM_COL32(255, 255, 255, 26), IM_COL32(255, 255, 255, 0), 0);
     // （流光版撤于 2026-10-28 用户拍板：不要流动光晕，只留静态镜面。）
     (void)tn;
 }
@@ -1170,7 +1460,7 @@ static float R31FootRoot(ImDrawList* dl, float x, float y, float w, int loc) {
         tx = R31Mid(dl, tx + 4.0f, cy, std::to_string(doneN), loc, k31Fg, T_S12B);
         // 箭头在稿子里钉在 x110；长语（de「Heute erledigt」）会把数字顶过 105，
         // 那时跟着数字走，不叠字。命中区照着实际内容收口。
-        const float ax = std::fmin(x + 110.0f, tx + 5.0f);
+        const float ax = std::fmax(x + 110.0f, tx + 5.0f);
         I31(dl, I31_RIGHT, ax, cy - 7.5f, 15.0f, k31Sec);
         linkEnd = std::fmax(x + 125.0f, ax + 15.0f);
         AddHit(g_hits, lx - 4.0f, y + 17.0f, linkEnd + 2.0f, y + 41.0f,
@@ -1380,10 +1670,18 @@ static float R31Queue(ImDrawList* dl, float x, float yTop, float w, int loc) {
     float cy = yTop + 1.0f;
     if (waits.empty()) {
         const bool filtered = !g_r31_query.empty() || g_r31_src != "all";
+        if (filtered)
+            return R31Empty(dl, x + 17.0f, cy, w - 34.0f, 180.0f,
+                            T("r_no_match", loc), T("r_try_other", loc),
+                            T("r_show_all", loc), HIT_SHOWALL31, loc);
+        // 队列空了不该是一块空白：给一个真落点——今天已经完成的那些会话。
+        // 零完成时不画按钮（0 条的入口是噪声，页脚已经写了「今日完成 0」）。
+        int doneN = 0;
+        for (const auto* r : all) if (GroupOf(r->state) == G_DONE) doneN++;
+        const std::string act = RFmt(T("r_view_done", loc), doneN);
         return R31Empty(dl, x + 17.0f, cy, w - 34.0f, 180.0f,
-                        filtered ? T("r_no_match", loc) : T("r_nothing", loc),
-                        T("r_try_other", loc),
-                        filtered ? T("r_show_all", loc) : nullptr, HIT_SHOWALL31, loc);
+                        T("r_nothing", loc), T("r_try_other", loc),
+                        doneN > 0 ? act.c_str() : nullptr, HIT_HISTORY31, loc);
     }
     const size_t cap = (waits.size() > 8 && !g_r31_queue_all) ? 8 : waits.size();
     for (size_t i = 0; i < cap; i++) {
@@ -2112,7 +2410,10 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         const float queueTop = R31OverviewFixed(dl, x, y, w, loc, tn);
         // 面板收放：队列短就收成「固定段＋队列＋页脚」；长了封顶当前窗口高、内部滚动。
         const float queueH = R31QueueH(loc);
-        const float avail = std::fmax(120.0f, (y + h) - queueTop - 57.0f - 8.0f);
+        // 底部要留 57（页脚）+ 4（队列下垫）＝61；这里若多减 4，滚动档的
+        // panelOut 就恒等于「当前高 − 4」，窗口每帧收一寸，六语并排一轮能掉 20pt，
+        // 空态那颗按钮就被页脚越压越低（实测 184/180/176/172/168/164）。
+        const float avail = std::fmax(120.0f, (y + h) - queueTop - 57.0f - 4.0f);
         const float vis = std::fmin(queueH, avail);
         const float qBot = queueTop + vis + 4.0f;
         g_bodyTop[view] = ImVec2(x + 16.0f, queueTop);
