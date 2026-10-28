@@ -85,6 +85,9 @@ static const Key kStr[] = {
                         "클릭으로 패널 열기／닫기, 우클릭은 메뉴"}},
     {"sb_queued",      {"含排队 %d", "(%d queued)", "(%d in Warteschlange)",
                         "(%d in coda)", "（うちキュー %d）", "(대기 %d)"}},
+    // 菜单栏那三个数只放要人动手的；「跑完你还没看过」是另一档，只在悬停说明里念。
+    {"sb_unseen",      {"待查看 %d", "%d to review", "%d zu prüfen", "%d da vedere",
+                        "未確認 %d", "확인 전 %d"}},
     // 状态项右键菜单的两项。菜单是系统画的，字只能由我们喂进去，所以六语都得有。
     {"sb_show_hide",   {"显示／隐藏面板", "Show / hide panel", "Panel ein-/ausblenden",
                         "Mostra / nascondi pannello", "パネル表示／非表示", "패널 표시／숨기기"}},
@@ -562,6 +565,9 @@ static const Key kStr[] = {
                         "코딩 세션을 시작하면 여기에 표시됩니다."}},
     {"r_done_today",   {"今日完成", "Done today", "Heute erledigt", "Completate oggi",
                         "本日完了", "오늘 완료"}},
+    // 队列里那一行不是「在等你回答」，而是「跑完了你还没看过」——状态字必须说清是后者，
+    // 否则它和上面那几条真正卡住的请求读起来一模一样。
+    {"r_unseen_done",  {"待查看", "Unseen", "Ungesehen", "Da vedere", "未確認", "확인 전"}},
     {"r_view_done",    {"查看今天的完成记录 %d", "Review today’s %d completed sessions",
                         "Heute %d abgeschlossene Sitzungen ansehen",
                         "Rivedi le %d sessioni completate oggi",
@@ -1364,6 +1370,7 @@ struct PanelData {
     int hook_live = 0;                   // Hook 收件箱里这轮真数得到的信号文件数（数据源那一格）
     int needs = 0, run = 0;              // 顶栏两个数（needs＝介入+失败，run＝运行+排队）
     int await_n = 0, fail_n = 0;         // 状态项那三个数：介入与失败各算一档，不并成 needs
+    int unseen_n = 0;                    // 今天完成但还没看过的条数（待处理清单的第二段）
     int queue_n = 0;                     // run 里有多少条其实在排队——悬停说明要摊开这一层
     double credits = 0;
     double yday_credits = 0;             // 昨天同窗用量，只为第三格的「较昨日」环比
@@ -4363,6 +4370,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
         else if (g == G_FAIL) { pd.needs++; pd.fail_n++; }
         else if (g == G_RUN) pd.run++;
         else if (g == G_QUEUE) { pd.run++; pd.queue_n++; }
+        else if (g == G_DONE && r.unseen) pd.unseen_n++;   // 跑完但没人看过：待处理清单的第二段
     }
     // 今日用量是整轮口径（scan_all 已汇总），不由逐项拼出来
     pd.credits = s.today_credits;
@@ -4399,13 +4407,31 @@ static void RebuildPanel(const ap::Snapshot& s) {
             snprintf(qs, sizeof qs, T("sb_queued", g_loc), g_pd.queue_n);
             snprintf(q, sizeof q, " %s", qs);
         }
-        snprintf(tip, sizeof tip, "%s %d · %s %d%s · %s %d · %s",
+        // 「待查看」不进菜单栏那串数字（它不催人），但悬停说明得把它念出来，
+        // 否则面板里待处理 8 与这里 2+1 对不上，读的人只会以为哪边算错了。
+        char us[48] = "";
+        if (g_pd.unseen_n) {
+            char one[40];
+            snprintf(one, sizeof one, T("sb_unseen", g_loc), g_pd.unseen_n);
+            snprintf(us, sizeof us, " · %s", one);
+        }
+        snprintf(tip, sizeof tip, "%s %d · %s %d%s · %s %d%s · %s",
                  T("grp_await", g_loc), g_pd.await_n,
                  T("grp_run", g_loc), g_pd.run, q,
-                 T("grp_fail", g_loc), g_pd.fail_n,
+                 T("grp_fail", g_loc), g_pd.fail_n, us,
                  T("sb_hint", g_loc));
     }
     sb_set_tooltip(tip);
+    // 悬停说明只在变的时候记一行：面板条数和菜单栏那串数字对不上时，先看这里到底发了什么，
+    // 不必去悬停菜单栏（那块屏的状态不许为了取证去动）。
+    {
+        static char last_tip[256] = "";
+        if (strcmp(last_tip, tip) != 0) {
+            snprintf(last_tip, sizeof last_tip, "%s", tip);
+            printf("[状态项] 悬停＝%s\n", tip);
+            fflush(stdout);
+        }
+    }
     g_relayout = true;
 }
 
@@ -4614,7 +4640,7 @@ static void LoadProbeFixture() {
     for (const auto& d : kDone) {
         UIRow* r2 = row(ap::ST_RESTING, d.proj, d.agent, d.aid, d.sess, at(d.hh, d.mm), d.turns);
         r2->at = midnight + (d.hh * 3600.0 + d.mm * 60.0);   // 完成时刻：未读点按它对水位线
-        r2->unseen = (d.hh >= 14);                           // 演示：14 点后的算「还没看过」
+        r2->unseen = (d.hh >= 19);                           // 演示：19 点后的算「还没看过」
     }
 
     // 行级用量也各留缺口：Qoder 只有 Credits（JSONL 没有 token 明细 → has_tokens 假），
@@ -4738,6 +4764,8 @@ static void LoadProbeFixture() {
         pd.rows.erase(std::remove_if(pd.rows.begin(), pd.rows.end(),
                                      [](const UIRow& r) { return GroupOf(r.state) != G_DONE; }),
                       pd.rows.end());
+        // 完成未看的也进「待处理」，所以这一档要一起清掉：否则探针拍的不是空队列。
+        for (auto& r : pd.rows) r.unseen = false;
         pd.needs = 0;
         pd.await_n = 0;
         pd.run = 0;

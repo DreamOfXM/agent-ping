@@ -699,14 +699,21 @@ static int R31KindIcon(int k) {
     }
 }
 /// `.status`：icon 11 + 4 + 11/500，右对齐时由调用方给 x1。
+/// 完成但没看过的行在这一格写「待查看」而不是「今日完成」：它在待处理清单里，
+/// 用完成的字眼会被读成「已经处理完了，为什么还列在这儿」。
+static bool R31UnseenDone(const UIRow& r) {
+    return GroupOf(r.state) == G_DONE && r.unseen;
+}
 static float R31StatusW(const UIRow& r, int loc) {
-    return 11.0f + 4.0f + TextWidth(T(R31KindWord(R31KindOf(r)), loc), loc, T_S11B);
+    return 11.0f + 4.0f + TextWidth(T(R31UnseenDone(r) ? "r_unseen_done" : R31KindWord(R31KindOf(r)),
+                                      loc), loc, T_S11B);
 }
 static void R31StatusRight(ImDrawList* dl, float x1, float cy, const UIRow& r, int loc) {
     const int k = R31KindOf(r);
-    const std::string w = T(R31KindWord(k), loc);
+    const bool unseen = R31UnseenDone(r);
+    const std::string w = T(unseen ? "r_unseen_done" : R31KindWord(k), loc);
     const float tw = TextWidth(w, loc, T_S11B);
-    const ImU32 col = R31KindColor(k);
+    const ImU32 col = unseen ? k31Blue : R31KindColor(k);
     I31(dl, R31KindIcon(k), x1 - tw - 4.0f - 11.0f, cy - 5.5f, 11.0f, col);
     DrawTextRun(dl, x1 - tw, TextMid(cy, T_S11B, loc), w, loc, col, T_S11B);
 }
@@ -728,6 +735,22 @@ static std::vector<const UIRow*> R31Rows(const std::string& src, const std::stri
         v.push_back(&r);
     }
     return v;
+}
+/// 「待处理」＝两段，先后固定：
+///   ① 要你动手的（回答／授权／失败）—— 卡住不动的是它们，排在前；
+///   ② 今天跑完但还没看过的 —— 只等你扫一眼，双击或点 ⓘ 看过就算处理完。
+/// 段内沿用 RebuildPanel 的「等得最久在前」，段间不混排（信息性的不许插到要动手的前面）。
+/// 第二段必须算进面板的条数，但不进菜单栏那串数字：它不催人。
+static std::vector<const UIRow*> R31Waits() {
+    const std::vector<const UIRow*> all = R31Rows(g_r31_src, g_r31_query);
+    std::vector<const UIRow*> waits, unseen;
+    for (const auto* r : all) {
+        const int g = GroupOf(r->state);
+        if (g == G_AWAIT || g == G_FAIL) waits.push_back(r);
+        else if (g == G_DONE && r->unseen) unseen.push_back(r);
+    }
+    waits.insert(waits.end(), unseen.begin(), unseen.end());
+    return waits;
 }
 /// 稿子 present()：今天有行、有账户用量、有余额、或有额度，就占一颗来源。
 /// 采集器「本机没有」不占位（它连一条记录都读不出，摆上去就是一格假身份）。
@@ -1160,7 +1183,8 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
     const float hov = TxPeekNew(zid, 0.0f);
     R31Glass(dl, x, y, w, h, 12.0f, hov, hov > 0.01f ? k31Rim : k31Line);
     const int kind = R31KindOf(r);
-    const ImU32 kc = R31KindColor(kind);
+    // 完成未看的行用蓝色（与页脚那颗「有没看过的」小点同色），别和灰色完成行混在一起。
+    const ImU32 kc = R31UnseenDone(r) ? k31Blue : R31KindColor(kind);
     dl->AddRectFilled(ImVec2(x, y + 14.0f), ImVec2(x + 2.0f, y + h - 14.0f), WithA(kc, 199), 2.0f);
     // 整行命中区先注册：芯片/ⓘ 这类行内小按钮后注册，命中判定从后往前扫才能优先命中小件
     AddHit(g_hits, x, y, x + w, y + h, HIT_OPEN, 900 + idx, 0, r, loc, R31RowName(r));
@@ -1535,16 +1559,12 @@ static long R31SeenSeq(const std::string& key) {
 /// 返回可滚动队列区的顶 y。
 static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc, double tn) {
     const std::vector<const UIRow*> all = R31Rows(g_r31_src, g_r31_query);
-    std::vector<const UIRow*> runs, waits;
-    double maxAge = 1.0;
+    std::vector<const UIRow*> runs;
     for (const auto* r : all) {
         const int g = GroupOf(r->state);
         if (g == G_RUN || g == G_QUEUE) runs.push_back(r);
-        else if (g == G_AWAIT || g == G_FAIL) {
-            waits.push_back(r);
-            if (r->age > maxAge) maxAge = r->age;
-        }
     }
+    const std::vector<const UIRow*> waits = R31Waits();
     std::stable_sort(runs.begin(), runs.end(), [](const UIRow* a, const UIRow* b) {
         return R31SeenSeq(a->key) > R31SeenSeq(b->key);   // 新在上、老不动
     });
@@ -1643,11 +1663,7 @@ static float R31QueueH(int loc) {
     (void)loc;
     const auto all = R31Rows(g_r31_src, g_r31_query);
     if (all.empty()) return 2.0f;
-    std::vector<const UIRow*> waits;
-    for (const auto* r : all) {
-        const int g = GroupOf(r->state);
-        if (g == G_AWAIT || g == G_FAIL) waits.push_back(r);
-    }
+    const std::vector<const UIRow*> waits = R31Waits();
     if (waits.empty()) return 180.0f;
     const size_t cap = (waits.size() > 8 && !g_r31_queue_all) ? 8 : waits.size();
     float h = 1.0f;
@@ -1669,15 +1685,10 @@ static float R31QueueH(int loc) {
 static float R31Queue(ImDrawList* dl, float x, float yTop, float w, int loc) {
     const std::vector<const UIRow*> all = R31Rows(g_r31_src, g_r31_query);
     if (all.empty()) return yTop + 1.0f;      // 整屏空态已由固定段画过
-    std::vector<const UIRow*> waits;
+    const std::vector<const UIRow*> waits = R31Waits();
     double maxAge = 1.0;
-    for (const auto* r : all) {
-        const int g = GroupOf(r->state);
-        if (g == G_AWAIT || g == G_FAIL) {
-            waits.push_back(r);
-            if (r->age > maxAge) maxAge = r->age;
-        }
-    }
+    for (const auto* r : waits)
+        if (r->age > maxAge) maxAge = r->age;
     float cy = yTop + 1.0f;
     if (waits.empty()) {
         const bool filtered = !g_r31_query.empty() || g_r31_src != "all";
