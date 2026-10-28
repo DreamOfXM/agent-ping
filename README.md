@@ -142,7 +142,7 @@ panel the way you treat your own terminal scrollback.
 | On screen | Definition | Honest caveat |
 |---|---|---|
 | Tray `2 · 5` | three counters in a fixed order — needs-you, running, failed — with empty slots omitted | `running` includes queued; which slot is which comes from the tooltip, not the label |
-| `Needs you` | sessions awaiting permission **plus** sessions that ended in an error, inside today's window | |
+| `Needs you` | sessions waiting on you — permission, an answer, or a run that ended in an error — **plus** today's sessions that finished while you were away and you haven't opened yet | the second group is drawn as `Unseen` rows with a blue mark; it stays out of the tray counters because nobody has to act |
 | `Running N` | sessions working **plus** sessions queued | |
 | `41.4 Credits` | sum of `message.usage.credits` over assistant records timestamped at or after local midnight | only Qoder CLI emits a `credits` field. This is that vendor's own counter, not our estimate and not money. Vendors without the field contribute 0. |
 | `Turn 77` | count of `type:"user"` records without a `toolUseResult` key | no local log carries a total-turn count, so progress is a flowing bar, never a percentage |
