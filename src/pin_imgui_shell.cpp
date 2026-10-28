@@ -4,6 +4,11 @@
 #include <GL/gl.h>
 #endif
 #include <GLFW/glfw3.h>
+#ifdef __APPLE__
+#include <ApplicationServices/ApplicationServices.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include "imgui.h"
@@ -539,6 +544,14 @@ static const Key kStr[] = {
     {"r_no_match",     {"没有匹配的待处理会话", "No matching requests", "Keine passenden Anfragen",
                         "Nessuna richiesta corrispondente", "一致する待ちはありません",
                         "일치하는 대기 항목 없음"}},
+    {"r_search_none",  {"没有匹配的会话", "No matching sessions", "Keine passenden Sitzungen",
+                        "Nessuna sessione corrispondente", "一致するセッションはありません",
+                        "일치하는 세션 없음"}},
+    {"r_search_none_hint",{"换个关键词，或查看全部会话。", "Try another keyword or show all sessions.",
+                        "Versuch ein anderes Suchwort oder zeig alle Sitzungen.",
+                        "Prova un’altra parola chiave o mostra tutte le sessioni.",
+                        "別のキーワードを試すか、すべてのセッションを表示してください。",
+                        "다른 검색어를 입력하거나 모든 세션을 표시하세요."}},
     {"r_no_sessions",  {"目前没有会话", "No sessions yet", "Noch keine Sitzungen",
                         "Nessuna sessione", "まだセッションがありません", "아직 세션이 없습니다"}},
     {"r_no_sessions_hint",{"开始使用编码工具后，会话会出现在这里。",
@@ -2769,6 +2782,19 @@ static std::vector<std::string> g_click_seq = []() {
 }();
 static int g_click_at = 0;      // 序列走到第几颗
 static int g_click_gap = 0;     // 当前这颗已经占了几帧
+// AGENTPING_CLICK 里的键盘步：text:<串> 打一串字、key:<名> 一按一放、hold:<名>:<帧> 按住若干帧。
+// 有了它们，「点开搜索框→打字→清空／退格／Esc」这条链能在出图轮里整条跑完，
+// 不必再去真的动他的桌面（2026-10-29 实测：合成按键会落进他正在用的 App）。
+static bool IsKeyStep(const std::string& s) {
+    return s.rfind("text:", 0) == 0 || s.rfind("key:", 0) == 0 || s.rfind("hold:", 0) == 0;
+}
+static ImGuiKey SeqKeyByName(const std::string& n) {
+    if (n == "esc") return ImGuiKey_Escape;
+    if (n == "enter") return ImGuiKey_Enter;
+    if (n == "backspace") return ImGuiKey_Backspace;
+    if (n == "tab") return ImGuiKey_Tab;
+    return ImGuiKey_None;
+}
 // AGENTPING_CLICK_DELAY=毫秒：推迟序列的第一次按下。出图要等第二轮扫描（≥3s）才回读，
 // 而回执只活 2.5s——不推迟就永远拍不到「复制成功」那条浮层（实测截图里只有选项没有回执）。
 static double g_click_delay = []() {
@@ -2802,7 +2828,8 @@ static ImVec2 MousePos(const ImGuiIO& io) {
     // 点完之后合成指针就留在那儿，出图轮的真指针另外被 g_shot_to 关掉）。
     if (!g_click_seq.empty()) {
         size_t i = g_click_at < (int)g_click_seq.size() ? (size_t)g_click_at : g_click_seq.size() - 1;
-        if (ResolveZone(g_click_seq[i].c_str(), p)) return p;
+        while (i > 0 && IsKeyStep(g_click_seq[i])) i--;   // 键盘步不钉指针，停在上一颗鼠标上
+        if (!IsKeyStep(g_click_seq[i]) && ResolveZone(g_click_seq[i].c_str(), p)) return p;
     }
     static const char* env = []() {
         const char* e = getenv("AGENTPING_HOVER");
@@ -2849,22 +2876,95 @@ static void Utf8Pop(std::string& s) {
     s.erase(i);
 }
 
+/// 逐码点过一段 UTF-8：丢掉控制字符与 Apple 的功能键私用区，遇换行就停（搜索框只收一行）。
+template <typename F>
+static void ForEachTextChar(const char* u8, F&& f) {
+    for (const unsigned char* p = (const unsigned char*)u8; p && *p;) {
+        unsigned int cp = 0;
+        int n = 0;
+        if (*p < 0x80) { cp = *p; n = 1; }
+        else if ((*p & 0xE0) == 0xC0) { cp = *p & 0x1F; n = 2; }
+        else if ((*p & 0xF0) == 0xE0) { cp = *p & 0x0F; n = 3; }
+        else if ((*p & 0xF8) == 0xF0) { cp = *p & 0x07; n = 4; }
+        else { ++p; continue; }
+        for (int i = 1; i < n && p[i]; ++i) cp = (cp << 6) | (p[i] & 0x3F);
+        p += n;
+        if (cp == '\n' || cp == '\r') return;
+        if (cp < 32 || cp == 127) continue;
+        if (cp >= 0xF700 && cp <= 0xF8FF) continue;
+        f(cp);
+    }
+}
+
+/// ImGui 的按下态只靠 GLFW 回调翻转。面板没拿到 key 状态时，抬起事件会被派给前台那个 App，
+/// 这一侧就永远停在「按住」——之后每帧都当按住看，点击整条链路再也不发火（2026-10-28 实拍：
+/// 面板收得到按下、收不到抬起，放大镜点不开第二次）。所以每帧向系统问一次真实按键态。
+/// 非 Apple 分支不补：X11/Wayland 的抬起事件派给按下那颗窗口（隐式抓取），这条漏不了。
+static bool RealLeftDown() {
+#ifdef __APPLE__
+    return CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft);
+#else
+    return true;
+#endif
+}
+
+#ifdef __APPLE__
+// GLFW 把按键交给 AppKit 的输入法（interpretKeyEvents），字符只从 insertText 回来。
+// 本机搜狗在这台机器上第一下按键后就连不上（IMKCFRunLoopWakeUpReliable 报错）：
+// 组词态挂住、永远不 commit，之后每个键都是「按下有、字符无」——搜索框点得进去、
+// 却一个字也打不出来（2026-10-28 实拍：z 之后 k 不进，marked=1 卡死）。
+//
+// 这块面板没有 AppKit 文本控件，输入全由自己从字符队列取，所以干脆不给这个视图
+// 输入法上下文：interpretKeyEvents 变成空操作，键上的 characters 直接进队列。
+// 代价是没法用拼音组词（组合窗本来也没地方画），中文搜索走 ⌘V 粘贴。
+static IMP g_origKeyDown = nullptr;
+static id NoInputContext(id, SEL) { return nil; }
+
+// 常驻浮层在别的 App 前台时，macOS 会把第一下点击只当「激活进程」，不给这个视图送 mouseDown。
+// 表现就是「图标点了没反应，得点第二次」。浮层本来就该一点即动，所以这颗视图收第一下点击。
+static BOOL AcceptsFirstMouseOn(id, SEL, id) { return YES; }
+
+static void KeyDownHook(id self, SEL _cmd, id ev) {
+    ImGuiIO& io = ImGui::GetIO();
+    const int before = io.InputQueueCharacters.Size;
+    ((void (*)(id, SEL, id))g_origKeyDown)(self, _cmd, ev);
+    if (io.InputQueueCharacters.Size != before) return;
+    const unsigned long flags =
+        ((unsigned long (*)(id, SEL))objc_msgSend)(ev, sel_registerName("modifierFlags"));
+    if (flags & ((1UL << 20) | (1UL << 19) | (1UL << 18))) return;
+    id s = ((id (*)(id, SEL))objc_msgSend)(ev, sel_registerName("characters"));
+    const char* u8 =
+        s ? ((const char* (*)(id, SEL))objc_msgSend)(s, sel_registerName("UTF8String")) : nullptr;
+    if (!u8) return;
+    ForEachTextChar(u8, [&](unsigned int cp) { io.AddInputCharacter(cp); });
+}
+#endif
+
 static void HandleInput(const ImGuiIO& io, double now) {
     ImVec2 mp = MousePos(io);
     // R31 的两个搜索框自己收字：面板不给控件焦点，字符从 ImGui 的输入队列取。
-    // 输入法组合窗由系统画，组合中的拼音不进这里——上屏那一刻才落字（这条限制写进 RESULT）。
+    // 这个视图关掉了输入法上下文（见启动处 KeyDownHook）：直接上屏的字符才进队列，
+    // 不做组词；中文走 ⌘V 粘贴（剪贴板是整段文字，不经过输入法）。
+    bool escTaken = false;
     if (g_r31_focus) {
         std::string& target = (g_r31_focus == 2) ? g_r31_toolq : g_r31_query;
         for (ImWchar c : io.InputQueueCharacters)
             if (c >= 32 && c != 127) Utf8Append(target, (unsigned int)c);
-        if (ImGui::IsKeyReleased(ImGuiKey_Backspace)) Utf8Pop(target);
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+        // macOS 的 Cmd 在 ImGui 里落在 KeyCtrl 上（ImGuiMod_Ctrl 即 Cmd），两个都收。
+        if ((io.KeySuper || io.KeyCtrl) && ImGui::IsKeyPressed(ImGuiKey_V)) {
+            if (const char* clip = glfwGetClipboardString(g_win))
+                ForEachTextChar(clip, [&](unsigned int cp) { Utf8Append(target, cp); });
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) Utf8Pop(target);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
             g_r31_focus = 0;
+            escTaken = true;   // 这一下归输入框：同帧不许再被下面「收搜索」那条吃掉
+        }
         g_relayout = true;
     }
     // 稿子 app.js:177 的两条键盘路（「能补就补」档）：⌘/Ctrl+F 唤出搜索并聚焦；
     // Esc 在根屏收搜索、在子屏等于点「← 来处」。输入框收字时 Esc 仍归输入框。
-    if (!g_r31_focus && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (!g_r31_focus && !escTaken && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         if ((g_view == 0 || g_view == 6) && g_r31_search) {
             g_r31_search = false;
             g_r31_query.clear();
@@ -2915,6 +3015,37 @@ static void HandleInput(const ImGuiIO& io, double now) {
         // 就会把 gap 冻在 3 上，整条序列永远走不完（实测连点三颗只发出第一颗）。
         // 另留一条兜底：目标 6 秒不出现就作废余下的颗，取证轮至少拍得出「走到哪算哪」那一屏。
         static double lastProgress = 0.0;
+        static ImGuiKey seqHeld = ImGuiKey_None;
+        const std::string& step = g_click_seq[(size_t)g_click_at];
+        if (IsKeyStep(step) && now >= g_click_delay) {
+            lastProgress = now;
+            const size_t colon = step.find(':');
+            const std::string kind = step.substr(0, colon);
+            std::string arg = step.substr(colon + 1);
+            int releaseAt = 1, frames = 8;
+            if (kind == "hold") {
+                const size_t c2 = arg.find(':');
+                if (c2 != std::string::npos) { releaseAt = atoi(arg.c_str() + c2 + 1); arg.resize(c2); }
+                frames = (std::max)(8, releaseAt + 2);
+            }
+            ImGuiIO& kio = ImGui::GetIO();
+            if (g_click_gap == 0) {
+                if (kind == "text")
+                    ForEachTextChar(arg.c_str(), [&](unsigned int cp) { kio.AddInputCharacter(cp); });
+                else if ((seqHeld = SeqKeyByName(arg)) != ImGuiKey_None)
+                    kio.AddKeyEvent(seqHeld, true);
+            } else if (seqHeld != ImGuiKey_None && g_click_gap >= releaseAt) {
+                kio.AddKeyEvent(seqHeld, false);
+                seqHeld = ImGuiKey_None;
+            }
+            if (g_click_gap >= frames - 1) {
+                if (seqHeld != ImGuiKey_None) { kio.AddKeyEvent(seqHeld, false); seqHeld = ImGuiKey_None; }
+                g_click_at++;
+                g_click_gap = 0;
+            } else {
+                g_click_gap++;
+            }
+        } else {
         if (now < g_click_delay) lastProgress = now;   // 还在等 CLICK_DELAY 的那段不算「无进展」
         ImVec2 tp;
         const bool cooling = g_click_gap >= 3;
@@ -2934,6 +3065,7 @@ static void HandleInput(const ImGuiIO& io, double now) {
                     g_click_seq[(size_t)g_click_at].c_str());
             fflush(stderr);
             g_click_at = (int)g_click_seq.size();
+        }
         }
     } else if (kDown && !g_hits.empty()) {
         down = true;                    // 一直按着：稿子里这就是 :active，抬起才是一次点击
@@ -2962,7 +3094,17 @@ static void HandleInput(const ImGuiIO& io, double now) {
         if (kv.second.seen != now && kv.second.target != 0.0f && !(kv.first & (1L << 41)))
             TxEval(kv.first, 0.0f, now);
 
+    static bool poked = false;                  // 这一按已经叫过窗口，松开再复位
+    if (!down) poked = false;
     if (down) {
+        // 这块面板是常驻浮层（LSUIElement＋无边框窗口）。别的 App 在前台时点进来，
+        // macOS 只把这一下当「激活进程」，GLFW 的窗口拿不到 key 状态——鼠标事件照收，
+        // 键盘一个字节都不来：搜索框看着能点，其实打不出字（2026-10-28 实拍：连打 5 键，
+        // 收字 0 次）。按下那一帧自己把窗口叫成 key，之后的按键与抬起才归这里。
+        if (!poked && !g_shot_to) {
+            poked = true;
+            if (!glfwGetWindowAttrib(g_win, GLFW_FOCUSED)) glfwFocusWindow(g_win);
+        }
         g_press = -1;
         for (size_t i = g_hits.size(); i-- > 0;)      // 从后往前：按钮登记在行之后，优先级天然高于行
             if (Inside(g_hits[i], mp)) {
@@ -2970,9 +3112,12 @@ static void HandleInput(const ImGuiIO& io, double now) {
                 if (g_hits[i].act != HIT_SEARCHFIELD) g_r31_focus = 0;
                 break;
             }
-        if (getenv("AGENTPING_INPUT_TRACE"))
-            fprintf(stderr, "[输入] 按下 mp=(%.0f,%.0f) press=%ld hits=%zu\n", mp.x, mp.y,
-                    g_press, g_hits.size());
+        if (getenv("AGENTPING_INPUT_TRACE")) {
+            int wx = 0, wy = 0;
+            glfwGetWindowPos(g_win, &wx, &wy);
+            fprintf(stderr, "[输入] 按下 mp=(%.0f,%.0f) win=(%d,%d) press=%ld hits=%zu\n", mp.x,
+                    mp.y, wx, wy, g_press, g_hits.size());
+        }
     } else if (!g_was_down && !g_drag_moved) {
         for (size_t i = g_hits.size(); i-- > 0;)      // 抬起也得落在同一颗上才算一次点击
             if (g_hits[i].zid == g_press && Inside(g_hits[i], mp)) {
@@ -4718,6 +4863,9 @@ int main(int argc, char** argv) {
     }
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
+    // 出图轮不许抢键盘：取证实例出现在他正在打字的桌面上，一 show 就会成 key 窗口，
+    // 他的拼音直接落进这块面板（2026-10-29 实测：没人碰面板，搜索框里却多了「xian」）。
+    if (getenv("AGENTPING_SHOT")) glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
     glfwWindowHint(GLFW_FLOATING, g_cfg.on_top ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_DECORATED, windowed ? GLFW_FALSE : GLFW_TRUE);
     // 稿子的 #win 是 rounded-16 + 1px hairline 的浮层，圆角外必须真透明，
@@ -4808,6 +4956,16 @@ int main(int argc, char** argv) {
     }
 
     ImGui_ImplGlfw_InitForOpenGL(win, true);
+#ifdef __APPLE__
+    {
+        Class c = objc_getClass("GLFWContentView");
+        Method m = c ? class_getInstanceMethod(c, sel_registerName("keyDown:")) : nullptr;
+        if (m) g_origKeyDown = method_setImplementation(m, (IMP)KeyDownHook);
+        if (c) class_addMethod(c, sel_registerName("inputContext"), (IMP)NoInputContext, "@@:");
+        if (c) class_addMethod(c, sel_registerName("acceptsFirstMouse:"), (IMP)AcceptsFirstMouseOn,
+                               "B@:@");
+    }
+#endif
 #ifdef __APPLE__
     ImGui_ImplOpenGL3_Init("#version 150");
 #else
@@ -5011,6 +5169,12 @@ int main(int argc, char** argv) {
             glClear(GL_COLOR_BUFFER_BIT);
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
+            // 系统说已经松开、这一侧还按着：补一次抬起（原因见 RealLeftDown 上那段）。
+            // 出图轮不补：那一轮的按下是合成的，真指针本来就没按。
+            if (!g_shot_to) {
+                ImGuiIO& iio = ImGui::GetIO();
+                if (iio.MouseDown[0] && !RealLeftDown()) iio.AddMouseButtonEvent(0, false);
+            }
             ImGui::NewFrame();
             // 输入排在绘制之前：这一帧的悬停/按下用的是上一帧登记的命中区，
             // 算完过渡值才画，命中那一帧就亮（滞后的 16ms 比 150ms 的过渡短一个数量级）。
@@ -5032,24 +5196,31 @@ int main(int argc, char** argv) {
                         onHit = true;
                         break;
                     }
-                const bool inHead = (mp.y <= 54.0f);
-                if (down && !dragArm && inHead && !onHit) {
+                // 表头右端是图标簇（齿轮／搜索／折叠）：按在那儿是点按，绝不起拖。
+                // 只靠命中区判不够——布局刚换帧时命中区还是上一帧的，正好漏掉刚点的那颗；
+                // 所以再按几何划一条死线（图标簇宽 90pt 贴右沿）。
+                const bool inHead = (mp.y <= 54.0f) && mp.x < io.DisplaySize.x - 90.0f;
+                // 这一按若是把窗口叫醒的那一下，只做激活，不当作拖拽起点。
+                const bool justActivated = !glfwGetWindowAttrib(win, GLFW_FOCUSED);
+                // 全局光标点＝窗口原点＋视口内鼠标，两个数同一帧取，天然同源。
+                // 别改用 CGEventGetLocation：它和窗口位置不同步，差一拍就会按「差多少」把窗口弹走
+                // （2026-10-28 实拍：单击表头，面板自己挪了 72pt）。窗口一动，视口内鼠标反向补齐，
+                // 这个点保持不变，所以没有反馈回路。
+                const ImVec2 gCur((float)wx0 + mp.x, (float)wy0 + mp.y);
+                if (down && !dragArm && inHead && !onHit && !justActivated) {
                     dragArm = true;
                     dragMoved = false;
                     dragWin0 = ImVec2((float)wx0, (float)wy0);
-                    dragMouse0 = GlobalCursorNow();       // 全局坐标：挪窗口不改写它，无反馈回路
+                    dragMouse0 = gCur;
                 }
                 if (dragArm && !down) dragArm = false;    // 没拖就松手＝一次普通空白点击
                 if (dragArm && down) {
-                    const ImVec2 g2 = GlobalCursorNow();
-                    if (g2.x > -1.0e5f) {
-                        const float dx = g2.x - dragMouse0.x, dy = g2.y - dragMouse0.y;
-                        if (dragMoved || dx * dx + dy * dy > 16.0f) {
-                            dragMoved = true;
-                            g_drag_moved = true;
-                            glfwSetWindowPos(win, (int)std::lround(dragWin0.x + dx),
-                                             (int)std::lround(dragWin0.y + dy));
-                        }
+                    const float dx = gCur.x - dragMouse0.x, dy = gCur.y - dragMouse0.y;
+                    if (dragMoved || dx * dx + dy * dy > 16.0f) {
+                        dragMoved = true;
+                        g_drag_moved = true;
+                        glfwSetWindowPos(win, (int)std::lround(dragWin0.x + dx),
+                                         (int)std::lround(dragWin0.y + dy));
                     }
                 }
                 if (!down && dragMoved) {                 // 拖完松手：落盘位置，放行下一击

@@ -1559,6 +1559,10 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
         if (g_r31_query.empty()) {
             DrawTextRun(dl, sx + 31.0f, TextMid(cy + 18.0f, T_S12, loc), T("r_search_ph", loc), loc,
                         k31Faint, T_S12);
+            // 空串也要画光标：不画的话点进来和没点一样，看不出这颗框已经在收字。
+            if (focused && std::fmod(tn, 1.06) < 0.53)
+                dl->AddRectFilled(ImVec2(sx + 31.0f, cy + 8.0f), ImVec2(sx + 32.0f, cy + 28.0f),
+                                  k31Fg);
         } else {
             const std::string shown = R31TailFit(g_r31_query, tw, loc, T_S12);
             const float drawn = DrawTextRun(dl, sx + 31.0f, TextMid(cy + 18.0f, T_S12, loc), shown,
@@ -1567,16 +1571,23 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
                 dl->AddRectFilled(ImVec2(sx + 31.0f + drawn + 1.0f, cy + 8.0f),
                                   ImVec2(sx + 31.0f + drawn + 2.0f, cy + 28.0f), k31Fg);
         }
+        // 整条框先登记、✕ 后登记：命中是倒序扫的，晚登记的先问着——否则整条框会把 ✕ 盖死。
+        AddHit(g_hits, sx, cy, sx + sw, cy + sh, HIT_SEARCHFIELD, 1301, 1, loc, T("r_search", loc), 0);
         if (!g_r31_query.empty()) {
             const float bx = sx + sw - 26.0f;
             I31(dl, I31_CLOSE, bx + 5.0f, cy + 12.5f, 11.0f, k31Faint);
             AddHit(g_hits, bx - 4.0f, cy + 6.0f, bx + 24.0f, cy + 30.0f, HIT_CLEARQ, 1300, 0, loc,
                    T("r_clear", loc), 0);
         }
-        AddHit(g_hits, sx, cy, sx + sw, cy + sh, HIT_SEARCHFIELD, 1301, 1, loc, T("r_search", loc), 0);
         cy += sh + 12.0f;
     }
     if (all.empty()) {
+        // 有搜索词却一条都不剩，不能说「目前没有会话」——那是「从没用过工具」的文案，
+        // 会让人以为数据丢了。给「没有匹配」＋一键回到全部（2026-10-29 实测：搜「赚钱」后这么写的）。
+        if (!g_r31_query.empty())
+            return R31Empty(dl, x + 16.0f, cy, w - 32.0f, 420.0f, T("r_search_none", loc),
+                            T("r_search_none_hint", loc), T("r_show_all", loc), HIT_SHOWALL31,
+                            loc);
         R31Empty(dl, x + 16.0f, cy, w - 32.0f, 420.0f, T("r_no_sessions", loc),
                  T("r_no_sessions_hint", loc), nullptr, 0, loc);
         return cy + 420.0f;
@@ -2091,6 +2102,10 @@ static void R31ToolsFixed(ImDrawList* dl, float x, float y, float w, int loc, do
     if (g_r31_toolq.empty()) {
         DrawTextRun(dl, sx + 34.0f, TextMid(sy + 18.0f, T_S12, loc), T("r_search_tools", loc), loc,
                     k31Faint, T_S12);
+        // 空串也要画光标：点进来却看不出这颗框在收字，和没点一样。
+        if (focused && std::fmod(tn, 1.06) < 0.53)
+            dl->AddRectFilled(ImVec2(sx + 34.0f, sy + 8.0f), ImVec2(sx + 35.0f, sy + 28.0f),
+                              k31Fg);
     } else {
         const std::string shown = R31TailFit(g_r31_toolq, tw, loc, T_S12);
         const float drawn = DrawTextRun(dl, sx + 34.0f, TextMid(sy + 18.0f, T_S12, loc), shown, loc,
@@ -2099,14 +2114,15 @@ static void R31ToolsFixed(ImDrawList* dl, float x, float y, float w, int loc, do
             dl->AddRectFilled(ImVec2(sx + 34.0f + drawn + 1.0f, sy + 8.0f),
                               ImVec2(sx + 34.0f + drawn + 2.0f, sy + 28.0f), k31Fg);
     }
+    // 同上：整条框先登记，✕ 压在它上面。
+    AddHit(g_hits, sx, sy, sx + sw, sy + sh, HIT_SEARCHFIELD, 1311, 2, loc,
+           T("r_search_tools", loc), 0);
     if (!g_r31_toolq.empty()) {
         const float bx = sx + sw - 28.0f;
         I31(dl, I31_CLOSE, bx + 5.0f, sy + 12.5f, 11.0f, k31Faint);
         AddHit(g_hits, bx - 4.0f, sy + 6.0f, bx + 26.0f, sy + 30.0f, HIT_CLEARQ, 1310, 2, loc,
                T("r_clear", loc), 0);
     }
-    AddHit(g_hits, sx, sy, sx + sw, sy + sh, HIT_SEARCHFIELD, 1311, 2, loc,
-           T("r_search_tools", loc), 0);
 }
 static float R31ToolsList(ImDrawList* dl, float x, float yTop, float w, int loc) {
     const auto present = R31PresentTools();
