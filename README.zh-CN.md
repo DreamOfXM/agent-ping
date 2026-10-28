@@ -195,7 +195,8 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 
 ## 构建
 
-macOS（最近一次实跑 2026-10-28，产出 `build/AgentPing-cpp.app`，42 MB）：
+macOS（最近一次实跑 2026-10-28，产出 `build/AgentPing-cpp.app`；其中约 40 MB 是随包
+的 `fonts/`，所以体积随字体变，不随代码变）：
 
 ```sh
 brew install cmake ninja glfw freetype
@@ -226,6 +227,9 @@ D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 56 条
 xvfb-run -a -s "-screen 0 1400x1100x24" ./build/pin_imgui_shell --dump
 ```
 
+上面这些路径是 macOS 的构建目录 —— Linux 上这两个二进制在 `build-linux/` 里，这些命令
+每一条都在 Debian 12 容器中实跑过。
+
 `--dump` 就是对账工具：屏幕上每个数在它里面都有一行，所以面板和现实不一致时，你在
 终端就能判是谁错了。
 
@@ -254,6 +258,8 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 - **Linux 出声没在真硬件上验过。** 验证环境没有声卡，所以「它确实响了」这件事没被观察到，
   观察到的是选择器能解析出「播放器 + 文件」这一对、且代码路径正常返回。
 - **Linux 上点横幅不跳，** 也没有面板驱动：Linux 的一行退到唤起 App 或打开会话的工作目录。
+  投递本身是观察到的——`alert_probe --post` 报出横幅交给了 Xvfb 会话里在跑的 `dunst`——
+  但也仅此而已，不是真桌面。
 - **没有真背景模糊。** 面板是手画的玻璃表面，不是合成器的模糊——macOS 不给 accessory
   进程一条便宜的取背后像素的路。
 - **搜索框能否真拿到键盘焦点，未实测。** 两个搜索框是从 GLFW 的输入队列里取字，而不是

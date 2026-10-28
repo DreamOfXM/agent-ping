@@ -219,7 +219,8 @@ only, so questions and options stay empty for them.
 
 ## Build
 
-macOS (last run 2026-10-28, produces `build/AgentPing-cpp.app`, 42 MB):
+macOS (last run 2026-10-28, produces `build/AgentPing-cpp.app` — about 40 MB of
+which is the copied `fonts/`, so the size moves with the fonts, not the code):
 
 ```sh
 brew install cmake ninja glfw freetype
@@ -250,6 +251,10 @@ D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 56 ass
 ./build/pin_imgui_shell --hook-status     # per-CLI wiring state as text
 xvfb-run -a -s "-screen 0 1400x1100x24" ./build/pin_imgui_shell --dump
 ```
+
+Those paths are the macOS build directory — on Linux the same two binaries are in
+`build-linux/`, and every one of these lines was run there inside a Debian 12
+container.
 
 `--dump` is the reconciliation tool: every number on screen has a line in it, so a
 disagreement between the panel and reality is checkable from the terminal.
@@ -287,7 +292,9 @@ mystery.
   no sound device, so "it made a noise" has not been observed — only that the picker
   resolves a player + file pair and the code path returns.
 - **Linux banner clicks do not jump,** and there is no palette driver: a Linux row
-  falls back to activating the app or opening the session's directory.
+  falls back to activating the app or opening the session's directory. Delivery
+  itself has been observed — `alert_probe --post` reports the banner handed to a
+  running `dunst` inside an Xvfb session — but that is the whole extent of it.
 - **No real backdrop blur.** The panel is a hand-drawn glass surface, not a
   compositing blur — macOS gives an accessory process no cheap way to sample what is
   behind it.
