@@ -569,8 +569,7 @@ static float RPermView(ImDrawList* dl, float L, float R, float y, int loc, doubl
 
     // .gobtn{height:32;margin-top:14;border:line2;background:surf2}
     y += 14.0f;
-    const std::string jb = RFmt(T("jump_project", loc),
-                                (r->project.empty() ? r->agent : r->project).c_str());
+    const std::string jb = T(LandGoKey(r->agent_id), loc);
     const long z = Zid(loc, 200, HIT_JUMP, 0);
     const float hv = TxPeek(z);
     dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + 32.0f), MixA(kSurf2, kRGoHover, hv), 8.0f);

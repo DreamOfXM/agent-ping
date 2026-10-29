@@ -240,6 +240,37 @@ static const Key kStr[] = {
                         "ZCode, WorkBuddy e OpenCode non hanno un hook Notification scrivibile: si leggono solo i log.",
                         "ZCode・WorkBuddy・OpenCode には書き込める通知フックがなく、ログを読むだけです。",
                         "ZCode, WorkBuddy, OpenCode는 쓸 수 있는 알림 훅이 없어 로그만 읽습니다."}},
+    // 第三步：Qoder / ZCode 没有会话级链接，唯一能落到「那一条对话」的入口是它们自己的
+    // 托盘/Command Center，而驱动那个入口要辅助功能授权。这一档现在有没有，屏上必须写，
+    // 不然用户只会看到「点了半天只唤起 App」，不知道差在哪一格（2026-10-29 就是这么撞上的）。
+    {"setup_step3",    {"授权辅助功能", "Allow Accessibility", "Bedienungshilfen erlauben",
+                        "Consenti Accessibilità", "アクセシビリティを許可", "보조 기능 허용"}},
+    {"setup_ax_on",    {"已授权", "Granted", "Erlaubt", "Concesso", "許可済み", "허용됨"}},
+    {"setup_ax_off",   {"未授权", "Not granted", "Nicht erlaubt", "Non concesso",
+                        "未許可", "미허용"}},
+    {"setup_axnote",   {"面板要点中客户端自己托盘里的条目才能跳到那一条对话，这一步要辅助功能授权。不授权也能用，只是那一跳只把 App 带到前台。",
+                        "To open one exact conversation the panel has to click that client's own tray entry, which needs Accessibility access. Without it the jump still brings the app forward — nothing more.",
+                        "Für den Sprung auf eine einzelne Sitzung muss das Panel den Eintrag im AblageMenü des Clients anklicken — dafür sind die Bedienungshilfen nötig. Ohne sie kommt nur die App nach vorn.",
+                        "Per aprire una conversazione precisa il pannello deve cliccare la voce nel tray del client: serve Accessibilità. Senza, il salto porta avanti solo l’app.",
+                        "特定の会話を開くには、パネルがクライアント自身のトレイ項目をクリックする必要があるためアクセシビリティの許可が要ります。未許可ではアプリを前面にするだけになります。",
+                        "특정 대화로 이동하려면 패널이 클라이언트 자체 트레이 항목을 클릭해야 하므로 보조 기능이 필요합니다. 없으면 앱만 앞으로 나옵니다."}},
+    {"setup_ax_go",    {"去系统设置", "Open Settings", "Systemeinstellungen öffnen",
+                        "Apri Impostazioni", "システム設定を開く", "시스템 설정 열기"}},
+    {"setup_ax_done",  {"已开到辅助功能那一格", "The Accessibility pane is open",
+                        "Das Bedienungshilfen-Fenster ist offen", "Il pannello Accessibilità è aperto",
+                        "アクセシビリティ欄を開きました", "보조 기능 설정 창을 열었습니다"}},
+    {"setup_ax_sub",   {"勾上 Agent Ping 后回到面板再点一次，不用重启",
+                        "Tick Agent Ping, then click the row again — no restart needed",
+                        "Agent Ping anhaken und die Zeile erneut klicken — kein Neustart",
+                        "Spunta Agent Ping e clicca di nuovo la riga: non serve riavviare",
+                        "Agent Ping をオンにしたら行をもう一度クリック。再起動は不要",
+                        "Agent Ping을 켜고 행을 다시 누르면 됩니다. 재시작 불필요"}},
+    {"setup_ax_fail",  {"系统设置没能自动打开，手动进：隐私与安全性 → 辅助功能",
+                        "Settings didn't open — go there yourself: Privacy & Security → Accessibility",
+                        "Die Einstellungen öffneten sich nicht — selbst gehen: Datenschutz & Sicherheit → Bedienungshilfen",
+                        "Impostazioni non aperte — vai tu: Privacy e sicurezza → Accessibilità",
+                        "設定が開けませんでした。手動で：プライバシーとセキュリティ → アクセシビリティ",
+                        "설정이 열리지 않았어요. 직접 가세요: 개인정보 보호 및 보안 → 보조 기능"}},
     {"det_title",      {"提问", "Question", "Frage", "Domanda", "質問", "질문"}},
     {"det_session",    {"会话", "Session", "Sitzung", "Sessione", "セッション", "세션"}},
     {"det_source_val", {"hook 收件箱 · 本机", "hook inbox · local", "Hook-Postfach · lokal",
@@ -259,8 +290,6 @@ static const Key kStr[] = {
     {"det_options",    {"选项", "Options", "Optionen", "Opzioni", "選択肢", "선택지"}},
     {"det_copy",       {"复制", "Copy", "Kopieren", "Copia", "コピー", "복사"}},
     {"det_copied",     {"已复制", "Copied", "Kopiert", "Copiato", "コピー済み", "복사됨"}},
-    {"det_jump",       {"跳到终端", "Open terminal", "Zum Terminal", "Vai al terminale",
-                        "ターミナルへ", "터미널로"}},
     {"det_no_submit",  {"这里不代你提交答案；复制后到终端粘贴。",
                         "Nothing is submitted for you — copy, then paste in the terminal.",
                         "Hier wird nichts gesendet — kopieren und im Terminal einfügen.",
@@ -285,8 +314,15 @@ static const Key kStr[] = {
     {"perm_empty",     {"现在没有停在授权的会话。", "No session is waiting for permission.",
                         "Keine Sitzung wartet auf Freigabe.", "Nessuna sessione attende un permesso.",
                         "許可待ちのセッションはありません。", "권한을 기다리는 세션이 없습니다."}},
-    {"jump_project",   {"切到 %s 的终端", "Open the %s terminal", "Zum %s-Terminal",
-                        "Apri il terminale di %s", "%s のターミナルへ", "%s 터미널로"}},
+    // 那颗「去」按钮的两种真话：有客户端的才敢说「在客户端里打开这条会话」，
+    // 纯 CLI 的这一路本机根本没有客户端，按钮只能承诺它真做得到的那件事。
+    // （旧文案「切到 %s 的终端」是假的：C++ 版从来没实现过终端跳转。）
+    {"land_go_sess",   {"打开客户端里的这条会话", "Open this session in the client",
+                        "Diese Sitzung in der App öffnen", "Apri questa sessione nel client",
+                        "クライアントでこのセッションを開く", "클라이언트에서 이 세션 열기"}},
+    {"land_go_log",    {"打开这条会话的记录目录", "Open this session's log folder",
+                        "Protokollordner dieser Sitzung öffnen", "Apri la cartella log di questa sessione",
+                        "このセッションのログフォルダを開く", "이 세션의 로그 폴더 열기"}},
     {"hist_done",      {"今日完成", "Finished today", "Heute beendet", "Conclusi oggi",
                         "本日完了", "오늘 완료"}},
     {"hist_latest",    {"回到最新", "Back to latest", "Zu den neuesten", "Torna ai recenti",
@@ -478,11 +514,61 @@ static const Key kStr[] = {
                         "常に手前に表示", "항상 최상단"}},
     {"span_contig",    {"连续 %s", "%s straight", "%s am Stück", "%s di fila",
                         "連続 %s", "%s 연속"}},
-    {"jump_done",      {"已切到 %s 的终端", "Switched to the %s terminal", "Zum %s-Terminal gewechselt",
-                        "Passato al terminale di %s", "%s のターミナルへ移動", "%s 터미널로 전환"}},
-    {"jump_done_sub",  {"允许 / 拒绝只在那个终端里点", "Allow / deny only in that terminal",
-                        "Erlauben / Ablehnen nur dort", "Consenti / nega solo lì",
-                        "許可・拒否はそのターミナルで", "허용/거부는 그 터미널에서만"}},
+    // ── 落点回执（2026-10-29）───────────────────────────────────────────────
+    // 用户原话：「怎么点击 qoder 的任务打开的是文件夹，不是应该定位到对应会话吗」。
+    // 所以那一跳落到哪一层要写在屏上：主行说清落到哪、副行说下一步由他做的那件事；
+    // 平台侧那句人话只进 [落点] 日志（六语表里没有它，上屏会把中文漏进德/日界面）。
+    {"land_sess",      {"已定位到这条会话", "That session is now in front",
+                        "Diese Sitzung wurde geöffnet", "Sessione aperta",
+                        "このセッションを開きました", "해당 세션을 열었습니다"}},
+    {"land_tray",      {"这条没在客户端托盘列出的会话里", "That session isn't in the client's tray list",
+                        "Diese Sitzung steht nicht in der Ablageliste der App",
+                        "Questa sessione non è nell'elenco del tray del client",
+                        "このセッションはクライアントのトレイ一覧に出ていません",
+                        "이 세션은 클라이언트 트레이 목록에 없습니다"}},
+    {"land_miss",      {"在客户端里搜不到这条会话", "The client's search didn't find that session",
+                        "Die Suche in der App hat diese Sitzung nicht gefunden",
+                        "La ricerca nel client non ha trovato questa sessione",
+                        "クライアント内の検索でこのセッションが見つかりません",
+                        "클라이언트 검색에서 이 세션을 찾지 못했습니다"}},
+    {"land_app",       {"只把 %s 带到了前台", "Only brought %s to the front",
+                        "%s wurde nur in den Vordergrund geholt",
+                        "%s è stata portata solo in primo piano",
+                        "%s を前面に出しただけです", "%s 앱만 앞으로 불러왔습니다"}},
+    {"land_copy",      {"标题已复制 — 在它的会话列表里贴一下就能到",
+                        "Title copied — paste it in the client's session list",
+                        "Titel kopiert — in der Sitzungsliste der App einfügen",
+                        "Titolo copiato — incollalo nell'elenco delle sessioni",
+                        "タイトルをコピーしました — クライアントの一覧に貼り付けてください",
+                        "제목을 복사했습니다 — 클라이언트 목록에 붙여넣으세요"}},
+    {"land_dir",       {"只打开了记录目录，没到那条会话", "Only the log folder opened — not that session",
+                        "Nur der Protokollordner wurde geöffnet — nicht die Sitzung",
+                        "Si è aperta solo la cartella log, non la sessione",
+                        "ログフォルダを開いただけで、そのセッションではありません",
+                        "로그 폴더만 열었고 해당 세션은 아닙니다"}},
+    // 记录目录这一档的第二行：这一路根本没有客户端，所以不许借用 land_copy
+    // 那句「在它的会话列表里贴一下就能到」——那列表并不存在（2026-10-29 实拍读出来的）。
+    {"land_dir_sub",   {"这一路只有命令行，没有客户端可跳；标题已复制",
+                        "This one is CLI-only — no client to jump into; title copied",
+                        "Diese Sitzung gibt es nur in der CLI — keine App; Titel kopiert",
+                        "Questa è solo CLI: nessun client da aprire; titolo copiato",
+                        "この経路はCLIのみでクライアントはありません。タイトルはコピーしました",
+                        "이 경로는 CLI뿐이라 클라이언트가 없습니다. 제목은 복사했습니다"}},
+    {"land_ax",        {"需要辅助功能授权，才能点中那条会话",
+                        "Accessibility access is needed to open that exact session",
+                        "Für diesen Sprung fehlt der Zugriff auf die Bedienungshilfen",
+                        "Serve l'accesso a Accessibilità per aprire quella sessione",
+                        "そのセッションを開くにはアクセシビリティの許可が必要です",
+                        "해당 세션을 열려면 보조 기능 권한이 필요합니다"}},
+    {"land_ax_sub",    {"系统设置里那一格已经打开；拨上后再点一次即可，不用重启",
+                        "The settings pane just opened — tick it and click again, no restart",
+                        "Das Einstellfenster ist offen — anhaken und erneut klicken, kein Neustart",
+                        "Il pannello delle impostazioni è aperto: spuntalo e clicca di nuovo, senza riavviare",
+                        "設定パネルを開きました。オンにしてもう一度クリックすれば再起動は不要です",
+                        "설정 창을 열었습니다. 켜고 다시 누르면 됩니다. 재시작이 필요 없습니다"}},
+    {"land_none",      {"这一跳没落到实处", "The jump landed nowhere",
+                        "Der Sprung ging ins Leere", "Il salto non è arrivato a nulla",
+                        "この移動はどこにも着地しませんでした", "이동할 곳을 찾지 못했습니다"}},
     {"toast_back_ov",  {"返回总览", "Back to overview", "Zur Übersicht", "Torna alla panoramica",
                         "概要に戻る", "개요로 돌아가기"}},
     // 稿子授权详情里「触发说明」那一行的键，以及设置屏第四节（四档提醒内容）的节头。
@@ -1430,6 +1516,15 @@ static const UIRow* SelectedRow(const std::string& key) {
     for (const auto& r : g_pd.rows) if (r.key == key) return &r;
     return g_sel_copy.key == key ? &g_sel_copy : nullptr;
 }
+/// 按「采集器 id + 该采集器里的会话 id」找行（横幅点击只带得到这两个，没有 key 可用）。
+/// key 的两种拼法（采集器用 /、hook 收件箱用 :）不在这里兜——两处 key 各自稳定，
+/// 而横幅带来的这对值就是行上的那两列，直接比它们最省事。
+static const UIRow* RowOf(const std::string& agent_id, const std::string& native_id) {
+    if (agent_id.empty() || native_id.empty()) return nullptr;
+    for (const auto& r : g_pd.rows)
+        if (r.agent_id == agent_id && r.native_id == native_id) return &r;
+    return nullptr;
+}
 static bool g_relayout = false;
 static bool g_panelVisible = true;
 static GLFWwindow* g_win = nullptr;      // 点击要跳走时得先把这块面板收起来
@@ -1805,12 +1900,15 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               // HIT_SUBTOG 队列行/运行卡上那颗「N 条子对话」的展开开关
               HIT_SUBTOG = 36,
               HIT_H31MORE = 38,      // 完成记录「还有 N 条」补位行（自动续页的兜底入口）
-              HIT_QUEUEALL = 39 };   // 首页队列「还有 N 条」：展开全部待处理行
+              HIT_QUEUEALL = 39,
+              // HIT_AXGO 接线屏第三步那颗「去系统设置」：开到「隐私与安全性 → 辅助功能」
+              HIT_AXGO = 40 };   // 首页队列「还有 N 条」：展开全部待处理行
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
 /// SC_NOTIFY（屏上「系统通知」对账上 dnd 要取反）那样绕一道。
 static void Toast(const std::string& a, const std::string& b, bool go = false);   // 定义在 r20 段
+static const Tool* AgentTool(const char* id);   // 定义在绘制段；落点回执要先认得出这一路的工具名
 enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
               SC_TOP, SC_ROWS, SC_DND, SC_LAUNCH, SC_QUIT };
 struct Hit {
@@ -2330,7 +2428,8 @@ static const char* ActName(int act) {
         case HIT_NAVHIST:  return "历史";
         case HIT_NAVSETUP: return "接线";
         case HIT_HOOKINST: return "写入接线";
-        case HIT_JUMP:     return "跳终端";
+        case HIT_JUMP:     return "跳转会话";
+        case HIT_AXGO:     return "去系统设置";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -2361,25 +2460,164 @@ static const char* ActName(int act) {
     }
 }
 
-/// 跳到那会话：先按方案 A 收面板（面板挡在目标窗口上时，跳过去也只是看见我们自己），
-/// 再把落点打出来。ap_open 自己会逐级退让并在 reason 里写清最后落在了哪一层。
-static void JumpTo(const Hit& h) {
-    // 先收面板：这块浮层是 topmost，跳过去的窗口会被我们自己盖住（Swift 那边 dismiss() 同一件事）。
+/// 那一跳真落到了哪一层。面板据此写回执，也据此决定收不收面板：
+/// 只有落到「那一条对话」才把面板藏起来——藏面板会把要解释的话一起藏掉，
+/// 而 2026-10-29 那次就是因为没解释：用户只看见 Finder 开在 ~/.qoder/projects，
+/// 以为这个产品压根不会跳会话。
+enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / ⌘K 命中 / deep link 被接住）
+                 L_TRAY,       // 托盘这一轮只露最近那 12 条，没列它（Qoder 实测）
+                 L_MISS,       // ⌘K 真敲进去了，检索里没这条（ZCode 实测）
+                 L_APP,        // 只把客户端唤到前台，没到具体会话
+                 L_DIR,        // 落到记录目录
+                 L_AX,         // 挡在辅助功能授权前面——这一格只能他自己拨
+                 L_NONE };     // 一层都没落上
+struct Landing { int level = L_NONE; std::string why; };   // why＝平台原话，只进日志
+
+static const char* LandName(int lv) {
+    switch (lv) {
+        case L_SESS: return "会话级";
+        case L_TRAY: return "托盘没列";
+        case L_MISS: return "检索没命中";
+        case L_APP:  return "只到 App";
+        case L_DIR:  return "记录目录";
+        case L_AX:   return "缺辅助功能";
+        default:     return "落空";
+    }
+}
+
+/// 收面板：这块浮层是 topmost，跳过去的窗口会被我们自己盖住（Swift 那边 dismiss() 同一件事）。
+static void HidePanel() {
     if (g_panelVisible) {
         g_panelVisible = false;
         if (g_win) glfwHideWindow(g_win);
     }
-    char why[512];
-    // ZCode 没有会话级 URL，精确落点只有 ⌘K 驱动（激活 → ⌘K → 粘贴标题 → 回车）。
-    // 未授权/没敲成时 reason 会写明，再退回普通落点阶梯，不静默。
+}
+
+/// 展面板，与 HidePanel 对称。ZCode 那一跳为了把 ⌘K 敲进客户端会先收面板，
+/// 没收成就要在屏上说一句话——面板还藏着，回执等于没写。
+static void ShowPanel() {
+    if (!g_panelVisible) {
+        g_panelVisible = true;
+        if (g_win) glfwShowWindow(g_win);
+        g_relayout = true;
+    }
+}
+
+/// 跳到那会话。先用会话级那把钥匙（Qoder＝按名字点它自己托盘里的条目，ZCode＝替用户敲 ⌘K），
+/// 没开成才走 ap_open3 的三层阶梯；两条 reason 各用各的缓冲区。
+/// 上一版复用同一个 why，ap_open 一把盖掉了「未授权辅助功能」那句，屏幕上就只剩「打开了文件夹」。
+static Landing JumpTo(const Hit& h) {
+    Landing out;
+    char key[512], lad[512];
+    key[0] = lad[0] = 0;
+    const bool titled = !h.title.empty();
+    // tried 必须单独记：会话级那两把钥匙只有 Qoder/ZCode 有，其余那几路压根没试。
+    // 早期版本用「rc 初值 1」当没试的哨兵，结果 Claude 的行也被判成「托盘没列它」。
+    bool tried = false;
     int rc = 1;
-    if (h.agent_id == "zcode" && !h.title.empty())
-        rc = ap_zcode_navigate(h.title.c_str(), why, (int)sizeof why);
-    if (rc != 0)
-        rc = ap_open2(h.agent_id.c_str(), h.native_id.c_str(), h.cwd.c_str(), why, (int)sizeof why);
-    fprintf(stderr, "[落点] %s/%s → %s（ap_open %s）\n", h.agent_id.c_str(), h.native_id.c_str(),
-            why[0] ? why : "无说明", rc == 0 ? " ok" : "失败");
+    if (h.agent_id == "zcode" && titled) {
+        // ⌘K 是把键敲进那个 App，面板挡在前面时键会落到我们自己身上，所以先收。
+        HidePanel();
+        rc = ap_zcode_navigate(h.title.c_str(), key, (int)sizeof key);
+        tried = rc != 4;
+    } else if (h.agent_id == "qoder" && titled) {
+        // 托盘那一菜单是 AXPress 点中的，不占键盘，面板留不留都不挡路。
+        rc = ap_qoder_tray(h.title.c_str(), key, (int)sizeof key);
+        tried = rc != 4;
+    }
+    if (tried && rc == 0) {
+        out.level = L_SESS;
+        out.why = key;
+        HidePanel();
+        fprintf(stderr, "[落点] %s/%s → 会话级 ok ｜ %s\n", h.agent_id.c_str(),
+                h.native_id.c_str(), key[0] ? key : "无说明");
+        fflush(stderr);
+        return out;
+    }
+    int lvl = -1;
+    if (tried && rc == 2) lvl = L_AX;                    // 未授权辅助功能：这一格只能他自己拨
+    else if (tried && rc == 1)
+        lvl = h.agent_id == "zcode" ? L_MISS : L_TRAY;   // 试过了，那一条不在客户端露出来的名单里
+
+    // 缺授权时顺手发起系统那次问询（弹窗里带「打开系统设置」），并把那一格真开到屏上：
+    // 回执第二行写的是「系统设置里那一格已经打开」，不真开就是谎话（10-29 逐张读实拍读出来的）。
+    if (lvl == L_AX) {
+        char ax[256], pane[256];
+        ap_ax_trusted(1, ax, (int)sizeof ax);
+        if (ap_open_privacy_pane(pane, (int)sizeof pane) == 0)
+            fprintf(stderr, "[落点] 已开系统设置那一格：%s\n", pane);
+        else
+            fprintf(stderr, "[落点] 系统设置那一格没开成：%s\n", pane);
+        fflush(stderr);
+    }
+
+    int layer = 0;
+    const int rc2 = ap_open3(h.agent_id.c_str(), h.native_id.c_str(), h.cwd.c_str(),
+                             lad, (int)sizeof lad, &layer);
+    if (lvl < 0) {
+        if (rc2 != 0) lvl = L_NONE;
+        else lvl = layer == 1 ? L_SESS : layer == 2 ? L_APP : layer == 3 ? L_DIR : L_NONE;
+    }
+    out.level = lvl;
+    out.why = (key[0] ? std::string(key) + "；" : std::string()) + (lad[0] ? lad : "未走阶梯");
+    if (out.level == L_SESS) HidePanel();
+    else ShowPanel();   // 上面为敲 ⌘K 收过一次；这一层要他看见回执，得先摆回来
+    fprintf(stderr, "[落点] %s/%s → %s ｜ 会话级：%s ｜ 阶梯：%s（ap_open %s，layer=%d）\n",
+            h.agent_id.c_str(), h.native_id.c_str(), LandName(out.level),
+            key[0] ? key : "不适用", lad[0] ? lad : "未走", rc2 == 0 ? "ok" : "落空", layer);
     fflush(stderr);
+    return out;
+}
+
+/// 把落点评语写屏：只有真落到那一条对话才算成，其余每一层都在屏上留一句话，
+/// 并把标题放进剪贴板——他在客户端自己的会话列表里粘一下就找得到（ZCode 同款处置，10-28 定）。
+/// copy_title=false：那一趟剪贴板上已经装着更要紧的东西（点选项时先把答案复制了），不许覆盖。
+/// 文案里带 %s 的只有 land_app（要念工具名），所以用一个填空函数而不是 snprintf：
+/// 六语表里少一个 %s，snprintf 就报一次 -Wformat-extra-args。
+static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true) {
+    const int loc = LocOfZid(h.zid);
+    if (ld.level == L_SESS) {
+        Toast(T("land_sess", loc), "");
+        g_toast_icon = 4;   // 这一句也是「跳到了哪儿」，不是复制
+        return;
+    }
+    const Tool* t = AgentTool(h.agent_id.c_str());
+    const std::string name = t && !t->name.empty() ? t->name : h.agent_id;
+    if (copy_title && !h.title.empty() && !g_shot_to) ImGui::SetClipboardText(h.title.c_str());
+    auto fill = [&name](const char* f) {
+        std::string s = f;
+        const std::size_t p = s.find("%s");
+        return p == std::string::npos ? s : s.replace(p, 2, name);
+    };
+    const char* key = ld.level == L_AX ? "land_ax" : ld.level == L_TRAY ? "land_tray"
+                    : ld.level == L_MISS ? "land_miss"
+                    : ld.level == L_APP ? "land_app" : ld.level == L_DIR ? "land_dir" : "land_none";
+    Toast(fill(T(key, loc)),
+          T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub" : "land_copy",
+            loc));
+    g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
+}
+
+/// 出图轮不许真跳（会把他的桌面点开），但回执那句话必须拍得到。
+/// AGENTPING_LAND_SHOT=sess|tray|miss|app|dir|ax|none 造一个该档位的落点，
+/// 走的是与真跳同一个 LandingToast——拍到的字就是屏幕上会出的字，不是另写的示意。
+static void JumpAndReport(const Hit& h, bool copy_title = true) {
+    if (!g_shot_to) { LandingToast(JumpTo(h), h, copy_title); return; }
+    const char* e = getenv("AGENTPING_LAND_SHOT");
+    if (!e || !*e) return;
+    Landing ld;
+    ld.why = "出图轮预览，未发起真跳转";
+    ld.level = !strcmp(e, "sess") ? L_SESS  : !strcmp(e, "tray") ? L_TRAY
+             : !strcmp(e, "miss") ? L_MISS  : !strcmp(e, "app") ? L_APP
+             : !strcmp(e, "dir") ? L_DIR    : !strcmp(e, "ax") ? L_AX : L_NONE;
+    LandingToast(ld, h, copy_title);
+}
+
+/// 那颗按钮的字按「这一路到底有没有客户端可唤」出：Claude / Codex 只有 JSONL，
+/// 那一趟真打开的是记录目录，按钮写「打开客户端里的这条会话」就是骗人。
+/// 上一版写的是「切到 … 的终端」，而 C++ 这版从没实现过切终端。
+static const char* LandGoKey(const std::string& agent_id) {
+    return ap_has_client(agent_id.c_str()) ? "land_go_sess" : "land_go_log";
 }
 
 /// 落点认的是「这个 App 自己那个 id」：scan.cpp 给 zcode/codex/workbuddy 的会话 id 加了
@@ -2419,7 +2657,15 @@ static void DrainBannerClick() {
     Hit h;
     h.agent_id = agent;
     h.native_id = NativeId(agent, ses);
-    JumpTo(h);
+    // 标题必须一起带上：会话级落点认的就是标题（Qoder 托盘里没有 URL 可认）。
+    // 上一版这里只填了 agent/id，于是点横幅永远走不到托盘点名那一级，
+    // 只会「唤起 App／打开记录目录」——和点行跳到文件夹是同一个病。
+    if (const UIRow* r = RowOf(agent, h.native_id)) {
+        h.key = r->key;
+        h.title = r->title;
+        h.cwd = r->cwd;
+    }
+    LandingToast(JumpTo(h), h);
 }
 
 /// 就地翻这一行的状态：下一轮重扫（3s）才会走 RebuildPanel，点下去必须马上看见反应。
@@ -2468,7 +2714,7 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             // 稿子的选项是「点它＝把这个答案带去 CLI」。单向通路给不了答案，所以能诚实做的
             // 只有两件：文案进剪贴板（到那儿直接粘），面板跳到那会话。
             if (!h.label.empty()) ImGui::SetClipboardText(h.label.c_str());
-            if (!g_shot_to) JumpTo(h);
+            JumpAndReport(h, false);
             return;
         }
         case HIT_SETTINGS:                    // 换屏：同一块窗口换内容，不另开窗口
@@ -2547,13 +2793,19 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_relayout = true;
             return;
         }
-        case HIT_JUMP: {                        // 授权详情那颗「切到 … 的终端」：真跳，并回执跳到了哪儿
-            if (!g_shot_to) JumpTo(h);
+        case HIT_AXGO: {                        // 第三步那颗「去系统设置」：开到辅助功能那一格
             const int loc = LocOfZid(h.zid);
-            char tb[160];
-            snprintf(tb, sizeof tb, T("jump_done", loc), h.label.empty() ? h.key.c_str() : h.label.c_str());
-            Toast(tb, T("jump_done_sub", loc));
-            g_toast_icon = 4;
+            char why[192];
+            // 平台那句 reason 是中文，不进屏幕（六语界面漏一句中文比不解释更难看），只进日志。
+            const int rc = ap_open_privacy_pane(why, (int)sizeof why);
+            fprintf(stderr, "[辅助功能] 开系统设置 %s → %s\n", rc == 0 ? "ok" : "落空", why);
+            fflush(stderr);
+            if (rc == 0) Toast(T("setup_ax_done", loc), T("setup_ax_sub", loc));
+            else Toast(T("setup_fail", loc), T("setup_ax_fail", loc));
+            return;
+        }
+        case HIT_JUMP: {                        // 详情那颗「打开会话」：真跳，并回执落到了哪一层
+            JumpAndReport(h);
             return;
         }
         case HIT_COPY: {                        // 详情屏的选项：只进剪贴板，不跳走
@@ -2720,8 +2972,11 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             return;
         }
         default: {                      // HIT_OPEN：R31 的主点击＝直接去那会话；ⓘ 才是详情
-            if (const UIRow* r = SelectedRow(h.key)) MarkSeen(*r);
-            if (!g_shot_to) JumpTo(h);
+            // 出图轮不许推进已读水位线（那是会落盘的状态），但回执那句话仍要能拍下来。
+            if (!g_shot_to) {
+                if (const UIRow* r = SelectedRow(h.key)) MarkSeen(*r);
+            }
+            JumpAndReport(h);
             return;
         }
     }
@@ -3646,6 +3901,32 @@ static float drawSetup(ImDrawList* dl, float L, float R, float maxBot, int loc, 
     }
     cy += 6.0f;
 
+    // 第三步：辅助功能。会话级那一跳（点 Qoder 托盘里的条目、替用户敲 ZCode 的 ⌘K）
+    // 全靠这一档，不授权就只能把 App 带到前台。Linux 上 ap_ax_trusted 返回 4＝不适用，
+    // 整块不画：显示成「未授权」是催他去拨一个这儿根本不存在的开关。
+    char axr[192];
+    const int axrc = ap_ax_trusted(0, axr, (int)sizeof axr);
+    if (axrc != 4) {
+        const bool axok = axrc == 0;
+        stepHead("setup_step3", 3, T(axok ? "setup_ax_on" : "setup_ax_off", loc), axok);
+        for (const auto& ln : WrapLines(T("setup_axnote", loc), R - L, loc, T_SM, 3)) {
+            DrawTextRun(dl, L, cy, ln, loc, kMutedFg, T_SM);
+            cy += kTierPx[T_SM] * 1.5f;
+        }
+        cy += 6.0f;
+        if (!axok) {
+            const float bw = MiniBtnW("setup_ax_go", loc);
+            const long z = Zid(loc, kHookRowBase + 6, HIT_AXGO, 0);
+            MiniBtn(dl, R - 8.0f - bw, cy, "setup_ax_go", loc, z);
+            Hit hh;
+            hh.x0 = R - 8.0f - bw; hh.y0 = cy; hh.x1 = R - 8.0f; hh.y1 = cy + 20.0f;
+            hh.act = HIT_AXGO; hh.row = kHookRowBase + 6; hh.zid = z;
+            hh.label = T("setup_ax_go", loc);
+            g_hits.push_back(hh);
+            cy += 20.0f + 6.0f;
+        }
+    }
+
     // 下面三块是解释性的，屏幕真矮时按「路径 → 备份说明 → 等待」的顺序让位，
     // 不挤掉上面的检测与写入按钮（那两块才是这一屏要干的事）。
     const float boxH = 46.0f;
@@ -3750,8 +4031,7 @@ static float drawDetail(ImDrawList* dl, float L, float R, float maxBot, int loc,
     }
     cy += 8.0f;
 
-    char jb[192];
-    snprintf(jb, sizeof jb, T("jump_project", loc), r->project.c_str());
+    const std::string jb = T(LandGoKey(r->agent_id), loc);
     cy += GoButton(dl, L, R, cy, jb, loc, *r);
     return cy;
 }
@@ -3794,8 +4074,7 @@ static float drawPermission(ImDrawList* dl, float L, float R, float maxBot, int 
     }
     cy += 8.0f;
 
-    char jb[192];
-    snprintf(jb, sizeof jb, T("jump_project", loc), r->project.c_str());
+    const std::string jb = T(LandGoKey(r->agent_id), loc);
     cy += GoButton(dl, L, R, cy, jb, loc, *r);
     return cy;
 }

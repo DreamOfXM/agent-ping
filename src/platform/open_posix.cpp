@@ -20,14 +20,16 @@ extern char** environ;
 
 namespace {
 
-struct Target { const char* log_rel; const char* deep_prefix; };
+struct Target { const char* log_rel; const char* deep_prefix; int has_client; };
 const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy"};
+// has_client 与 macOS 那张表同判据：这几路是桌面客户端（Linux 上是否有包未实机核），
+// claude/codex 两边都是纯 CLI，本机根本没有可跳的 App，只能落到记录目录。
 const Target kTargets[] = {
-    {".qoder/projects", ""},
-    {".claude/projects", ""},
-    {".codex/sessions", ""},
-    {".zcode/cli/db", ""},
-    {".workbuddy/projects", "workbuddy://chat/"},
+    {".qoder/projects", "", 1},
+    {".claude/projects", "", 0},
+    {".codex/sessions", "", 0},
+    {".zcode/cli/db", "", 1},
+    {".workbuddy/projects", "workbuddy://chat/", 1},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 
@@ -91,32 +93,84 @@ extern "C" int ap_open_plan(const char* agent_id, const char* session_id, char* 
 }
 
 extern "C" int ap_open(const char* agent_id, const char* session_id, char* reason, int out_len) {
-    const Target* t = Find(agent_id);
-    if (!t) { Say(reason, out_len, "无处可去：落点表里没有这一路采集器"); return 1; }
-    if (t->deep_prefix[0] && session_id && *session_id) {
-        std::string url = std::string(t->deep_prefix) + session_id;
-        if (SpawnOpen(url)) { Say(reason, out_len, "已交给桌面环境打开：" + url); return 0; }
-    }
-    std::string log = Expand(t->log_rel);
-    if (Exists(log) && SpawnOpen(log)) { Say(reason, out_len, "已在文件管理器里打开：" + log); return 0; }
-    Say(reason, out_len, "三条退路全落空（Linux 侧落点未实机验证）");
-    return 1;
+    return ap_open3(agent_id, session_id, nullptr, reason, out_len, nullptr);
 }
 
 // ap_open 的加 cwd 版。Linux 侧 cwd 同样不参与落点：这里没有「按工作区打开」的 URL，
 // 参数保留只为让 core 侧的调用形状与 macOS 一致（同一个阶梯、同一套 reason）。
 extern "C" int ap_open2(const char* agent_id, const char* session_id, const char* cwd,
                         char* reason, int out_len) {
+    return ap_open3(agent_id, session_id, cwd, reason, out_len, nullptr);
+}
+
+// layer 的档位与 macOS 完全一致（1 deep link / 2 唤起 App / 3 记录目录 / 0 没落上），
+// 面板才能不分平台地把回执说准。本平台没有「唤起某个 App」的判据（xdg-open 只会把
+// URL 丢给默认程序，认不出 scheme 就失败），所以只有 ①③ 两层能真命中。
+extern "C" int ap_open3(const char* agent_id, const char* session_id, const char* cwd,
+                        char* reason, int out_len, int* layer) {
     (void)cwd;
-    return ap_open(agent_id, session_id, reason, out_len);
+    if (layer) *layer = 0;
+    const Target* t = Find(agent_id);
+    if (!t) { Say(reason, out_len, "无处可去：落点表里没有这一路采集器"); return 1; }
+    if (t->deep_prefix[0] && session_id && *session_id) {
+        std::string url = std::string(t->deep_prefix) + session_id;
+        if (SpawnOpen(url)) {
+            Say(reason, out_len, "已交给桌面环境打开：" + url);
+            if (layer) *layer = 1;
+            return 0;
+        }
+    }
+    std::string log = Expand(t->log_rel);
+    // 与 macOS 不同，这里不拦「有客户端却退到目录」那一档：本平台根本没有唤起步（xdg-open 认不出
+    // scheme 就失败），拦住之后只剩「什么都不发生」。落到目录至少人还在数据旁边，
+    // 而 layer=3 会让面板照实说「只打开了记录目录，没到那条会话」。
+    if (Exists(log) && SpawnOpen(log)) {
+        Say(reason, out_len, "已在文件管理器里打开：" + log);
+        if (layer) *layer = 3;
+        return 0;
+    }
+    Say(reason, out_len, "三条退路全落空（Linux 侧落点未实机验证）");
+    return 1;
+}
+
+// 这一路在本机有没有可跳的客户端：判据与 macOS 同一套（那张表看 .app 在不在，
+// 这里只能按表里的标记说），面板据此选按钮文案与预期。
+extern "C" int ap_has_client(const char* agent_id) {
+    const Target* t = Find(agent_id);
+    return t && t->has_client ? 1 : 0;
 }
 
 // ZCode 的会话级落点在 macOS 上是替用户敲 ⌘K（AX 投键，见 open_macos.mm）。
 // 本平台没有等价能力：ZCode 没有会话级 URL，也没有能驱动别的 App 检索框的通用通道
 // （xdotool 那类要真桌面会话在场，本机从未在有桌面的 Linux 上跑过，不敢当作可用）。
-// 返回非 0 并写清原因，调用方按 open.h 的契约退回上面的阶梯——不静默、也不谎称跳到了。
+// 返回 4（这一档在本平台不适用）并写清原因，调用方按 open.h 的契约退回上面的阶梯——
+// 不静默、也不谎称跳到了，更不许显示成「客户端里没搜到这条」（那根本没试过）。
 extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
     (void)title;
     Say(reason, out_len, "本平台没有 ⌘K 驱动，落点退回唤起或打开记录目录");
+    return 4;
+}
+
+// Qoder 的会话级落点在 macOS 上是点它自己托盘里的会话条目（AX，见 open_macos.mm）。
+// Linux 侧没有等价能力：桌面环境不提供「读另一个 App 的菜单并点某一项」的通用通道，
+// 而 qoder:// 本身没有会话级路由。返回 4（这一档在本平台不适用）并写清挡在哪一层，
+// 调用方按 open.h 的契约把这句摆到屏幕上——不静默，也不拿「打开记录目录」冒充跳到了会话。
+extern "C" int ap_qoder_tray(const char* title, char* reason, int out_len) {
+    (void)title;
+    Say(reason, out_len, "本平台没有托盘会话表这一档，只能唤起 App 或打开记录目录");
+    return 4;
+}
+
+// 辅助功能是 macOS 那一档授权；本平台没有这一档（既没有 AX，也没有能点进别的 App 的
+// 通用通道），所以返回 4＝不适用，并把话写进 reason。面板据此整格不画——
+// 显示成「未授权」是逼他去拨一个这儿根本不存在的开关。
+extern "C" int ap_ax_trusted(int prompt, char* reason, int out_len) {
+    (void)prompt;
+    Say(reason, out_len, "本平台没有辅助功能这一档");
+    return 4;
+}
+
+extern "C" int ap_open_privacy_pane(char* reason, int out_len) {
+    Say(reason, out_len, "本平台没有系统设置里的那一页");
     return 1;
 }

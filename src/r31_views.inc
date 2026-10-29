@@ -2555,6 +2555,9 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
                 g_r31_hist_n += 12;
         }
     }
-    RToast(dl, x, y, w, y + panelOut, loc, tn);
+    // 回执钉在**看得见**的那一屏底沿：内容超过窗口时 panelOut 是整块内容的高，
+    // 照它摆会把回执画到窗口外——点了行、回执其实出了，只是他一个字也看不见
+    // （2026-10-29 实拍：四路会话同时在跑，固定段 935pt > 窗口 850pt，回执落在 848pt 以下）。
+    RToast(dl, x, y, w, y + std::fmin(panelOut, (float)h), loc, tn);
     return panelOut;
 }
