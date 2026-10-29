@@ -1191,26 +1191,36 @@ static float RSetup(ImDrawList* dl, float L, float R, float y, int loc, double t
 static float RToast(ImDrawList* dl, float x, float y, float w, float panelBot, int loc,
                     double tn) {
     const double now = glfwGetTime();
-    if (g_toast.empty() || now - g_toast_at > 2.6) return 0.0f;
+    // 出图轮不许让回执先过期：快门要等第二轮重扫（≥3 秒）才按，2.6 秒的窗口撑不到那一下。
+    // 只延寿命，文案与版式一个字都不动——拍到的字与 live 看到的字仍是同一份。
+    if (g_toast.empty() || (!g_shot_to && now - g_toast_at > 2.6)) return 0.0f;
     (void)tn;
     const std::string a = g_toast, b = g_toast_sub;
     const float l1 = kTierPx[T_LABEL] * 1.35f;
     const float l2 = kTierPx[T_SM] * 1.4f;
-    const float textH = l1 + (b.empty() ? 0.0f : 1.0f + l2);
-    const float h = 9.0f + std::fmax(22.0f, textH) + 9.0f + 2.0f;
     const float L = x + 14.0f, R = x + w - 14.0f;
+    const float tx = L + 11.0f + 22.0f + 9.0f;
+    float tw = R - 11.0f - tx;
+    if (g_toast_go) tw -= TextWidth(T("toast_back_ov", loc), loc, T_LABEL) + 12.0f;
+    // 两行都是「这一跳落到哪、下一步做什么」，裁掉任何一句都等于把回执报半截。
+    // 10-29 六语实拍：单行 ClipToWidth 时 de 的主行（land_dir/land_ax）与 en/de/ja 的
+    // land_copy、en/de/it/ja 的 land_wake_sub 都被裁成「…」。所以主行与副行都给两行，
+    // 仍放不下才由 WrapLines 在末行补省略号；框高跟着实际行数走。
+    const std::vector<std::string> al = WrapLines(a, tw, loc, T_LABEL, 2);
+    const std::vector<std::string> bl =
+        b.empty() ? std::vector<std::string>{} : WrapLines(b, tw, loc, T_SM, 2);
+    const float textH = l1 * (float)al.size() + (bl.empty() ? 0.0f : 1.0f + l2 * (float)bl.size());
+    const float h = 9.0f + std::fmax(22.0f, textH) + 9.0f + 2.0f;
     const float ty = panelBot - 54.0f - h;
     dl->AddRectFilled(ImVec2(L, ty), ImVec2(R, ty + h), kRToastBg, 10.0f);
     dl->AddRect(ImVec2(L + 0.5f, ty + 0.5f), ImVec2(R - 0.5f, ty + h - 0.5f), kLine2, 10.0f, 0, 1.0f);
     const float iy = ty + 9.0f;
     dl->AddRectFilled(ImVec2(L + 11.0f, iy), ImVec2(L + 33.0f, iy + 22.0f), WithA(kAmber, 36), 6.0f);
     DrawIcon(dl, g_toast_icon == 4 ? RI_JUMP : RI_COPY, L + 11.0f + 4.0f, iy + 4.0f, 14.0f, kAmber);
-    const float tx = L + 11.0f + 22.0f + 9.0f;
-    float tw = R - 11.0f - tx;
-    if (g_toast_go) tw -= TextWidth(T("toast_back_ov", loc), loc, T_LABEL) + 12.0f;
-    DrawTextRun(dl, tx, ty + 9.0f, ClipToWidth(a, tw, loc, T_LABEL), loc, kT1, T_LABEL);
-    if (!b.empty())
-        DrawTextRun(dl, tx, ty + 9.0f + l1 + 1.0f, ClipToWidth(b, tw, loc, T_SM), loc, kT4, T_SM);
+    float sy = ty + 9.0f;
+    for (const auto& ln : al) { DrawTextRun(dl, tx, sy, ln, loc, kT1, T_LABEL); sy += l1; }
+    if (!bl.empty()) sy += 1.0f;
+    for (const auto& ln : bl) { DrawTextRun(dl, tx, sy, ln, loc, kT4, T_SM); sy += l2; }
     if (g_toast_go) {
         const std::string go = T("toast_back_ov", loc);
         const float gw = TextWidth(go, loc, T_LABEL);

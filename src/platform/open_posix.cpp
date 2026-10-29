@@ -140,14 +140,14 @@ extern "C" int ap_has_client(const char* agent_id) {
     return t && t->has_client ? 1 : 0;
 }
 
-// ZCode 的会话级落点在 macOS 上是替用户敲 ⌘K（AX 投键，见 open_macos.mm）。
-// 本平台没有等价能力：ZCode 没有会话级 URL，也没有能驱动别的 App 检索框的通用通道
+// ZCode 的会话级落点在 macOS 上是读它侧栏的任务行按名字点中（AX，见 open_macos.mm）。
+// 本平台没有等价能力：ZCode 没有会话级 URL，也没有能读别的 App 界面树并点某一行的通用通道
 // （xdotool 那类要真桌面会话在场，本机从未在有桌面的 Linux 上跑过，不敢当作可用）。
 // 返回 4（这一档在本平台不适用）并写清原因，调用方按 open.h 的契约退回上面的阶梯——
-// 不静默、也不谎称跳到了，更不许显示成「客户端里没搜到这条」（那根本没试过）。
+// 不静默、也不谎称跳到了，更不许显示成「客户端侧栏里没这一条」（那根本没读过它的树）。
 extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
     (void)title;
-    Say(reason, out_len, "本平台没有 ⌘K 驱动，落点退回唤起或打开记录目录");
+    Say(reason, out_len, "本平台没有读界面树点侧栏行的能力，落点退回唤起或打开记录目录");
     return 4;
 }
 

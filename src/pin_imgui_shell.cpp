@@ -248,12 +248,14 @@ static const Key kStr[] = {
     {"setup_ax_on",    {"已授权", "Granted", "Erlaubt", "Concesso", "許可済み", "허용됨"}},
     {"setup_ax_off",   {"未授权", "Not granted", "Nicht erlaubt", "Non concesso",
                         "未許可", "미허용"}},
-    {"setup_axnote",   {"面板要点中客户端自己托盘里的条目才能跳到那一条对话，这一步要辅助功能授权。不授权也能用，只是那一跳只把 App 带到前台。",
-                        "To open one exact conversation the panel has to click that client's own tray entry, which needs Accessibility access. Without it the jump still brings the app forward — nothing more.",
-                        "Für den Sprung auf eine einzelne Sitzung muss das Panel den Eintrag im AblageMenü des Clients anklicken — dafür sind die Bedienungshilfen nötig. Ohne sie kommt nur die App nach vorn.",
-                        "Per aprire una conversazione precisa il pannello deve cliccare la voce nel tray del client: serve Accessibilità. Senza, il salto porta avanti solo l’app.",
-                        "特定の会話を開くには、パネルがクライアント自身のトレイ項目をクリックする必要があるためアクセシビリティの許可が要ります。未許可ではアプリを前面にするだけになります。",
-                        "특정 대화로 이동하려면 패널이 클라이언트 자체 트레이 항목을 클릭해야 하므로 보조 기능이 필요합니다. 없으면 앱만 앞으로 나옵니다."}},
+    // 「托盘里的条目」10-29 放宽：ZCode 那一路点的是它侧栏的任务行，不是托盘。
+    // 只写托盘会让看 ZCode 的人以为这一档跟他无关。
+    {"setup_axnote",   {"面板要点中客户端界面里的会话条目（Qoder 的托盘、ZCode 的侧栏）才能跳到那一条对话，这一步要辅助功能授权。不授权也能用，只是那一跳只把 App 带到前台。",
+                        "To open one exact conversation the panel has to click that session inside the client (Qoder's tray, ZCode's sidebar), which needs Accessibility access. Without it the jump still brings the app forward — nothing more.",
+                        "Für den Sprung auf eine einzelne Sitzung muss das Panel den Eintrag in der App anklicken (AblageMenü bei Qoder, Seitenleiste bei ZCode) — dafür sind die Bedienungshilfen nötig. Ohne sie kommt nur die App nach vorn.",
+                        "Per aprire una conversazione precisa il pannello deve cliccare quella voce dentro il client (vassoi di Qoder, barra laterale di ZCode): serve Accessibilità. Senza, il salto porta avanti solo l’app.",
+                        "特定の会話を開くには、パネルがクライアント画面内のその項目（Qoder のトレイ、ZCode のサイドバー）をクリックする必要があるためアクセシビリティの許可が要ります。未許可ではアプリを前面にするだけになります。",
+                        "특정 대화로 가려면 패널이 클라이언트 화면 속 항목(Qoder 트레이, ZCode 사이드바)을 클릭해야 하므로 보조 기능 권한이 필요합니다. 없으면 앱만 앞으로 나옵니다."}},
     {"setup_ax_go",    {"去系统设置", "Open Settings", "Systemeinstellungen öffnen",
                         "Apri Impostazioni", "システム設定を開く", "시스템 설정 열기"}},
     {"setup_ax_done",  {"已开到辅助功能那一格", "The Accessibility pane is open",
@@ -526,28 +528,45 @@ static const Key kStr[] = {
                         "Questa sessione non è nell'elenco del tray del client",
                         "このセッションはクライアントのトレイ一覧に出ていません",
                         "이 세션은 클라이언트 트레이 목록에 없습니다"}},
-    {"land_miss",      {"在客户端里搜不到这条会话", "The client's search didn't find that session",
-                        "Die Suche in der App hat diese Sitzung nicht gefunden",
-                        "La ricerca nel client non ha trovato questa sessione",
-                        "クライアント内の検索でこのセッションが見つかりません",
-                        "클라이언트 검색에서 이 세션을 찾지 못했습니다"}},
+    // 10-29 改字：这一档原来写「在客户端里搜不到这条会话」，那是 ⌘K 那一路的说法。
+    // 命令中心撤掉后没有任何检索发生，再说「搜不到」就是编一个没跑过的动作。
+    // 现在这句只陈述结果：客户端里没能点到这一条（侧栏没列它／窗口没建起来／点了没换都算）。
+    {"land_miss",      {"客户端里没能点到这一条会话", "Couldn't open that session inside the client",
+                        "In der App ließ sich diese Sitzung nicht öffnen",
+                        "La sessione non è stata aperta nel client",
+                        "クライアント内でこのセッションを開けませんでした",
+                        "클라이언트에서 해당 세션을 열지 못했습니다"}},
     {"land_app",       {"只把 %s 带到了前台", "Only brought %s to the front",
                         "%s wurde nur in den Vordergrund geholt",
                         "%s è stata portata solo in primo piano",
                         "%s を前面に出しただけです", "%s 앱만 앞으로 불러왔습니다"}},
-    {"land_copy",      {"标题已复制 — 在它的会话列表里贴一下就能到",
-                        "Title copied — paste it in the client's session list",
-                        "Titel kopiert — in der Sitzungsliste der App einfügen",
-                        "Titolo copiato — incollalo nell'elenco delle sessioni",
-                        "タイトルをコピーしました — クライアントの一覧に貼り付けてください",
-                        "제목을 복사했습니다 — 클라이언트 목록에 붙여넣으세요"}},
+    // 10-29 新增：ZCode 一个窗口都没有时，这一跳会先替它把窗口要回来。实测 reopen 3 秒内出窗，
+    // 但无障碍树还要长一会儿；面板一跳只等 2.4 秒（4 轮 ×600ms），没长出来就返回 5＝这一档。
+    // 主行只说「正在打开」，不说「已经开好」——数到窗口不等于那棵树已经能点。
+    {"land_wake",      {"ZCode 的窗口正在打开", "ZCode is opening its window",
+                        "ZCode öffnet gerade ein Fenster", "ZCode sta aprendendo una finestra",
+                        "ZCode がウィンドウを開いています", "ZCode 창을 여는 중입니다"}},
+    {"land_wake_sub",  {"界面还要几秒才长出来 — 稍等一下再点这一行就能落到那条会话",
+                        "Its UI needs a few more seconds — click that row again shortly",
+                        "Die Oberfläche braucht ein paar Sekunden — gleich erneut auf die Zeile",
+                        "L'interfaccia ha bisogno di qualche secondo: clicca di nuovo la riga",
+                        "画面の立ち上がりに数秒かかります —少し待ってからもう一度この行をクリック",
+                        "화면이 뜨는 데 몇 초 걸립니다 — 잠시 후 이 줄을 다시 누르세요"}},
+    // 「贴一下就能到」10-29 撤掉：Qoder 托盘和 ZCode 侧栏都没有能粘贴的检索框（前者只有最近
+    // 12 条列表，后者只有任务列表），那句话承诺了一个客户端里不存在的动作。改成只说怎么找。
+    {"land_copy",      {"标题已复制 — 在它的会话列表里对着这个标题找",
+                        "Title copied — match it against the client's session list",
+                        "Titel kopiert — in der Sitzungsliste der App danach suchen",
+                        "Titolo copiato — cercalo nell'elenco delle sessioni",
+                        "タイトルをコピーしました — クライアントの一覧でこのタイトルを探してください",
+                        "제목을 복사했습니다 — 클라이언트 목록에서 이 제목으로 찾으세요"}},
     {"land_dir",       {"只打开了记录目录，没到那条会话", "Only the log folder opened — not that session",
                         "Nur der Protokollordner wurde geöffnet — nicht die Sitzung",
                         "Si è aperta solo la cartella log, non la sessione",
                         "ログフォルダを開いただけで、そのセッションではありません",
                         "로그 폴더만 열었고 해당 세션은 아닙니다"}},
     // 记录目录这一档的第二行：这一路根本没有客户端，所以不许借用 land_copy
-    // 那句「在它的会话列表里贴一下就能到」——那列表并不存在（2026-10-29 实拍读出来的）。
+    // 那句「在它的会话列表里对着这个标题找」——那列表并不存在（2026-10-29 实拍读出来的）。
     {"land_dir_sub",   {"这一路只有命令行，没有客户端可跳；标题已复制",
                         "This one is CLI-only — no client to jump into; title copied",
                         "Diese Sitzung gibt es nur in der CLI — keine App; Titel kopiert",
@@ -2464,9 +2483,13 @@ static const char* ActName(int act) {
 /// 只有落到「那一条对话」才把面板藏起来——藏面板会把要解释的话一起藏掉，
 /// 而 2026-10-29 那次就是因为没解释：用户只看见 Finder 开在 ~/.qoder/projects，
 /// 以为这个产品压根不会跳会话。
-enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / ⌘K 命中 / deep link 被接住）
+enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / 侧栏点中 / deep link 被接住）
                  L_TRAY,       // 托盘这一轮只露最近那 12 条，没列它（Qoder 实测）
-                 L_MISS,       // ⌘K 真敲进去了，检索里没这条（ZCode 实测）
+                 L_MISS,       // 客户端里试过了但没落到这一条：侧栏这一列没它、窗口没建起来、
+                               // 或点下去主区没换（ZCode 实测，10-29 逐条读过）
+                 L_WAKE,       // ZCode 原本一扇窗口都没有，这一跳只替它把窗口要了回来：
+                               // 界面还要几秒才长出来（实测窗口 3 秒、树更晚），这一档不算落到会话，
+                               // 也不许走阶梯凑数
                  L_APP,        // 只把客户端唤到前台，没到具体会话
                  L_DIR,        // 落到记录目录
                  L_AX,         // 挡在辅助功能授权前面——这一格只能他自己拨
@@ -2477,7 +2500,8 @@ static const char* LandName(int lv) {
     switch (lv) {
         case L_SESS: return "会话级";
         case L_TRAY: return "托盘没列";
-        case L_MISS: return "检索没命中";
+        case L_MISS: return "客户端没点中";
+        case L_WAKE: return "窗口在开";
         case L_APP:  return "只到 App";
         case L_DIR:  return "记录目录";
         case L_AX:   return "缺辅助功能";
@@ -2493,8 +2517,8 @@ static void HidePanel() {
     }
 }
 
-/// 展面板，与 HidePanel 对称。ZCode 那一跳为了把 ⌘K 敲进客户端会先收面板，
-/// 没收成就要在屏上说一句话——面板还藏着，回执等于没写。
+/// 展面板，与 HidePanel 对称。点横幅那条路进来时面板本来就是藏着的，
+/// 而没落到具体会话时要在屏上说一句话——面板还藏着，回执等于没写。
 static void ShowPanel() {
     if (!g_panelVisible) {
         g_panelVisible = true;
@@ -2503,8 +2527,8 @@ static void ShowPanel() {
     }
 }
 
-/// 跳到那会话。先用会话级那把钥匙（Qoder＝按名字点它自己托盘里的条目，ZCode＝替用户敲 ⌘K），
-/// 没开成才走 ap_open3 的三层阶梯；两条 reason 各用各的缓冲区。
+/// 跳到那会话。先用会话级那把钥匙（Qoder＝按名字点它自己托盘里的条目，ZCode＝按名字点侧栏
+/// 任务列表里的行），没开成才走 ap_open3 的三层阶梯；两条 reason 各用各的缓冲区。
 /// 上一版复用同一个 why，ap_open 一把盖掉了「未授权辅助功能」那句，屏幕上就只剩「打开了文件夹」。
 static Landing JumpTo(const Hit& h) {
     Landing out;
@@ -2516,8 +2540,9 @@ static Landing JumpTo(const Hit& h) {
     bool tried = false;
     int rc = 1;
     if (h.agent_id == "zcode" && titled) {
-        // ⌘K 是把键敲进那个 App，面板挡在前面时键会落到我们自己身上，所以先收。
-        HidePanel();
+        // 点侧栏那一行是 AXPress 别的 App 的界面，面板留不留都不挡路；
+        // 「窗口都没开」那一档由平台侧自己发一次 reopen 要回窗口，不需要我们传路径
+        //（10-29 撤掉了 workspace/open 那条 URL：它会弹文件夹信任确认，见 open.h）。
         rc = ap_zcode_navigate(h.title.c_str(), key, (int)sizeof key);
         tried = rc != 4;
     } else if (h.agent_id == "qoder" && titled) {
@@ -2536,6 +2561,19 @@ static Landing JumpTo(const Hit& h) {
     }
     int lvl = -1;
     if (tried && rc == 2) lvl = L_AX;                    // 未授权辅助功能：这一格只能他自己拨
+    // 5＝ZCode 原本一扇窗口都没有，这一跳替它把主窗口要回来了，但界面树还没长出来
+    // （面板这一跳最多等 2.4 秒，实测窗口 3 秒、树更晚）。这一趟就此收手：
+    // 再走阶梯只会多唤一层（activate／开目录），把「稍等再点一次」这句冲掉。
+    else if (tried && rc == 5) {
+        out.level = L_WAKE;
+        out.why = key;
+        ShowPanel();
+        fprintf(stderr, "[落点] %s/%s → %s ｜ 会话级：%s ｜ 阶梯：未走（窗口正在开）\n",
+                h.agent_id.c_str(), h.native_id.c_str(), LandName(out.level),
+                key[0] ? key : "无说明");
+        fflush(stderr);
+        return out;
+    }
     else if (tried && rc == 1)
         lvl = h.agent_id == "zcode" ? L_MISS : L_TRAY;   // 试过了，那一条不在客户端露出来的名单里
 
@@ -2561,7 +2599,7 @@ static Landing JumpTo(const Hit& h) {
     out.level = lvl;
     out.why = (key[0] ? std::string(key) + "；" : std::string()) + (lad[0] ? lad : "未走阶梯");
     if (out.level == L_SESS) HidePanel();
-    else ShowPanel();   // 上面为敲 ⌘K 收过一次；这一层要他看见回执，得先摆回来
+    else ShowPanel();   // 点横幅进来时面板是藏着的；这一层要他看见回执，得先摆回来
     fprintf(stderr, "[落点] %s/%s → %s ｜ 会话级：%s ｜ 阶梯：%s（ap_open %s，layer=%d）\n",
             h.agent_id.c_str(), h.native_id.c_str(), LandName(out.level),
             key[0] ? key : "不适用", lad[0] ? lad : "未走", rc2 == 0 ? "ok" : "落空", layer);
@@ -2570,7 +2608,7 @@ static Landing JumpTo(const Hit& h) {
 }
 
 /// 把落点评语写屏：只有真落到那一条对话才算成，其余每一层都在屏上留一句话，
-/// 并把标题放进剪贴板——他在客户端自己的会话列表里粘一下就找得到（ZCode 同款处置，10-28 定）。
+/// 并把标题放进剪贴板——客户端的列表里没有可粘贴的检索框，这一份是给他对着标题找的（10-29 核过）。
 /// copy_title=false：那一趟剪贴板上已经装着更要紧的东西（点选项时先把答案复制了），不许覆盖。
 /// 文案里带 %s 的只有 land_app（要念工具名），所以用一个填空函数而不是 snprintf：
 /// 六语表里少一个 %s，snprintf 就报一次 -Wformat-extra-args。
@@ -2583,7 +2621,10 @@ static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true
     }
     const Tool* t = AgentTool(h.agent_id.c_str());
     const std::string name = t && !t->name.empty() ? t->name : h.agent_id;
-    if (copy_title && !h.title.empty() && !g_shot_to) ImGui::SetClipboardText(h.title.c_str());
+    // L_WAKE 不动剪贴板：那一行的下文是「过几秒再点一次这一行」，我们这边还等着自己点，
+    // 复制标题反而把上一趟真正要贴的东西顶掉。
+    if (copy_title && ld.level != L_WAKE && !h.title.empty() && !g_shot_to)
+        ImGui::SetClipboardText(h.title.c_str());
     auto fill = [&name](const char* f) {
         std::string s = f;
         const std::size_t p = s.find("%s");
@@ -2591,15 +2632,17 @@ static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true
     };
     const char* key = ld.level == L_AX ? "land_ax" : ld.level == L_TRAY ? "land_tray"
                     : ld.level == L_MISS ? "land_miss"
+                    : ld.level == L_WAKE ? "land_wake"
                     : ld.level == L_APP ? "land_app" : ld.level == L_DIR ? "land_dir" : "land_none";
     Toast(fill(T(key, loc)),
-          T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub" : "land_copy",
+          T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub"
+            : ld.level == L_WAKE ? "land_wake_sub" : "land_copy",
             loc));
     g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
 }
 
 /// 出图轮不许真跳（会把他的桌面点开），但回执那句话必须拍得到。
-/// AGENTPING_LAND_SHOT=sess|tray|miss|app|dir|ax|none 造一个该档位的落点，
+/// AGENTPING_LAND_SHOT=sess|tray|miss|wake|app|dir|ax|none 造一个该档位的落点，
 /// 走的是与真跳同一个 LandingToast——拍到的字就是屏幕上会出的字，不是另写的示意。
 static void JumpAndReport(const Hit& h, bool copy_title = true) {
     if (!g_shot_to) { LandingToast(JumpTo(h), h, copy_title); return; }
@@ -2608,7 +2651,8 @@ static void JumpAndReport(const Hit& h, bool copy_title = true) {
     Landing ld;
     ld.why = "出图轮预览，未发起真跳转";
     ld.level = !strcmp(e, "sess") ? L_SESS  : !strcmp(e, "tray") ? L_TRAY
-             : !strcmp(e, "miss") ? L_MISS  : !strcmp(e, "app") ? L_APP
+             : !strcmp(e, "miss") ? L_MISS  : !strcmp(e, "wake") ? L_WAKE
+             : !strcmp(e, "app") ? L_APP
              : !strcmp(e, "dir") ? L_DIR    : !strcmp(e, "ax") ? L_AX : L_NONE;
     LandingToast(ld, h, copy_title);
 }
@@ -3901,7 +3945,7 @@ static float drawSetup(ImDrawList* dl, float L, float R, float maxBot, int loc, 
     }
     cy += 6.0f;
 
-    // 第三步：辅助功能。会话级那一跳（点 Qoder 托盘里的条目、替用户敲 ZCode 的 ⌘K）
+    // 第三步：辅助功能。会话级那一跳（点 Qoder 托盘里的条目、点 ZCode 侧栏里的任务行）
     // 全靠这一档，不授权就只能把 App 带到前台。Linux 上 ap_ax_trusted 返回 4＝不适用，
     // 整块不画：显示成「未授权」是催他去拨一个这儿根本不存在的开关。
     char axr[192];
@@ -4203,40 +4247,6 @@ static float drawHistory(ImDrawList* dl, float L, float R, float maxBot, int loc
         cy += pagerH;
     }
     return cy;
-}
-
-/// 回执浮层：画在卡内底部、内容之上，2.5 秒后自己消失。它不登记命中区，
-/// 所以「它挡着的那颗按钮」在回执期间点不到——这是有意的，回执本来就是「刚发生了什么」。
-static void DrawToast(ImDrawList* dl, float L, float R, float panelBot, int loc) {
-    if (g_toast.empty() || glfwGetTime() - g_toast_at > 2.5) return;
-    const float maxw = R - 22.0f - L - 8.0f;
-    // 第二行常是一条备份路径：一行放不下就把时间戳截掉，而那正是要拿来还原的那半截。
-    // 调用方可以在 '/' 处显式换行；其余部分按词换行，仍放不下才退回裁切。
-    std::vector<std::string> sub;
-    if (!g_toast_sub.empty()) {
-        std::size_t i = 0;
-        while (i <= g_toast_sub.size() && (int)sub.size() < 3) {
-            const std::size_t e = g_toast_sub.find('\n', i);
-            const std::string part = g_toast_sub.substr(i, e == std::string::npos ? std::string::npos : e - i);
-            for (const auto& ln : WrapLines(part, maxw, loc, T_MICRO, 1)) sub.push_back(ln);
-            if (e == std::string::npos) break;
-            i = e + 1;
-        }
-    }
-    const float h = sub.empty() ? 30.0f : (22.0f + kTierPx[T_MICRO] * 1.5f * (float)sub.size() + 6.0f);
-    const float y = panelBot - kPadBottom - h;
-    dl->AddRectFilled(ImVec2(L, y), ImVec2(R, y + h), kSurface2, 9.0f);
-    dl->AddRect(ImVec2(L + 0.5f, y + 0.5f), ImVec2(R - 0.5f, y + h - 0.5f), WithA(kPrimary, 70),
-                9.0f, 0, 1.0f);
-    dl->AddCircleFilled(ImVec2(L + 13.0f, y + h * 0.5f), 2.5f, kPrimary);
-    DrawTextRun(dl, L + 22.0f, TextTop(y + 6.0f, kTierPx[T_LABEL] * 1.5f, T_LABEL, loc),
-                ClipToWidth(g_toast, maxw, loc, T_LABEL), loc, kFg, T_LABEL);
-    float sy = y + 22.0f;
-    for (const auto& ln : sub) {
-        DrawTextRun(dl, L + 22.0f, TextTop(sy, kTierPx[T_MICRO] * 1.5f, T_MICRO, loc),
-                    ln, loc, kMutedFg, T_MICRO);
-        sy += kTierPx[T_MICRO] * 1.5f;
-    }
 }
 
 static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UIRow& row,

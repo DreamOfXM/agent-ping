@@ -36,11 +36,25 @@ int ap_open3(const char* agent_id, const char* session_id, const char* cwd, char
    读的是 ap_open3 同一张落点表，两处不许各判各的。 */
 int ap_has_client(const char* agent_id);
 
-/* ZCode 专用：激活 App 后替用户敲 ⌘K → 粘贴 title → 回车，让 Command Center
-   定位到那条会话（ZCode 没有会话级 URL，这是唯一通路，Swift 版 KeyDriver 同款）。
-   需要辅助功能授权。返回：0 已敲进并回车 / 1 没成（唤不起、检索没命中）/
-   2 未授权辅助功能 / 4 本平台没有这一档（不适用，调用方当没这条路，不许报「没搜到」）。
-   非 0 时 reason 写明挡在哪一层，调用方退回 ap_open3。 */
+/* ZCode 专用：会话级落点。ZCode 没有会话级 URL（10-29 在 app.asar 里逐条核过，
+   只认领 oauth/callback 与 workspace/open?path=），能落到「那一条对话」的只有它自己的界面：
+   ① 先读侧栏「任务列表」的行（Chromium 要先置 AXManualAccessibility 才建这棵树），
+      按标题匹配后 AXPress 那一行，再拿主区标题当裁判验收；
+   ② App 在跑但一个窗口都没有（10-29 实测到）：发一次 LaunchServices 的 reopen
+      （openURL 那个 .app 本身，与点 Dock 图标同一件事），实测 3 秒内把原来那一扇按原几何
+      恢复出来，不弹框、不多开窗。这一支以「原生 AXWindows 数到 0」为门——那个不依赖
+      Chromium 的树，秒读；不许拿「读不到界面」当门：窗口在、树没建起来时照样会多开一扇。
+      10-29 撤掉 zcode://workspace/open?path= 这条：它开的是「用外部 URL 打开这个文件夹」，
+      ZCode 会先弹一枚模态「是否在 ZCode 中打开此文件夹？」，界面树从此卡在框后面，
+      而替他自己按「打开文件夹」是替用户做一个 App 故意要问的安全决定。
+   命令中心（⌘K）不是第二把钥匙：它是当前工作区作用域，实测 0/10 且对侧栏明明有的标题
+   回「暂无相关结果」（见 open_macos.mm 那段），10-29 撤掉，侧栏没有就按没这一条报。
+   需要辅助功能授权。返回：0 已点中且主区换成了这一条 / 1 没成（唤不起、侧栏没这一条、
+   按了主区没换、窗口要不回来）/ 2 未授权辅助功能 / 3 ZCode 没在跑 /
+   4 本平台没有这一档（不适用，调用方当没这条路，不许报「侧栏没这条」）/
+   5 窗口已经让它重开了，但界面还要几秒才长出来（10-29 实测），这一跳不等它——
+   调用方要写「过几秒再点一次就能落到这一条」，不许报成成功，也不许混进「侧栏没这条」。
+   非 0 时 reason 写明挡在哪一层，调用方按那一层决定退不退 ap_open3。 */
 int ap_zcode_navigate(const char* title, char* reason, int out_len);
 
 /* Qoder 专用：读它客户端托盘里的会话条目（「会话标题，工作区名」），按名字点中那一条。
