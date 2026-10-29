@@ -789,7 +789,7 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     // sess_subagent_agent_* 是主会话派生的子代理，完工会并回主会话，单独列会把一张卡占满。
     sqlite3_stmt* st = nullptr;
     const char* sql =
-        "select s.id, s.title, s.directory, s.time_updated, "
+        "select s.id, s.title, s.directory, s.time_updated, s.time_created, "
         "(select m.data from message m where m.session_id = s.id "
         " and json_extract(m.data,'$.semantics.kind') = 'assistant_response' "
         " order by m.time_created desc, m.sequence desc limit 1) "
@@ -807,7 +807,8 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         std::string title = col_text(st, 1);
         std::string dir = col_text(st, 2);
         long long upd = sqlite3_column_int64(st, 3);
-        std::string data = col_text(st, 4);
+        long long cre = sqlite3_column_int64(st, 4);
+        std::string data = col_text(st, 5);
         if ((double)upd < cutoff_ms) continue;
 
         Session s;
@@ -820,6 +821,7 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         if (s.title.empty()) s.title = s.project;
         s.cwd = dir;
         s.last_activity = (double)upd / 1000.0;
+        s.created = (double)cre / 1000.0;
         s.state = ST_RESTING;
         auto w = wins.find(sid);
         if (w != wins.end()) {

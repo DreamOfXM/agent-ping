@@ -56,6 +56,9 @@ struct Session {
     std::string project;
     std::string cwd;
     double last_activity = 0;
+    /// 这一条是哪一刻建出来的（ZCode 的 session.time_created）。0 = 这一路没给。
+    /// ZCode 落点用它分清两种「侧栏没这一条」：本次启动之后新建的，它这次运行根本不列。
+    double created = 0;
     State state = ST_RESTING;
     bool inferred_wait = false;   // 「疑似等授权」：反推出来的，不许响铃
     long tokens = 0;

@@ -145,8 +145,9 @@ extern "C" int ap_has_client(const char* agent_id) {
 // （xdotool 那类要真桌面会话在场，本机从未在有桌面的 Linux 上跑过，不敢当作可用）。
 // 返回 4（这一档在本平台不适用）并写清原因，调用方按 open.h 的契约退回上面的阶梯——
 // 不静默、也不谎称跳到了，更不许显示成「客户端侧栏里没这一条」（那根本没读过它的树）。
-extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
-    (void)title;
+extern "C" int ap_zcode_navigate(const char* title, const char* cwd, double created,
+                                 char* reason, int out_len) {
+    (void)title; (void)cwd; (void)created;
     Say(reason, out_len, "本平台没有读界面树点侧栏行的能力，落点退回唤起或打开记录目录");
     return 4;
 }

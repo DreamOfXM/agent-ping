@@ -15,6 +15,7 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <sys/sysctl.h>   // ZCode 进程启动时刻（判「这条比它这次启动还晚」）
 
 #include "open.h"
 
@@ -453,6 +454,16 @@ static int ZcodeWindowCount(AXUIElementRef app) {
     return n;
 }
 
+/// cwd 末级＝侧栏里的项目组名（一个工作区目录就是一个组，组名就是那一级目录名）。没绑项目的会话落在
+/// ~/.zcode/workspace/default，那一档的末级是 "default"、不是组名，别拿它去匹配（与 scan.cpp 同一判据）。
+static NSString* ZcodeGroupOf(const char* cwd) {
+    if (!cwd || !*cwd) return nil;
+    NSString* p = @(cwd);
+    if ([p rangeOfString:@"/.zcode/workspace/"].location != NSNotFound) return nil;
+    NSString* last = p.lastPathComponent;
+    return last.length ? last : nil;
+}
+
 /// 找 AXWebArea 并把它的引用放进 webs（找到就停）。
 static void ZcodeWebArea(AXUIElementRef app, std::vector<AXUIElementRef>& webs) {
     CFArrayRef ws = nil;
@@ -463,7 +474,90 @@ static void ZcodeWebArea(AXUIElementRef app, std::vector<AXUIElementRef>& webs) 
     }
 }
 
-extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
+/// 数一节子树里的两样东西：可点的会话行（AXContentList 的可点子节点）、本组的「显示更多」，
+/// 并把第一枚「显示更多」带引用留在 *more（moren>1 时不给，调用方要因为分不清归属而收手）。
+static void ZcodeCountSection(AXUIElementRef el, int depth, long* rows, long* moren,
+                              AXUIElementRef* more) {
+    if (depth > 14) return;
+    std::vector<AXUIElementRef> kids;
+    AxKids(el, kids);
+    for (auto k : kids) {
+        NSString* role = AxStr(k, CFSTR("AXRole"));
+        NSString* sub = AxStr(k, CFSTR("AXSubrole"));
+        NSString* t = AxStr(k, CFSTR("AXTitle"));
+        if (role && [role isEqualToString:@"AXButton"] && t && [t isEqualToString:@"显示更多"] && AxHasPress(k)) {
+            (*moren)++;
+            if (!*more) *more = (AXUIElementRef)CFRetain(k);
+        }
+        if (sub && [sub isEqualToString:@"AXContentList"]) {
+            std::vector<AXUIElementRef> rk;
+            AxKids(k, rk);
+            for (auto c : rk) if (AxHasPress(c)) (*rows)++;
+            AxRelease(rk);
+        }
+        ZcodeCountSection(k, depth + 1, rows, moren, more);
+    }
+    AxRelease(kids);
+}
+
+/// 目标项目组的那一节在哪一层——10-29 实测四个组的树形状：
+///   一节＝直接子节点只有两枚 AXGroup（组头行 0 行 ＋ 行块 N 行）：
+///     三个组各自上溯 2 层就是它那一节，分别 18 / 4 / 3 行、都是 2 枚子节点
+///   再往上一层（其中一个组上溯 3 层）＝25 行 9 子——那是好几个组并排，
+///   在这一层按「显示更多」翻的就是别人的组（先前那版正是这么把 22 行按到 35 行的）。
+/// 所以：从组头一路上溯，第一个「装着行」的祖先才算这一节；它必须只有两枚直接子节点，
+/// 且这一节里恰好一枚「显示更多」。任一条不满足就什么也不按——替他多翻一个组是动他界面。
+static void ZcodeSectionFor(AXUIElementRef web, NSString* group, bool* seen, long* rows,
+                            AXUIElementRef* more) {
+    *seen = false; *rows = 0; *more = nil;    if (!group.length) return;
+    std::vector<AXUIElementRef> btns;
+    AxFind(web, false, @"AXButton", 0, btns, 400);
+    AXUIElementRef head = nil;
+    for (auto b : btns) {
+        NSString* t = AxStr(b, CFSTR("AXTitle"));
+        if (t && [t isEqualToString:group]) { head = (AXUIElementRef)CFRetain(b); break; }
+    }
+    AxRelease(btns);
+    if (!head) return;
+    *seen = true;
+    // up 自己拿一份引用：往上那一圈每层都 release 掉手里的，若让它直接等于 head，
+    // 第一层就会把 head 唯一的引用放掉，函数末尾再 release 一次是超放。
+    AXUIElementRef up = (AXUIElementRef)CFRetain(head);
+    for (int level = 1; level <= 4; level++) {
+        CFTypeRef p = nil;
+        if (AXUIElementCopyAttributeValue(up, kAXParentAttribute, &p) != kAXErrorSuccess || !p) break;
+        CFRelease(up);
+        up = (AXUIElementRef)p;
+        long r = 0, m = 0;
+        AXUIElementRef got = nil;
+        ZcodeCountSection(up, 0, &r, &m, &got);
+        if (r == 0) continue;                       // 这一组还没列出行：接着往上找装着它的那一节
+        std::vector<AXUIElementRef> ks;
+        AxKids(up, ks);
+        const long kids = (long)ks.size();
+        AxRelease(ks);
+        if (kids > 2) { if (got) CFRelease(got); break; }   // 第一个有行的祖先已是多组并排，分不清归属
+        *rows = r;
+        if (m == 1) *more = got; else if (got) CFRelease(got);
+        break;
+    }
+    if (up != head) CFRelease(up);
+    CFRelease(head);
+}
+
+/// ZCode 本次启动的时刻（epoch 秒），0＝读不到。它这次的会话列表是启动时的那一份快照，
+/// 拿这个与会话的 time_created 一比，就能分清「藏在显示更多后面」和「它压根没列」。
+/// NSRunningApplication 不给启动时刻（编译期就没这个属性），走 sysctl KERN_PROC_PID。
+static double ZcodeStartEpoch(pid_t pid) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid };
+    struct kinfo_proc kp;
+    size_t len = sizeof(kp);
+    if (sysctl(mib, 4, &kp, &len, nullptr, 0) != 0 || len == 0) return 0;
+    return (double)kp.kp_proc.p_starttime.tv_sec;
+}
+
+extern "C" int ap_zcode_navigate(const char* title, const char* cwd, double created,
+                                 char* reason, int out_len) {
     if (!title || !*title) { Say(reason, out_len, @"ZCode 这一跳缺标题，退回普通落点"); return 1; }
     {   // 防抖：连点多轮时每一轮都是完整的「唤起＋读树＋点」，别叠着敲
         static double lastNavAt = 0;
@@ -543,15 +637,72 @@ extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
         if (BestOf(@(title), titles) >= 0 || (!woke && i)) break;
         usleep(500 * 1000);
     }
-    const int best = BestOf(@(title), titles);
+    int best = BestOf(@(title), titles);
+    // 每个项目组只列它那一节的前几行，其余藏在本组那枚「显示更多」后面（10-29 实测：
+    // 同一颗按下去行数会涨）。不替他翻到底就判「侧栏没这一条」，正是他这次报的现象。
+    // 只翻目标那一组、且只认那一节里恰好一枚的按钮（判据见 ZcodeSectionFor），
+    // 这一跳的翻页预算压在 2.5 秒内——面板不能冻在他脸上。
+    bool group_seen = false;
+    bool group_checked = false;   // 一上来就命中时根本没走翻页那一轮：日志不许说「组不在」
+    long group_rows = 0;
+    int more_presses = 0;   // 替他按了几次「显示更多」——回执要说出来，那是动了他界面
+    NSString* group = ZcodeGroupOf(cwd);
+    const double navT0 = [NSProcessInfo processInfo].systemUptime;
+    for (int round = 0; round < 6 && best < 0; round++) {
+        if ([NSProcessInfo processInfo].systemUptime - navT0 > 2.5) break;   // 按之前先看表，别按完才发现超时
+        AXUIElementRef more = nil;
+        group_checked = true;
+        ZcodeSectionFor(web, group, &group_seen, &group_rows, &more);
+        if (!more) break;
+        const AXError e = AXUIElementPerformAction(more, kAXPressAction);
+        CFRelease(more);
+        if (e != kAXErrorSuccess) break;
+        more_presses++;
+        usleep(600 * 1000);
+        for (auto r : rows) CFRelease(r);
+        rows.clear(); [titles removeAllObjects];
+        ZcodeRows(web, rows, titles);
+        best = BestOf(@(title), titles);
+    }
     int rc = 1;
     bool said = false;
     if (best < 0) {
         // 命令中心那条路 10-29 撤了（工作区级作用域，实测 0/10，见上面那段注释）：
-        // 侧栏没有就是没有，如实报这一列有几行，别为了「看起来像跳到了」再敲一轮键。
-        Say(reason, out_len, [NSString stringWithFormat:
-                              @"ZCode 侧栏这一轮只列了 %lu 行，没有「%@」这一条",
-                              (unsigned long)titles.count, @(title)]);
+        // 侧栏没有就是没有，如实报这一组有几行，别为了「看起来像跳到了」再敲一轮键。
+        // 但「没有」分三种，下一步完全不同，必须分开说（判据都是 10-29 实测的）：
+        //   ① 组头本身不在侧栏 → 它列的是这一轮它认得的那些工作区；
+        //   ② 这条的建立时刻比 ZCode 本次启动晚 → 返回 6，单独一档（实测：本次启动之后建的
+        //      15 条，一条都不在它这次的侧栏里；启动前建的在列，哪怕最新的几条已经翻出来了）；
+        //   ③ 组在、也不晚 → 翻到底仍没匹配上，报这一组的行数。
+        NSString* why;
+        const double start = ZcodeStartEpoch(pid);
+        if (group.length && !group_seen) {
+            why = [NSString stringWithFormat:@"ZCode 侧栏里没有「%@」这个项目组，所以也没列它的会话", group];
+        } else if (created > 0 && start > 0 && created >= start) {
+            NSDateFormatter* df = [[NSDateFormatter alloc] init];
+            df.dateFormat = @"MM-dd HH:mm";
+            why = [NSString stringWithFormat:
+                   @"这条 %@ 才建，比 ZCode 本次启动（%@）晚，它这次的侧栏列表里没有它",
+                   [df stringFromDate:[NSDate dateWithTimeIntervalSince1970:created]],
+                   [df stringFromDate:[NSDate dateWithTimeIntervalSince1970:start]]];
+            rc = 6;
+        } else if (!group.length) {
+            why = [NSString stringWithFormat:
+                   @"这条没绑项目（落在 ZCode 的默认工作区），侧栏里没有对应的项目组可定位：「%@」", @(title)];
+        } else if (group_rows <= 0) {
+            // 组头在、但没能单独认出它那一节：要么那一节没列出行，要么它和邻组并排挂在同一层
+            // （判据见 ZcodeSectionFor）。这一档一个字都不许写成「翻到底只有 N 行」——那是没翻的证据。
+            why = [NSString stringWithFormat:
+                   @"ZCode 侧栏里有「%@」这一组，但没能把它单独认出来（它那一节没列出行，或与别的组并排在同一层），所以没替它翻页", group];
+        } else {
+            // 「翻到底」只有在真按过那颗才算说过；一颗没按就报行数时，必须连带说这一组
+            // 已经没有「显示更多」了——否则他会以为再等一等就能翻出来。
+            why = [NSString stringWithFormat:
+                   more_presses ? @"ZCode 侧栏「%@」这一组翻到底列了 %ld 行，没有「%@」这一条"
+                                : @"ZCode 侧栏「%@」这一组现在只列了 %ld 行（那颗「显示更多」已经不在这组里），没有「%@」这一条",
+                   group, group_rows, @(title)];
+        }
+        Say(reason, out_len, why);
         said = true;
     } else {
         // 刚 reopen 出来的第一跳实测会空一发（8 次里 1 次：AXPress 返回成功，但主区还在画
@@ -576,11 +727,11 @@ extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
             }
             e = AXUIElementPerformAction(rows[(NSUInteger)idx], kAXPressAction);
             if (e == kAXErrorSuccess && ZcodeLanded(web, @(title))) {
-                Say(reason, out_len, a
-                    ? [NSString stringWithFormat:
-                       @"先替它开出了窗口、又按了一次，已在 ZCode 侧栏点中「%@」", titles[(NSUInteger)idx]]
-                    : [NSString stringWithFormat:@"%@已在 ZCode 侧栏点中「%@」",
-                       woke ? @"先替它开出了窗口，" : @"", titles[(NSUInteger)idx]]);
+                NSString* head = [NSString stringWithFormat:@"%@%@",
+                                  woke ? @"先替它开出了窗口，" : @"",
+                                  more_presses ? @"替它翻开了那一组，" : @""];
+                Say(reason, out_len, [NSString stringWithFormat:@"%@已在 ZCode 侧栏点中「%@」",
+                                      head, titles[(NSUInteger)idx]]);
                 said = true;
                 rc = 0;
                 break;
@@ -597,9 +748,12 @@ extern "C" int ap_zcode_navigate(const char* title, char* reason, int out_len) {
     for (auto r : rows) CFRelease(r);
     CFRelease(web);
     CFRelease(app);
-    fprintf(stderr, "[落点·ZCode] 进函数时窗口 %d 扇，侧栏 %lu 行%s，标题「%s」→ %s\n",
-            wins0, (unsigned long)titles.count, woke ? "（窗口是本次要回来的）" : "", title,
-            rc == 0 ? "命中" : "未落到");
+    fprintf(stderr, "[落点·ZCode] 窗口 %d 扇，侧栏 %lu 行（组「%s」%s，本组 %ld 行，显示更多按了 %d 次）%s，"
+                    "标题「%s」/ 建于 %.0f → %s｜%s\n",
+            wins0, (unsigned long)titles.count, group.UTF8String ?: "-",
+            !group_checked ? "未查" : (group_seen ? "在" : "不在"), group_rows, more_presses,
+            woke ? "（窗口是本次要回来的）" : "", title, created,
+            rc == 0 ? "命中" : (rc == 6 ? "比本次启动晚" : "未落到"), reason ?: "");
     fflush(stderr);
     return rc;
 }

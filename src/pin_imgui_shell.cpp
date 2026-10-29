@@ -536,6 +536,19 @@ static const Key kStr[] = {
                         "La sessione non è stata aperta nel client",
                         "クライアント内でこのセッションを開けませんでした",
                         "클라이언트에서 해당 세션을 열지 못했습니다"}},
+    // 10-29 新增：这一条建得比 ZCode 本次启动晚（实测：本次启动后新建的 15 条零命中）。
+    // 不复用 land_copy 那句「对着标题在列表里找」——列表里根本没有它，那是给人指一条死路。
+    {"land_newrun",    {"这条比 ZCode 本次启动还新", "This session is newer than ZCode's current run",
+                        "Diese Sitzung ist neuer als ZCodes aktueller Lauf",
+                        "Questa sessione è più recente dell'avvio corrente di ZCode",
+                        "このセッションは ZCode の今回の起動より新しい",
+                        "이 세션은 ZCode의 현재 실행보다 최근에 만들어졌습니다"}},
+    {"land_newrun_sub",{"它建于本次启动之后，ZCode 的列表里还没有它 — 标题已复制",
+                        "Created after that start, so it isn't in ZCode's list yet — title copied",
+                        "Nach diesem Start erstellt — deshalb fehlt es in ZCodes Liste; Titel kopiert",
+                        "Creata dopo l'avvio: non è ancora nell'elenco di ZCode — titolo copiato",
+                        "今回の起動の後に作られたため ZCode の一覧にありません — タイトルをコピーしました",
+                        "현재 실행 이후에 만들어져 ZCode 목록에 없습니다 — 제목을 복사했습니다"}},
     {"land_app",       {"只把 %s 带到了前台", "Only brought %s to the front",
                         "%s wurde nur in den Vordergrund geholt",
                         "%s è stata portata solo in primo piano",
@@ -1428,6 +1441,9 @@ struct UIRow {
     bool has_tokens = false, has_credits = false;
     std::string model;
     std::string cwd;                       // 会话的工作区绝对路径：ZCode 落点要开到工作区窗口
+    /// 这一条建出来的时刻（采集层给的 time_created，0＝这一路没给）。
+    /// ZCode 落点用它分清「侧栏藏在显示更多后面」和「它这次运行压根没列」两种没点中。
+    double created = 0;
     std::vector<ap::Session::Child> children;   // 子代理对话：主任务下可展开的那层
     /// 完成了但你还没看过（完成时刻 > 已读水位线）。只有完成态才有点；
     /// 双击跳过去或 ⓘ 看过详情就推进水位线，点消失。
@@ -1939,6 +1955,7 @@ struct Hit {
     long zid = 0;
     std::string key, agent_id, native_id, label, title;
     std::string cwd;                       // 行的工作区路径：ZCode 那级落点用
+    double created = 0;                    // 这条会话建出来的时刻：ZCode 落点据此说清为什么点不到
 };
 static std::vector<Hit> g_hits;                  // 本帧登记、下一帧消费
 static std::set<std::string> g_ack;              // 「已读」：只在内存，与 Swift 的 acknowledged 同一口径
@@ -2016,6 +2033,7 @@ static void AddHit(std::vector<Hit>& v, float x0, float y0, float x1, float y1,
     h.zid = Zid(loc, row, act, opt);
     h.key = r.key; h.agent_id = r.agent_id; h.native_id = r.native_id; h.title = r.title;
     h.cwd = r.cwd;
+    h.created = r.created;
     h.label = label;
     v.push_back(h);
 }
@@ -2487,6 +2505,9 @@ enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / 侧�
                  L_TRAY,       // 托盘这一轮只露最近那 12 条，没列它（Qoder 实测）
                  L_MISS,       // 客户端里试过了但没落到这一条：侧栏这一列没它、窗口没建起来、
                                // 或点下去主区没换（ZCode 实测，10-29 逐条读过）
+                 L_NEWRUN,     // 这条比 ZCode 本次启动还晚：它这次的侧栏列表里根本没有它（10-29 实测）。
+                               // 单独立一档，因为 land_miss 那句「对着标题在列表里找」在这里是死路——
+                               // 列表里不会有它，翻页也翻不出来。
                  L_WAKE,       // ZCode 原本一扇窗口都没有，这一跳只替它把窗口要了回来：
                                // 界面还要几秒才长出来（实测窗口 3 秒、树更晚），这一档不算落到会话，
                                // 也不许走阶梯凑数
@@ -2501,6 +2522,7 @@ static const char* LandName(int lv) {
         case L_SESS: return "会话级";
         case L_TRAY: return "托盘没列";
         case L_MISS: return "客户端没点中";
+        case L_NEWRUN: return "比本次启动晚";
         case L_WAKE: return "窗口在开";
         case L_APP:  return "只到 App";
         case L_DIR:  return "记录目录";
@@ -2543,7 +2565,7 @@ static Landing JumpTo(const Hit& h) {
         // 点侧栏那一行是 AXPress 别的 App 的界面，面板留不留都不挡路；
         // 「窗口都没开」那一档由平台侧自己发一次 reopen 要回窗口，不需要我们传路径
         //（10-29 撤掉了 workspace/open 那条 URL：它会弹文件夹信任确认，见 open.h）。
-        rc = ap_zcode_navigate(h.title.c_str(), key, (int)sizeof key);
+        rc = ap_zcode_navigate(h.title.c_str(), h.cwd.c_str(), h.created, key, (int)sizeof key);
         tried = rc != 4;
     } else if (h.agent_id == "qoder" && titled) {
         // 托盘那一菜单是 AXPress 点中的，不占键盘，面板留不留都不挡路。
@@ -2574,6 +2596,7 @@ static Landing JumpTo(const Hit& h) {
         fflush(stderr);
         return out;
     }
+    else if (tried && rc == 6) lvl = L_NEWRUN;   // 这条比 ZCode 本次启动晚，它这次的列表里没它
     else if (tried && rc == 1)
         lvl = h.agent_id == "zcode" ? L_MISS : L_TRAY;   // 试过了，那一条不在客户端露出来的名单里
 
@@ -2632,17 +2655,19 @@ static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true
     };
     const char* key = ld.level == L_AX ? "land_ax" : ld.level == L_TRAY ? "land_tray"
                     : ld.level == L_MISS ? "land_miss"
+                    : ld.level == L_NEWRUN ? "land_newrun"
                     : ld.level == L_WAKE ? "land_wake"
                     : ld.level == L_APP ? "land_app" : ld.level == L_DIR ? "land_dir" : "land_none";
     Toast(fill(T(key, loc)),
           T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub"
-            : ld.level == L_WAKE ? "land_wake_sub" : "land_copy",
+            : ld.level == L_WAKE ? "land_wake_sub" : ld.level == L_NEWRUN ? "land_newrun_sub"
+            : "land_copy",
             loc));
     g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
 }
 
 /// 出图轮不许真跳（会把他的桌面点开），但回执那句话必须拍得到。
-/// AGENTPING_LAND_SHOT=sess|tray|miss|wake|app|dir|ax|none 造一个该档位的落点，
+/// AGENTPING_LAND_SHOT=sess|tray|miss|newrun|wake|app|dir|ax|none 造一个该档位的落点，
 /// 走的是与真跳同一个 LandingToast——拍到的字就是屏幕上会出的字，不是另写的示意。
 static void JumpAndReport(const Hit& h, bool copy_title = true) {
     if (!g_shot_to) { LandingToast(JumpTo(h), h, copy_title); return; }
@@ -2651,7 +2676,8 @@ static void JumpAndReport(const Hit& h, bool copy_title = true) {
     Landing ld;
     ld.why = "出图轮预览，未发起真跳转";
     ld.level = !strcmp(e, "sess") ? L_SESS  : !strcmp(e, "tray") ? L_TRAY
-             : !strcmp(e, "miss") ? L_MISS  : !strcmp(e, "wake") ? L_WAKE
+             : !strcmp(e, "miss") ? L_MISS  : !strcmp(e, "newrun") ? L_NEWRUN
+             : !strcmp(e, "wake") ? L_WAKE
              : !strcmp(e, "app") ? L_APP
              : !strcmp(e, "dir") ? L_DIR    : !strcmp(e, "ax") ? L_AX : L_NONE;
     LandingToast(ld, h, copy_title);
@@ -2708,6 +2734,7 @@ static void DrainBannerClick() {
         h.key = r->key;
         h.title = r->title;
         h.cwd = r->cwd;
+        h.created = r->created;
     }
     LandingToast(JumpTo(h), h);
 }
@@ -4600,6 +4627,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.has_credits = se.credits > 0;
             row.model = se.model;
             row.cwd = se.cwd;
+            row.created = se.created;
             row.children = se.children;
             row.at = se.last_activity;
             row.unseen = GroupOf(row.state) == G_DONE &&
