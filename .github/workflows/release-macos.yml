@@ -1,0 +1,49 @@
+name: Build macOS app and attach to release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the build to (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+      - name: Install build dependencies
+        run: brew install cmake ninja glfw freetype
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+          cmake --build build --target pin_imgui_shell --parallel
+
+      - name: Bundle app
+        run: |
+          sh Tools/make_bundle.sh
+          mv "build/AgentPing-cpp.app" "build/Agent Ping.app"
+
+      - name: Package
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "build/Agent Ping.app" \
+            "Agent-Ping-${TAG}-macos-arm64.zip"
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$TAG" "Agent-Ping-${TAG}-macos-arm64.zip" --clobber
