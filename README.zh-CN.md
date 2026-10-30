@@ -3,9 +3,9 @@
 ![许可证](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![平台](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![界面语言](https://img.shields.io/badge/UI-zh%20·%20en%20·%20de%20·%20it%20·%20ja%20·%20ko-lightgrey.svg)
-![版本](https://img.shields.io/github/v/tag/DreamOfXM/agent-ping?label=release&color=blue)
+![版本](https://img.shields.io/github/v/release/DreamOfXM/agent-ping?label=release&color=blue)
 
-[English](README.md)
+[English](README.md) · [产品页](https://dreamofxm.github.io/agent-ping/)
 
 同时开着 Qoder、Claude Code、Codex、ZCode、WorkBuddy、OpenCode 的时候，你缺的不是又一块
 看板，而是「现在轮到哪一条」。Agent Ping 是一个菜单栏面板：它读这些工具已经写在你机器上

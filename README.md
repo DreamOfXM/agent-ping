@@ -3,9 +3,9 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![UI languages](https://img.shields.io/badge/UI-zh%20·%20en%20·%20de%20·%20it%20·%20ja%20·%20ko-lightgrey.svg)
-![Release](https://img.shields.io/github/v/tag/DreamOfXM/agent-ping?label=release&color=blue)
+![Release](https://img.shields.io/github/v/release/DreamOfXM/agent-ping?label=release&color=blue)
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Product page](https://dreamofxm.github.io/agent-ping/en/)
 
 When Qoder, Claude Code, Codex, ZCode, WorkBuddy and OpenCode are all open at once,
 what you are missing is not another dashboard — it is "which one is my turn". Agent
