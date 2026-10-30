@@ -83,6 +83,10 @@ if(APPLE)
   set(LANG_SRC src/platform/lang_macos.mm)
   set_source_files_properties(${LANG_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(AUTOSTART_SRC src/platform/autostart_macos.mm)
+  set_source_files_properties(${AUTOSTART_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(FOCUS_SRC src/platform/focus_macos.mm)
+  set_source_files_properties(${FOCUS_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(CURSOR_SRC src/platform/cursor_macos.mm)
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
   # 静态链 glfw 时 cocoa_window.m 会引用 CAMetalLayer，必须自己带上 QuartzCore
   # （动态链时是 libglfw.3.dylib 的 LC_LOAD_DYLIB 替你带进来的，静态链没人管）。
@@ -108,6 +112,8 @@ else()
   set(NOTIFY_SRC src/platform/notify_posix.cpp)
   set(LANG_SRC src/platform/lang_posix.cpp)
   set(AUTOSTART_SRC src/platform/autostart_posix.cpp)
+  set(FOCUS_SRC src/platform/focus_posix.cpp)
+  set(CURSOR_SRC src/platform/cursor_posix.cpp)
   set(PLATFORM_LIBS ${OPENGL_LIB})
   if(LIBDBUS_FOUND)
     set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
@@ -138,6 +144,8 @@ add_executable(pin_imgui_shell
   ${NOTIFY_SRC}
   ${LANG_SRC}
   ${AUTOSTART_SRC}
+  ${FOCUS_SRC}
+  ${CURSOR_SRC}
   ${IMGUI_SRC}
   # 粗体字形要真加粗轮廓（FT_GlyphSlot_Embolden）才不糊：只给 pin_imgui_shell 编进来，
   # i18n_probe 只量覆盖，不需要加载器。

@@ -312,7 +312,7 @@ const zh: SiteContent = {
       },
       {
         q: "它会替我点领取吗？",
-        a: "不会。权益屏是只读的，点卡片只把那家 App 唤到前台，屏幕上明写「领取要在那家 App 里自己点」。ZCode 的领取状态在它的服务端响应里，本地日志零信号，所以那张卡永远写 Unknown——这是这条路的天花板，不是加载失败。",
+        a: "不会。权益屏是只读的，点卡片只把那家 App 唤到前台，屏幕上明写「领取要在那家 App 里自己点」。ZCode 的本期额度由它自己的 App 落盘（`~/.zcode/v2/logs/<日期>.log` 里的 `billing/balance` 响应），面板读的就是那条——但还没领的那一期不会写进这份日志，所以面板不可能提前预告，卡上那时只说「本机没有活期」。面值是本期发的总额而非剩余额度，且本机没有日志记录「领取」这个动作。",
       },
       {
         q: "支持哪些工具？Linux 上到什么程度？",
@@ -578,7 +578,7 @@ const en: SiteContent = {
       },
       {
         q: "Will it claim rewards for me?",
-        a: "No. The Rewards screen is read-only; clicking a card only brings that vendor's app to the front, and the card states that claiming happens inside that app. ZCode keeps its claim state in a server response and its local logs carry zero signal, so that card only ever says Unknown — that is the ceiling of this path, not a load failure.",
+        a: "No. The Rewards screen is read-only; clicking a card only brings that vendor's app to the front, and the card states that claiming happens inside that app. ZCode's current grant is written by its own app to `~/.zcode/v2/logs/<date>.log` (the `billing/balance` response), and that is what the panel reads — but a period still waiting to be claimed never appears in that log, so the panel can't announce it in advance; at that point the card only says \"no live period on this machine\". The face value is the total granted for the period rather than what remains, and no local log records the claim action itself.",
       },
       {
         q: "Which tools does it support, and how far does Linux go?",

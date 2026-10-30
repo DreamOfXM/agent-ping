@@ -36,6 +36,8 @@ struct AlertCfg {
     long long last_claim_at = 0;
     /// 「已读水位线」：完成时刻 ≤ 它的会话都算看过（小点点不亮）。冷启动没有这个键时
     /// 取当前时刻——存量的完成记录不倒灌成未读，只给今后新完成的起点。
+    /// 2026-10-31 起不再推进：看过改按会话键记（seen.txt），水位线一推就会把同批完成、
+    /// 还没看过的其它会话一起抹掉（用户实测：一个 agent 多条待处理，点一条其余全没了）。
     long long seen_until = 0;
     /// 面板窗口位置：拖动过就记住（-1＝没拖过，启动贴菜单栏右下）。
     int win_x = -1, win_y = -1;
@@ -120,6 +122,14 @@ std::set<std::string> load_alerted();
 /// 写账本。返回 false 且 err 非空时调用方必须把 err 打出来：账本写不进去＝去重失效，
 /// 每轮重扫都会重发同一批横幅，那是比不响更糟的失效方式。
 bool save_alerted(const std::set<std::string>& ids, std::string* err);
+
+// ── 「看过」按会话记 ─────────────────────────────────────────────────────────
+// 每行一个会话键，追加写。与水位线并存：水位线只管升级前那批存量，新看过的一律进这里。
+std::string seen_path();
+std::vector<std::string> load_seen();
+bool append_seen(const std::string& key, std::string* err);
+/// 压缩：内存里只留最近若干键时，整份重写（普通路径只追加，不碰历史行）。
+bool save_seen(const std::vector<std::string>& keys, std::string* err);
 
 /// 读设置；AGENTPING_SOUND / AGENTPING_DND 覆盖（0/1），让「免打扰确实压住了」可机器验证。
 AlertCfg load_alert_cfg();

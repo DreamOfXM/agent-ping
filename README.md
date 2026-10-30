@@ -126,7 +126,7 @@ files are touched only when **you** install a hook (the Connect button or
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows (read-only) |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`, `~/.workbuddy/projects` | session rows, `providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (honours `$XDG_DATA_HOME`) | `session` title/cwd/`time_updated`, `part` `step-finish` token sums and `tool.state.status` (read-only) |
-| Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/cli/log/zcode-<date>.jsonl` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; for ZCode only whether today's log exists — it writes no reward state locally |
+| Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/v2/logs/<date>.log` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; ZCode's `billing/balance` response — this period's plan, its `grant_units` face value and expiry, written by ZCode's own app, not by its CLI |
 | Hook inbox | `~/Library/Application Support/AgentPing/hooks/*.json` | the verbatim question and its options — written by the small `hook.sh` that Agent Ping installs on request; the panel itself never writes into this directory |
 
 On Linux the two Agent Ping paths move to `$XDG_CONFIG_HOME/AgentPing/…`
@@ -429,9 +429,13 @@ mystery.
 - **The unread dot does not sync with the tool.** ZCode keeps its read state in
   renderer memory, not on disk, so reading a session *in ZCode* will not clear the
   dot here. The dot means "not opened through this panel".
-- **ZCode's reward state cannot be read.** It keeps that state in its own server
-  response, and the local logs carry zero signal, so that card only ever says
-  `Unknown`. That is the ceiling of this path, not a load failure.
+- **ZCode's reward card can only confirm a period after it has been claimed.** The state
+  comes from the `billing/balance` response its app logs in `~/.zcode/v2/logs/<date>.log`;
+  a period still waiting to be claimed never appears in that log, so the panel cannot
+  announce it in advance. The card then reads *No live period here* — a statement about
+  this machine, not a claim that nothing is on offer. Face value is that response's
+  `grant_units` (the total granted, not what remains), the expiry is its `ends_at`, and
+  no local log records the claim action itself.
 - **Reward readings change only when the vendor itself refreshes.** WorkBuddy's
   `[Checkin]` is rewritten only while its window is focused; the panel does not poke
   it, it just writes *File X ago* on the card so you can tell "we did not refresh"

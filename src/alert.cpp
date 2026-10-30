@@ -195,6 +195,42 @@ bool save_alerted(const std::set<std::string>& ids, std::string* err) {
     return true;
 }
 
+std::string seen_path() { return join_(state_dir(), "seen.txt"); }
+
+std::vector<std::string> load_seen() {
+    std::vector<std::string> out;
+    std::ifstream f(seen_path(), std::ios::binary);
+    if (!f) return out;    // 没有这文件＝升级后还没点过任何一条，不是「全都看过」
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.back() == '\r') line.pop_back();
+        if (!line.empty()) out.push_back(line);
+    }
+    return out;
+}
+
+bool append_seen(const std::string& key, std::string* err) {
+    mkdirs(state_dir());
+    const std::string p = seen_path();
+    std::ofstream f(p, std::ios::binary | std::ios::app);
+    if (!f) { if (err) *err = "写不了「" + p + "」"; return false; }
+    f << key << "\n";
+    f.flush();
+    if (!f) { if (err) *err = "写到一半失败（" + p + "）"; return false; }
+    return true;
+}
+
+bool save_seen(const std::vector<std::string>& keys, std::string* err) {
+    mkdirs(state_dir());
+    const std::string p = seen_path();
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    if (!f) { if (err) *err = "写不了「" + p + "」"; return false; }
+    for (const auto& k : keys) f << k << "\n";
+    f.flush();
+    if (!f) { if (err) *err = "写到一半失败（" + p + "）"; return false; }
+    return true;
+}
+
 AlertCfg load_alert_cfg() {
     AlertCfg c;
     std::ifstream f(alert_settings_path(), std::ios::binary);

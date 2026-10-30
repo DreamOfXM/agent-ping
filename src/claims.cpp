@@ -3,6 +3,7 @@
 #include "jsonl.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -43,6 +44,21 @@ double local_midnight(double now) {
     ::localtime_r(&tt, &lt);
     lt.tm_hour = 0; lt.tm_min = 0; lt.tm_sec = 0;
     return (double)::mktime(&lt);
+}
+
+/// `[2026-10-30 00:12:38.982]` —— ZCode 自己那份 app 日志的行首时间戳。
+/// 它与 parse_bracket_iso 不是一支：不带 Z、也不当 UTC 读（实测 00:12:39 那条的
+/// server_time 换成本地正是 00:12:39，两者同一天同一秒）。取不到返回 0。
+double parse_bracket_local(const std::string& line) {
+    int y = 0, mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    if (line.size() < 20 || line[0] != '[') return 0;
+    if (std::sscanf(line.c_str(), "[%4d-%2d-%2d %2d:%2d:%2d", &y, &mo, &d, &hh, &mi, &ss) != 6)
+        return 0;
+    struct tm t{};
+    t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d;
+    t.tm_hour = hh; t.tm_min = mi; t.tm_sec = ss; t.tm_isdst = -1;
+    const double r = (double)::mktime(&t);
+    return r > 0 ? r : 0;
 }
 
 /// 从文件尾往前按 512 KB 一块扫，返回命中 needle 的整行，新的在前。
@@ -157,6 +173,7 @@ void from_workbuddy(Claim& c, double now) {
     const bool checked = bool_at(p, "today_checked_in", &got);
     if (!got) { c.note_key = "cl_note_wb_nofield"; return; }
     c.known = true;
+    c.none_reported = true;   // active／today_checked_in 都是它自己写的布尔
     c.done = checked;
     c.ready = active && !checked;
     const long credit = num_at(p, "today_credit", &got);
@@ -295,6 +312,7 @@ void from_qoder(Claim& c) {
     std::sort(ev.poll.begin(), ev.poll.end(),
               [](const QoderEvents::Poll& a, const QoderEvents::Poll& b) { return a.ts > b.ts; });
     c.known = true;
+    c.none_reported = true;   // hasClaimableCampaign 是它自己轮询完写的布尔
     c.seen_at = ev.poll.empty() ? 0 : ev.poll.front().ts;
     c.ready = ev.poll.empty() ? ev.any_pending : ev.poll.front().claimable;
     if (!ev.poll.empty() && ev.poll.front().has_notif) { c.notif = ev.poll.front().notif; c.notif_known = true; }
@@ -332,30 +350,159 @@ void from_qoder(Claim& c) {
     c.note_key = c.opened ? "cl_note_qd_gap_open" : "cl_note_qd_gap";
 }
 
-// ── ZCode：本机没有路 ─────────────────────────────────────────────────────
-// 实测口径（2026-10-29，两条独立检查）：
-//   ① 当天 ~/.zcode/cli/log/zcode-<日期>.jsonl 全文 56.7 MB 逐行扫
-//     「billing / entitlement / gift / welfare / benefit」= 0 命中，
-//      「quota」只命中模型请求的失败行（"exceed quota limit"），与领取无关；
-//      「zcode-plan」只命中推理 baseURL，没有任何权益接口。
-//   ② 整个 ~/.zcode 目录 9650 个文件 / 1.54 GB 扫「领取/claim/checkin/签到/reward/coupon/活动」
-//     —— 命中的全是他自己会话的产物（artifacts 里的 tool-result、插件源码、base64 串），
-//      没有一条是 ZCode 客户端写的权益读数。
-// 结论：它把权益状态留在服务端，本机日志一个字不落。要拿只能走它自己的网页（要它的登录态），
-// 那是另一档授权，不在只读层里。所以这里恒 known=false，界面对它只该说「状态未知」。
-void from_zcode(Claim& c) {
+// ── ZCode：额度写在它自己 app 日志的响应体里 ─────────────────────────────
+// 2026-10-30 推翻旧结论。旧口径只扫了 CLI 那层（~/.zcode/cli/log/zcode-<日期>.jsonl，
+// 那里确实一个字不落），没扫 GUI 那层。真源是 ~/.zcode/v2/logs/<日期>.log 里
+// `[coding-plan-availability] billing/balance 请求完成 {…}` 这一行 —— 它每几分钟请求一次
+// 并把整个响应体原样写盘。当天实测 44 条，00:12:39 那条：
+//   plans[0] = {name:"ZCODE GLOBAL BUILD",status:"active",starts_at:1793271791,
+//               ends_at:1793322000,entitlements:[{show_name:"GLM-5.3-Flash",
+//               unit_type:"token",grant_units:300000000,period:"one_time"}]}
+//   balances[0] 同刻给 total_units:300000000 / used_units:61946662 / remaining_units:238053338。
+// ends_at 换成本地正是 10-30 09:00:00，之后每条响应的 plans 都是空 ⇒「本期已过」这条也有读数。
+// 三家里只有它给服务端真失效时刻，所以时间轨画实线。面值取 entitlements 的 grant_units（与它
+// 屏上那张 Weekend Banner 同一口径：同单位相加、one_time 优先），不是余额。
+struct ZcRead {
+    double ts = 0;
+    bool parsed = false;      // 响应体读出来了（plans 为空也算读出来）
+    bool any = false;         // plans[] 非空 = 这一期它有额度
+    std::string status;
+    double starts = 0, ends = 0;
+    /// entitlements[].effective_at —— 额度真正开始可用的时刻。它比 starts_at 晚（10-30 实测
+    /// starts_at=19:47:17 是领的那一刻，effective_at=23:00:00 才是它屏上写的「将于…生效」），
+    /// 所以「本期起」这一格取 effective_at，拿不到才退回 starts_at。
+    double eff = 0;
+    long grant = 0; bool has_grant = false;
+    std::string unit;
+    long remaining = 0; bool has_remaining = false;
+};
+
+/// 单位归一，照它自己 quota.js 的 normalize：token/tokens 一支、credit/credits 一支。
+std::string zc_unit(const std::string& raw) {
+    std::string u;
+    for (char ch : raw) u += (char)std::tolower((unsigned char)ch);
+    if (u == "token" || u == "tokens") return "tokens";
+    if (u == "credit" || u == "credits") return "credits";
+    return u;
+}
+
+ZcRead parse_zc_line(const std::string& ln) {
+    ZcRead z;
+    z.ts = parse_bracket_local(ln);
+    const std::size_t tag = ln.find("请求完成");
+    const std::size_t brace = tag == std::string::npos ? std::string::npos
+                                                          : ln.find('{', tag);
+    if (brace == std::string::npos) return z;
+    Json rec;
+    if (!json_parse(ln.c_str() + brace, ln.size() - brace, rec)) return z;
+    z.parsed = true;
+    const Json* pay = rec.at("payload");
+    const Json* data = pay ? pay->at("data") : nullptr;
+    const Json* plans = data ? data->at("plans") : nullptr;
+    if (!plans || plans->kind != Json::ARR || plans->arr.empty()) return z;
+    z.any = true;
+    const Json& p = plans->arr.front();
+    bool got = false;
+    if (const std::string* s = p.str_at("status")) z.status = *s;
+    z.starts = (double)num_at(&p, "starts_at", &got);
+    if (!got) z.starts = 0;
+    z.ends = (double)num_at(&p, "ends_at", &got);
+    if (!got) z.ends = 0;
+    const Json* ents = p.at("entitlements");
+    std::string unit;
+    if (ents && ents->kind == Json::ARR) {
+        for (const Json& e : ents->arr) {
+            const std::string* ut = e.str_at("unit_type");
+            const std::string u = zc_unit(ut ? *ut : std::string());
+            if (unit.empty()) unit = u;
+            if (!unit.empty() && u != unit) continue;    // 不同单位不相加，与它 quota.js 同律
+            bool g4 = false;
+            const double ea = (double)num_at(&e, "effective_at", &g4);
+            if (g4 && ea > 0 && (z.eff == 0 || ea < z.eff)) z.eff = ea;
+            bool g2 = false;
+            const long v = num_at(&e, "grant_units", &g2);
+            if (g2 && v >= 0) { z.grant += v; z.has_grant = true; }
+        }
+    }
+    z.unit = unit;
+    const Json* bals = data->at("balances");
+    if (bals && bals->kind == Json::ARR) {
+        for (const Json& b : bals->arr) {
+            const std::string* ut = b.str_at("unit_type");
+            if (!unit.empty() && zc_unit(ut ? *ut : std::string()) != unit) continue;
+            bool g3 = false;
+            const long v = num_at(&b, "remaining_units", &g3);
+            if (g3 && v >= 0) { z.remaining += v; z.has_remaining = true; }
+        }
+    }
+    return z;
+}
+
+void from_zcode(Claim& c, double now) {
     c.vendor = "zcode";
     c.name = "ZCode";
-    struct tm lt{};
-    const time_t nowt = (time_t)std::time(nullptr);
-    ::localtime_r(&nowt, &lt);
-    char day[32];
-    std::strftime(day, sizeof day, "%Y-%m-%d", &lt);
-    c.source = home_dir() + "/.zcode/cli/log/zcode-" + std::string(day) + ".jsonl";
+    const std::string dir = home_dir() + "/.zcode/v2/logs";
+    DIR* d = ::opendir(dir.c_str());
+    if (!d) { c.source = dir; c.note_key = "cl_note_zc_nodir"; return; }
+    std::vector<std::string> names;
+    while (dirent* e = ::readdir(d))
+        if (e->d_name[0] != '.') names.push_back(e->d_name);
+    ::closedir(d);
+    if (names.empty()) { c.source = dir; c.note_key = "cl_note_zc_nodir"; return; }
+    std::sort(names.begin(), names.end(),
+              [](const std::string& a, const std::string& b) { return a > b; });
+    // 文件名是 YYYY-MM-DD.log，倒序即新在前。本期常跨零点（10-29 19:03 开的那一期
+    // 到 10-30 09:00 才作废），所以最新两份一起扫，且只扫这两份。
+    std::vector<ZcRead> reads;
+    std::string hit_file;
+    for (std::size_t i = 0; i < names.size() && i < 2; i++) {
+        const std::string p = dir + "/" + names[i];
+        for (const auto& ln : tail_lines(p, "billing/balance 请求完成", 200, 8ull << 20)) {
+            ZcRead z = parse_zc_line(ln);
+            if (z.parsed) reads.push_back(z);
+        }
+        if (!reads.empty()) { hit_file = p; break; }
+    }
+    c.source = hit_file.empty() ? dir + "/" + names.front() : hit_file;
     c.log_mtime = mtime_of(c.source);
-    if (!c.log_mtime) { c.note_key = "cl_note_zc_nolog"; return; }
-    c.known = false;
-    c.note_key = "cl_note_zc_none";
+    if (reads.empty()) { c.note_key = "cl_note_zc_noline"; return; }
+
+    std::sort(reads.begin(), reads.end(),
+              [](const ZcRead& a, const ZcRead& b) { return a.ts > b.ts; });
+    c.known = true;
+    c.seen_at = reads.front().ts;
+    // 「活着的这一期」只有一个判法：最新那条响应里清单非空、状态是 active、且没越过它自己
+    // 报的 ends_at。旧读数里的 active 只能回答「上一次有是几点」，不许顶成现状 ——
+    // 10-30 09:14 起清单就空了，拿 00:12 那条判「有得领」会把过期说成在售。
+    const ZcRead* live = nullptr;
+    for (const ZcRead& z : reads) {
+        if (!z.any || z.status != "active") continue;
+        if (z.ends > 0 && z.ends <= now) continue;
+        live = &z;
+        break;
+    }
+    if (!live) {
+        for (const ZcRead& z : reads)
+            if (z.any && z.status == "active") { c.last_ready_at = z.ts; break; }
+    }
+    if (live) {
+        c.done = true;             // 额度已在账户里并可消费：同一条 balances 给 used/remaining
+        // 「本期起」优先用它自己的 effective_at（额度可用时刻），领的动作发生在更早的 starts_at。
+        c.appears_at = live->eff > live->starts ? live->eff : live->starts;
+        c.expires_at = live->ends;
+        if (live->has_grant) {
+            c.credit = live->grant;
+            c.credit_known = true;
+            c.credit_unit = live->unit;
+        }
+        c.note_key = "cl_note_zc_done";
+    } else if (c.last_ready_at > 0) {
+        c.note_key = "cl_note_zc_gone";
+    } else if (reads.front().any) {
+        c.note_key = "cl_note_zc_other";   // 清单非空但状态不是本机见过的 active，不猜
+    } else {
+        c.note_key = "cl_note_zc_empty";
+    }
 }
 
 }  // namespace
@@ -364,7 +511,7 @@ std::vector<Claim> claims_scan(double now_epoch) {
     std::vector<Claim> out(3);
     from_workbuddy(out[0], now_epoch);
     from_qoder(out[1]);
-    from_zcode(out[2]);
+    from_zcode(out[2], now_epoch);
     return out;
 }
 
@@ -372,11 +519,15 @@ std::string claims_dump(const std::vector<Claim>& cs) {
     char buf[512];
     std::string s;
     for (const auto& c : cs) {
-        std::snprintf(buf, sizeof buf, "%-10s known=%d ready=%d done=%d opened=%d",
-                      c.vendor.c_str(), (int)c.known, (int)c.ready, (int)c.done, (int)c.opened);
+        std::snprintf(buf, sizeof buf, "%-10s known=%d ready=%d done=%d opened=%d none_reported=%d",
+                      c.vendor.c_str(), (int)c.known, (int)c.ready, (int)c.done, (int)c.opened,
+                      (int)c.none_reported);
         s += buf;
-        if (c.credit_known) { std::snprintf(buf, sizeof buf, " credit=%ld", c.credit); s += buf; }
-        else s += " credit=—";
+        if (c.credit_known) {
+            std::snprintf(buf, sizeof buf, " credit=%ld%s", c.credit,
+                          c.credit_unit.empty() ? "" : (" " + c.credit_unit).c_str());
+            s += buf;
+        } else s += " credit=—";
         if (c.streak_known) { std::snprintf(buf, sizeof buf, " streak=%d", c.streak); s += buf; }
         if (c.notif_known) { std::snprintf(buf, sizeof buf, " notif=%d", c.notif); s += buf; }
         s += "\n           源=" + c.source;

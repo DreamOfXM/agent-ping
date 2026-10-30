@@ -16,7 +16,16 @@ struct Claim {
     bool known = false;
     bool ready = false;         // 它亲口说现在有可领的
     bool done = false;          // 本期已经领过
+    /// 「现在没有」这句是不是它自己报出来的。WorkBuddy 的 active、Qoder 的 claimable 都是
+    /// 它写的布尔 ⇒ 卡上可以写「当前没有可领」。ZCode 读的是 billing/balance 的活期清单，
+    /// 清单空只证明「本机没看到活期」—— 没领的那一期根本不写这份日志（10-30 实测：
+    /// 19:16 读到空清单，19:47 他领完，同一份日志里才出现 500M 那一期），
+    /// 所以这一家的空不许念成「没有可领」。
+    bool none_reported = false;
     long credit = 0; bool credit_known = false;
+    /// 面值那格的单位。空 = 界面按 "Credits" 念（WorkBuddy 的 today_credit 就是积分）；
+    /// ZCode 给的是 token，写成 Credits 就是假话，所以单位跟着它自己的 unit_type 走。
+    std::string credit_unit;
     /// 连续签到天数 —— 实测只有 WorkBuddy 给（streak_days）。
     int streak = 0; bool streak_known = false;
     /// 未读通知条数 —— 实测只有 Qoder 给（notificationCount）。与 streak 不同义，不混用。

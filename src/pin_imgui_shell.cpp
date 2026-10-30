@@ -20,6 +20,8 @@
 #include "platform/notify.h"
 #include "platform/lang.h"
 #include "platform/autostart.h"
+#include "platform/focus.h"
+#include "platform/cursor.h"
 #include "alert.h"
 #include "claims.h"
 #include "scan.h"
@@ -636,6 +638,10 @@ static const Key kStr[] = {
                         "受け取り済み", "수령 완료"}},
     {"r_claim_none",   {"当前没有可领", "Nothing to claim", "Nichts verfügbar",
                         "Nulla da riscuotere", "受け取れるものなし", "받을 항목 없음"}},
+    // 与上一颗的区别是这一颗只说本机：那家没在日志里报「没有」，只是本机看不到活期。
+    // 10-30 实测过差别 —— 19:16 读到空清单，19:47 他领完才出现 500M 那一期。
+    {"r_claim_nolocal",{"本机没有活期", "No live period here", "Kein laufender Plan hier",
+                        "Nessun periodo attivo qui", "有効な期間はなし", "활성 기간 없음"}},
     {"r_claim_unknown",{"状态未知", "Unknown", "Unbekannt", "Sconosciuto", "状態不明", "상태 모름"}},
     // 数字拆出来单独放大之后，这一格只剩标签：六语都得是「光秃秃一个名词短语」，
     // 不能带「连续…天」那种把数字包在中间的写法，否则拆完读不通。
@@ -776,18 +782,42 @@ static const Key kStr[] = {
                              "%s; testo e valore della carta non sono scritti in locale, quindi non si vedono. Hai aperto il suo pannello: nessun altro avviso",
                              "%s。カードの文言と額面は本機に書かれず、取得できません。企画パネルを開いたため、再通知はしません",
                              "%s. 카드 문구와 액면가는 로컬에 기록되지 않아 알 수 없습니다. 활동 패널을 열었으므로 다시 알리지 않습니다"}},
-    {"cl_note_zc_nolog", {"本机没有 ZCode 当天的 CLI 日志",
-                          "No ZCode CLI log for today on this machine",
-                          "Kein Tages-CLI-Log von ZCode auf diesem Rechner",
-                          "Nessun log CLI di ZCode per oggi su questa macchina",
-                          "このマシンに ZCode の当日 CLI ログがありません",
-                          "이 기기에 ZCode 오늘 CLI 로그가 없습니다"}},
-    {"cl_note_zc_none", {"本机日志零领取信号：状态只在它自己的服务端响应里，要它的登录态才拿得到",
-                         "No claim signal locally: its server holds the state, behind its login",
-                         "Kein Signal in lokalen Logs: der Zustand liegt nur in seiner Server-Antwort und braucht sein Login",
-                         "Nessun segnale nei log locali: lo stato sta solo nella risposta del server e richiede il suo login",
-                         "ローカルログに受取の手掛かりなし。状態はサーバー応答のみにあり、ログイン状態が必要です",
-                         "로컬 로그에 수령 신호가 없습니다. 상태는 서버 응답에만 있어 해당 로그인이 필요합니다"}},
+    {"cl_note_zc_nodir", {"本机没有 ZCode 的 app 日志目录",
+                          "No ZCode app-log directory on this machine",
+                          "Kein ZCode-App-Log-Ordner auf diesem Rechner",
+                          "Nessuna cartella di log dell'app ZCode su questa macchina",
+                          "このマシンに ZCode のアプリログフォルダがありません",
+                          "이 기기에 ZCode 앱 로그 폴더가 없습니다"}},
+    {"cl_note_zc_noline", {"它的 app 日志里没有 billing/balance 那一行：这一版不落权益响应",
+                           "No billing/balance line in its app log — this build doesn't write the reward response",
+                           "Keine billing/balance-Zeile im App-Log — diese Version schreibt die Antwort nicht",
+                           "Nessuna riga billing/balance nel log dell'app: questa build non scrive la risposta",
+                           "アプリログに billing/balance の行がありません。この版は権限応答を書き込みません",
+                           "앱 로그에 billing/balance 줄이 없습니다. 이 버전은 응답을 기록하지 않습니다"}},
+    {"cl_note_zc_done", {"面值是它自己响应里的 grant_units（本期发的总额），不是剩余额度；作废时刻同一条给",
+                         "Face value is grant_units from its own response (this period's grant), not what's left; the same line gives the expiry",
+                         "Der Nennwert ist grant_units aus seiner Antwort (diese Periode), nicht der Rest; dieselbe Zeile nennt den Ablauf",
+                         "Il valore è grant_units nella sua risposta (di questo periodo), non il residuo; la stessa riga dà la scadenza",
+                         "額面は自身の応答の grant_units（今期の発行総額）で、残高ではありません。失効時刻も同じ行が与えます",
+                         "액면가는 응답의 grant_units(이번 주기 지급 총액)이며 잔액이 아닙니다. 만료 시각도 같은 줄에 있습니다"}},
+    {"cl_note_zc_gone", {"本机最近一次响应里没有活期（上一行是最后一次读到活期的时刻）；还没领的那一期不写这份日志，所以「有没有券待领」这一路读不到",
+                         "No live period in its newest response (the line above is the last one that had one); a period you haven't claimed never reaches this log, so \"is there a coupon?\" is unreadable here",
+                         "Kein laufender Plan in der neuesten Antwort (die Zeile oben ist die letzte mit einem); ein noch nicht abgeholter Plan landet nie in diesem Log — ob ein Gutschein wartet, ist hier nicht lesbar",
+                         "Nessun periodo attivo nell'ultima risposta (la riga sopra è l'ultima che ne aveva uno); un periodo non ancora riscosso non arriva a questo log: \"c'è un buono?\" qui non è leggibile",
+                         "最新の応答に有効な期間はありません（上の行が最後に有効期を読めた時刻）。未受領の期間はこのログに書かれないため、「受け取り可能な券があるか」は判定できません",
+                         "최신 응답에 활성 기간이 없습니다(위 줄이 마지막으로 활성 기간을 읽은 시각). 아직 수령하지 않은 기간은 이 로그에 남지 않으므로 '받을 쿠폰이 있는지'는 읽을 수 없습니다"}},
+    {"cl_note_zc_empty", {"本机读到的每一条响应里清单都是空的 —— 从没读到过它有额度",
+                          "Every response read on this machine lists no plan — a grant has never been seen here",
+                          "Jede lokal gelesene Antwort listet keinen Plan — hier wurde nie ein Gutschein gesehen",
+                           "Ogni risposta letta su questa macchina non elenca piani: qui non si è mai visto un premio",
+                          "このマシンで読んだ応答はすべてリストが空です。額度のある応答は一度もありません",
+                          "이 기기에서 읽은 응답은 모두 목록이 비어 있습니다. 한도가 부여된 읽기를 한 번도 못 했습니다"}},
+    {"cl_note_zc_other", {"清单里有期，但状态不是本机见过的 active —— 不据此判它现在可领",
+                          "A plan is listed, but its status isn't the 'active' seen on this machine — not counted as claimable",
+                          "Ein Plan ist gelistet, aber sein Status ist nicht das hier bekannte 'active' — nicht als ausbuchbar gewertet",
+                          "Un piano è elencato ma il suo stato non è l''active' visto su questa macchina: non lo contiamo come riscuotibile",
+                          "リストに企画がありますが状態はこのマシンで確認済みの active ではないため、受取可とは判定しません",
+                          "목록에 계획이 있지만 상태가 이 기기에서 확인된 active가 아니므로 수령 가능으로 판단하지 않습니다"}},
     // 券到账横幅的三段：标题的状态词、正文（有数字／没数字）、落点说明。
     // 与会话横幅同一做法：alert 层不给文案，六种语言都在这张表里现做。
     {"claim_word",     {"有券可领", "Reward ready", "Gutschein verfügbar", "Premio disponibile",
@@ -2229,6 +2259,11 @@ static int g_shown[G_N];      // 上一帧每组真摆了几条（翻页步长�
 // 所以每帧把这组账写成一行诊断，配合 AGENTPING_HITS 的命中区表一起读。
 static char g_fold_diag[256];
 static std::map<std::string, double> g_later;    // 「稍后提醒」：会话键 → 恢复时刻（epoch 秒）
+// 「看过」按会话键记，落盘 seen.txt。原来是一条时间水位线（seen_until）：点一条就把水位
+// 推到它的完成时刻，同批完成、还没看过的其它会话被一起抹掉——2026-10-31 用户实测
+// 「一个 agent 多条待处理，点一条其余全没了」。水位线只留作升级前那批存量的起点。
+static std::set<std::string> g_seen;
+static std::vector<std::string> g_seen_order;
 
 /// Tailwind 的 transition-* 默认曲线 cubic-bezier(.4,0,.2,1) + duration-150。
 static const float kEaseTail[4] = { 0.4f, 0.0f, 0.2f, 1.0f };
@@ -3028,16 +3063,30 @@ static void DrainBannerClick() {
 
 /// 就地翻这一行的状态：下一轮重扫（3s）才会走 RebuildPanel，点下去必须马上看见反应。
 static int GroupOf(int st);    // 定义在绘制段；这里前置声明给 MarkSeen 用
-/// 看过一条完成会话（双击跳走或 ⓘ 进详情）：把已读水位线推进到它的完成时刻并落盘。
+/// 看过一条完成会话（双击跳走或 ⓘ 进详情）：把这一条记进「看过」账本并落盘。
 /// 不落盘的话重启就把今天全部点回未读，那比没有点还吵。
+/// 记的是会话键，不是时间水位线：水位线一推，同批完成、还没看过的其它会话会被一起
+/// 抹掉（2026-10-31 用户实测「点一条其余全没了」），与「点哪个哪个消失」相反。
 static void MarkSeen(const UIRow& r) {
     if (GroupOf(r.state) != G_DONE) return;
-    const long long t = (long long)r.at;
-    if (t <= g_cfg.seen_until) return;
-    g_cfg.seen_until = t;
+    if ((long long)r.at <= g_cfg.seen_until) return;    // 升级前那批存量：本来就算看过
+    if (!g_seen.insert(r.key).second) return;           // 已经记过：不重复落盘
+    g_seen_order.push_back(r.key);
+    // 内存里这一条立刻撤下「未看」：活扫描要到下一轮（≤3s）才重算，样例轮根本不重算，
+    // 不当场改就会出现「账本记了、屏上还在」的半拍。只改被点的那一条。
+    for (auto& row : g_pd.rows)
+        if (row.key == r.key) row.unseen = false;
+    if (g_pd.unseen_n > 0) g_pd.unseen_n--;
     std::string err;
-    if (!ap::save_alert_cfg(g_cfg, &err))
-        fprintf(stderr, "[已读] 水位线没写下去：%s\n", err.c_str());
+    if (g_seen_order.size() > 4000) {                   // 键会随日子涨：只留最近 2000，整份重写
+        g_seen_order.erase(g_seen_order.begin(), g_seen_order.end() - 2000);
+        g_seen = std::set<std::string>(g_seen_order.begin(), g_seen_order.end());
+        if (!ap::save_seen(g_seen_order, &err))
+            fprintf(stderr, "[已读] 账本压缩没写下去：%s\n", err.c_str());
+        return;
+    }
+    if (!ap::append_seen(r.key, &err))
+        fprintf(stderr, "[已读] 没写下去：%s\n", err.c_str());
 }
 
 static void MarkRow(const Hit& h, bool ack, bool later) {
@@ -4982,7 +5031,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.children = se.children;
             row.at = se.last_activity;
             row.unseen = GroupOf(row.state) == G_DONE &&
-                         (long long)row.at > g_cfg.seen_until;
+                         (long long)row.at > g_cfg.seen_until && g_seen.count(row.key) == 0;
             if (se.state == ap::ST_FAILED) row.detail = se.error_text;   // 出错才有原文可引
             pd.rows.push_back(std::move(row));
             shown++;
@@ -5297,12 +5346,33 @@ static int WantedWindowH() {
 /// r20 六屏同宽：都是 340pt 的浮层（设置也是同一张卡，不再单独 420）。
 static int WantedWindowW() { return kPanelW; }
 
+static double g_focus_hide_at = -10;    // 上一次「失焦自动收」的时刻：托盘那一击要认它
+
+/// 切到别的 App 就收面板。它是浮层不是常驻窗口：留在最上层只会盖住别人（2026-10-31
+/// 用户实测「点其他软件时它依然展示在最上层，只有点菜单图标才收回」）。
+/// macOS 走应用退前台通知（点自己菜单栏那颗不算退前台，不会误伤开关那一击）；
+/// X11 没有这条通知，主循环挂 GLFW 焦点回调顶，代价是点托盘会先失焦一次，靠
+/// g_focus_hide_at 把那紧随其后的一击按「收」处理。横幅不在这条里：它拍板过不点不收。
+static void HideOnFocusLoss() {
+    if (g_shot_to || g_bannerActive || !g_panelVisible) return;
+    HidePanel();
+    g_focus_hide_at = glfwGetTime();
+    printf("[面板] 切到别的 App，自动收起\n");
+    fflush(stdout);
+}
+
 static void TogglePanel(void*) {
     if (!g_win) return;
     // 出图轮不许收面板：收了主循环就跳过 HandleInput，AGENTPING_CLICK 序列冻在半路，
     // 窗口永远等不到那张 PPM。真点菜单栏那颗只打一行账，面板留在屏上直到拍完自收。
     if (g_shot_to) {
         printf("[面板] 出图轮忽略状态项切换\n");
+        fflush(stdout);
+        return;
+    }
+    // X11：点托盘先让窗口失焦 → 自动收已经发生过；这一击的意图是「收」，不是再展开。
+    if (!g_panelVisible && glfwGetTime() - g_focus_hide_at < 0.4) {
+        printf("[面板] 状态项这一击紧跟失焦自动收，按「收」处理\n");
         fflush(stdout);
         return;
     }
@@ -5402,7 +5472,9 @@ static void LoadProbeFixture() {
     for (const auto& d : kDone) {
         UIRow* r2 = row(ap::ST_RESTING, d.proj, d.agent, d.aid, d.sess, at(d.hh, d.mm), d.turns);
         r2->at = midnight + (d.hh * 3600.0 + d.mm * 60.0);   // 完成时刻：未读点按它对水位线
-        r2->unseen = (d.hh >= 19);                           // 演示：19 点后的算「还没看过」
+        // 样例也要认已读账本：MarkSeen 落的是这些键，重装载却把它们抹回「未看」，
+        // 「点哪条哪条消失」在样例轮就永远拍不出来（2026-10-31 取证发现）。
+        r2->unseen = (d.hh >= 19) && g_seen.count(r2->key) == 0;
     }
 
     // 行级用量也各留缺口：Qoder 只有 Credits（JSONL 没有 token 明细 → has_tokens 假），
@@ -5541,12 +5613,18 @@ static void LoadProbeFixture() {
         q.source = "~/Library/Application Support/com.qoder.app.stable/logs/<newest>/main.log";
         pd.claims.push_back(q);
 
-        // ZCode：采集层恒 known=false，所以卡上只有状态胶囊和出处那一行，没有面值也没有时间轨。
+        // ZCode：2026-10-30 起采集层能从它 app 日志的 billing/balance 响应读出本期额度，
+        // 所以这张稿要按「有面值、有真作废时刻」的形状拍——面值单位是 tokens，不是 Credits。
         ap::Claim z;
         z.vendor = "zcode"; z.name = "ZCode";
+        z.known = true; z.done = true;
+        z.credit = 300000000; z.credit_known = true; z.credit_unit = "tokens";
+        z.appears_at = now - 5 * 3600.0;
+        z.expires_at = now + 14 * 3600.0;
+        z.seen_at = now - 60.0;
         z.log_mtime = now - 20 * 60.0;
-        z.source = "~/.zcode/cli/log/zcode-2026-10-30.jsonl";
-        z.note_key = "cl_note_zc_none";
+        z.source = "~/.zcode/v2/logs/2026-10-30.log";
+        z.note_key = "cl_note_zc_done";
         pd.claims.push_back(z);
         g_cfg.last_claim_at = now - 2 * 3600.0;   // 屏上那行「上次提醒 2h 前」
     }
@@ -5686,6 +5764,9 @@ int main(int argc, char** argv) {
     // 设置盘的八个开关在窗口建起来之前就要落进 g_cfg：常驻置顶是建窗 hint，
     // 先开窗再改会让他在启动瞬间看见一次「本该置顶却没置顶」的闪。
     g_cfg = ap::load_alert_cfg();
+    // 「看过」账本启动一次读进内存：MarkSeen 只追加，不在每帧里读盘。
+    for (const auto& k : ap::load_seen())
+        if (g_seen.insert(k).second) g_seen_order.push_back(k);
     // 设置屏改过语言就得活过重启：HIT_LANG 把 lang=0..5 写进 settings.txt，但这一版
     // 原来只有「写」没有「读」——他选德语、重启，界面又回中文（2026-10-30 实拍发现）。
     // 优先级是 探测 < settings.txt < AGENTPING_LANG：环境变量是取证口，必须能盖过他
@@ -5933,6 +6014,14 @@ int main(int argc, char** argv) {
         glfwSwapInterval(1);
         glfwShowWindow(win);
         sb_float_window();
+        // 切到别的 App 就收面板：macOS 走应用退前台通知；X11 没有这条通知，挂窗口焦点
+        // 回调顶（点自己托盘会先失焦一次，TogglePanel 里按 0.4s 窗口把那一击认作「收」）。
+        ap_set_app_deactivate_cb(HideOnFocusLoss);
+#ifndef __APPLE__
+        glfwSetWindowFocusCallback(win, [](GLFWwindow*, int focused) {
+            if (!focused) HideOnFocusLoss();
+        });
+#endif
         // AGENTPING_SHOT=出图路径：把**真窗口**的帧缓冲回读出来存 PPM，然后自己收摊。
         // 为什么需要这一条：从命令行截屏（screencapture -x / -R）在本机只会得到一张纯黑图——
         // 驱动器没有「屏幕录制」授权，实测 3840x2160 全画面只有 1 种颜色 (0,0,0)。
@@ -6125,14 +6214,18 @@ int main(int argc, char** argv) {
                 // 只靠命中区判不够——布局刚换帧时命中区还是上一帧的，正好漏掉刚点的那颗；
                 // 所以再按几何划一条死线（图标簇宽 90pt 贴右沿）。
                 const bool inHead = (mp.y <= 54.0f) && mp.x < io.DisplaySize.x - 90.0f;
-                // 这一按若是把窗口叫醒的那一下，只做激活，不当作拖拽起点。
-                const bool justActivated = !glfwGetWindowAttrib(win, GLFW_FOCUSED);
-                // 全局光标点＝窗口原点＋视口内鼠标，两个数同一帧取，天然同源。
-                // 别改用 CGEventGetLocation：它和窗口位置不同步，差一拍就会按「差多少」把窗口弹走
-                // （2026-10-28 实拍：单击表头，面板自己挪了 72pt）。窗口一动，视口内鼠标反向补齐，
-                // 这个点保持不变，所以没有反馈回路。
-                const ImVec2 gCur((float)wx0 + mp.x, (float)wy0 + mp.y);
-                if (down && !dragArm && inHead && !onHit && !justActivated) {
+                // 全局光标点优先走平台的全局读数：io.MousePos 只在指针位于窗口内时才更新，
+                // 按住表头快速上拖、指针一出顶边就冻住，窗口跟着停摆再追——就是用户说的
+                // 「不能稳定随鼠标移动，还有点飘」。全局点不掺窗口位置，算差值没有反馈回路；
+                // 按下那一帧记基准，常数偏移（坐标系翻转的残余）自己消掉。平台拿不到才退回
+                // 「窗口原点＋视口内鼠标」（X11 那一档）。
+                // 叫醒这一下也允许起拖：面板从菜单栏打开时 App 尚未激活，头一次按表头就是
+                // 激活那一按；以前跳过它，第一次拖永远没反应，得再按一次（2026-10-31 实测）。
+                double gx = 0, gy = 0;
+                const ImVec2 gCur = ap_global_cursor(&gx, &gy)
+                                        ? ImVec2((float)gx, (float)gy)
+                                        : ImVec2((float)wx0 + mp.x, (float)wy0 + mp.y);
+                if (down && !dragArm && inHead && !onHit) {
                     dragArm = true;
                     dragMoved = false;
                     dragWin0 = ImVec2((float)wx0, (float)wy0);

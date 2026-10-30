@@ -105,7 +105,7 @@ CJK 不是后贴的补丁。
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录（只读） |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`、`~/.workbuddy/projects` | 会话行、`providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db`（认 `$XDG_DATA_HOME`） | `session` 的标题/cwd/`time_updated`、`part` 的 `step-finish` token 之和与 `tool.state.status`（只读） |
-| 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/cli/log/zcode-<日期>.jsonl` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 只取「今天有没有这份日志」——它本机不写权益状态 |
+| 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/v2/logs/<日期>.log` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 的 `billing/balance` 响应——本期计划、`grant_units` 面值与作废时刻，由 ZCode 自己的 App 落盘，CLI 侧没有 |
 | Hook 收件箱 | `~/Library/Application Support/AgentPing/hooks/*.json` | 待回答原文与选项——由 Agent Ping 应你要求装进去的那个 `hook.sh` 写；面板自身从不往这个目录写 |
 
 Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…`（收件箱，取不到
@@ -367,8 +367,10 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
   池里就没有这条——那是 ZCode 侧的边界。
 - **未读点不与工具联动。** ZCode 的已读状态存在它 renderer 的内存里，不落盘，所以在
   ZCode 里读完不会让这里的点消失。这个点的含义是「没通过本面板打开过」。
-- **ZCode 的权益状态读不到。** 它把状态留在自己的服务端响应里，本机日志零信号，所以那张
-  卡只会写「状态未知」。这是这一路的上限，不是加载失败。
+- **ZCode 的权益卡只能在领完之后确认这一期。** 状态来自它 App 写进 `~/.zcode/v2/logs/<日期>.log`
+  的 `billing/balance` 响应；还没领的那一期不会出现在这份日志里，所以面板不可能提前预告——
+  那时卡上写的是「本机没有活期」，这句只关于本机，不等于「那家没有券」。面值取该响应的
+  `grant_units`（本期发的总额，不是剩余额度），作废时刻取同一条 `ends_at`，本机没有日志记录「领取」这个动作。
 - **权益读数只在各家自己刷新时才变。** WorkBuddy 的 `[Checkin]` 只在它窗口聚焦时刷新；
   面板不催它，只在卡上如实写「本机文件 X 前」，让你分得清「我们没刷」和「那家没写」。
 - **Linux 状态项很年轻。** 带 `libdbus-1` 时构建出的是真 StatusNotifierItem（三数标签、

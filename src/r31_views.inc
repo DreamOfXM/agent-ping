@@ -2060,7 +2060,9 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
         R31Mid(dl, nx, y + 19.5f, R31Agent(c.vendor, loc), loc, k31Fg, T_S12B);
         const char* st = !c.known ? T("r_claim_unknown", loc)
                      : c.ready ? T("r_claim_ready", loc)
-                     : c.done ? T("r_claim_done", loc) : T("r_claim_none", loc);
+                     : c.done ? T("r_claim_done", loc)
+                     : c.none_reported ? T("r_claim_none", loc)
+                                       : T("r_claim_nolocal", loc);
         const ImU32 sfg = c.ready ? k31Fg : !c.known ? k31Muted : k31Sec;
         const ImU32 sbg = c.ready ? WithA(k31Blue, 46) : k31Badge;
         const float pw = TextWidth(st, loc, T_S10B) + 18.0f;
@@ -2106,14 +2108,20 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
         dl->AddLine(ImVec2(px, cy + 0.5f), ImVec2(x + w - 14.0f, cy + 0.5f), k31LineSoft, 1.0f);
         const float top = cy + 9.0f;
         if (c.credit_known) {
-            char vb[24];
-            snprintf(vb, sizeof vb, "%ld", c.credit);
+            // 面值这一格：≥1M 走 compact —— 300000000 那串零在 40px 上会顶穿卡片右边，
+            // 而且 ZCode 自己那张 Weekend Banner 写的就是 300M 这个量级。
+            const std::string vtxt = c.credit >= 1000000 ? R31Compact((double)c.credit)
+                                                         : std::to_string(c.credit);
+            // 单位不许跟着 WorkBuddy 那格写死成 Credits：ZCode 的 grant_units 是 token，
+            // 标成 Credits 就是把读数说成另一种钱。采集层给空时才回落到 Credits。
+            const std::string ulab = c.credit_unit.empty() ? std::string("Credits")
+                                                           : c.credit_unit;
             const ImU32 ncol = c.ready ? k31Blue : k31Sec;
-            const float nw = TextWidth(vb, loc, T_N40, -1.4f);
+            const float nw = TextWidth(vtxt, loc, T_N40, -1.4f);
             const float ntop = TextTop(top, 44.0f, T_N40, loc);
-            DrawTextRun(dl, px, ntop, vb, loc, ncol, T_N40, -1.4f);
+            DrawTextRun(dl, px, ntop, vtxt, loc, ncol, T_N40, -1.4f);
             const float base = ntop + AscentPx(T_N40, RefFace(T_N40, loc));
-            DrawTextRun(dl, px + nw + 6.0f, base - AscentPx(T_S11B, RefFace(T_S11B, loc)), "Credits",
+            DrawTextRun(dl, px + nw + 6.0f, base - AscentPx(T_S11B, RefFace(T_S11B, loc)), ulab,
                         loc, c.ready ? k31Muted : k31Faint, T_S11B, 0.2f);
         }
         if (c.streak_known) {
