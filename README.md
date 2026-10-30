@@ -17,6 +17,8 @@ rewards screen — in front of you. No server, no account, no telemetry: the bin
 makes no network calls (checked with `nm -u`, see
 [Privacy](#privacy--exactly-what-it-reads)).
 
+![Agent Ping in motion: the needs-you queue, a session's verbatim question, and the jump back](docs/agent-ping-teaser.gif)
+
 ![01 · One screen to see who is waiting for you: overview on the left, session detail on the right; the numbered markers match the legend](docs/fig-01-queue-en.png)
 
 *All three figures in this README are rendered offscreen by the binary this repo

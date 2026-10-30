@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Ping — know which AI coding agent needs you</title>
+<meta name="description" content="A menu-bar panel for macOS and Linux that reads the local logs of Claude Code, Codex, OpenCode and more, and tells you which session is waiting for you. Zero network calls.">
+<meta property="og:title" content="Agent Ping">
+<meta property="og:description" content="Know which AI coding agent needs you — from the menu bar. Zero network calls, verifiable with nm -u.">
+<meta property="og:image" content="fig-01-queue-en.png">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --bg: #0a0c0f; --panel: #12151a; --line: #232830;
+    --text: #e8eaee; --dim: #9aa3ad; --accent: #5b8dee;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text);
+         font: 16px/1.6 -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 72px 0 40px; text-align: center; }
+  header img.icon { width: 96px; height: 96px; border-radius: 22px; }
+  h1 { font-size: 44px; line-height: 1.15; margin: 24px 0 12px; letter-spacing: -0.5px; }
+  .tag { color: var(--dim); font-size: 19px; max-width: 640px; margin: 0 auto; }
+  .cta { margin: 32px 0 8px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 26px; border-radius: 10px;
+         text-decoration: none; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.ghost { border: 1px solid var(--line); color: var(--text); }
+  .install { margin: 18px auto 0; background: var(--panel); border: 1px solid var(--line);
+             border-radius: 10px; padding: 14px 20px; font-family: ui-monospace, Menlo, monospace;
+             font-size: 14px; color: #b9c2cc; max-width: 640px; white-space: pre-wrap; }
+  .media { margin: 48px 0; }
+  .media img, .media video { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 16px; margin: 40px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .card h3 { font-size: 17px; margin-bottom: 8px; }
+  .card p { color: var(--dim); font-size: 14.5px; }
+  .privacy { border: 1px solid var(--line); border-radius: 14px; padding: 28px;
+             background: linear-gradient(180deg, #10141a, #0c0f13); margin: 48px 0; }
+  .privacy h2 { font-size: 24px; margin-bottom: 10px; }
+  .privacy p { color: var(--dim); }
+  .privacy code { background: #1a1f26; padding: 2px 7px; border-radius: 6px;
+                  font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #cfd6de; }
+  h2.sec { font-size: 26px; margin: 56px 0 8px; }
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  .shots img { width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+  footer { padding: 56px 0 72px; color: var(--dim); font-size: 14px; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+  @media (max-width: 720px) { h1 { font-size: 32px; } .shots { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img class="icon" src="../assets/icon-1024.png" alt="Agent Ping icon">
+    <h1>Know which AI coding agent<br>needs you — from the menu bar</h1>
+    <p class="tag">Agent Ping reads the logs and local databases that Claude Code, Codex,
+      OpenCode, Qoder CLI, ZCode and WorkBuddy already write on your machine, and shows who is
+      running, who errored, and who is waiting for your answer. Then it alerts you, and jumps
+      you back into that session.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/DreamOfXM/agent-ping">View on GitHub</a>
+      <a class="btn ghost" href="https://github.com/DreamOfXM/agent-ping#install-with-homebrew-macos-13">Install</a>
+    </div>
+    <div class="install">brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew install dreamofxm/agent-ping/agent-ping</div>
+  </header>
+
+  <div class="media">
+    <img src="agent-ping-teaser.gif" alt="Agent Ping panel: overview queue, session detail, and jump-back flow">
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>The "needs you" queue</h3>
+      <p>Sessions waiting on a permission, an answer, or stopped by an error — sorted by how
+      long they have waited. The menu-bar icon carries the counts, so you know before you click.</p></div>
+    <div class="card"><h3>Alerts that land</h3>
+      <p>A system banner and a chime while you are not looking. Open it and you are one
+      double-click away from the session — via URL scheme, AppleScript, or the tool's own
+      command palette.</p></div>
+    <div class="card"><h3>Quota, right now</h3>
+      <p>Today's token usage and each tool's quota window ("66% left, resets in 2h16m"), read
+      from local logs. Fields a tool does not write are left undrawn, never filled with zero.</p></div>
+    <div class="card"><h3>Six tools, one panel</h3>
+      <p>Qoder CLI, Claude Code, Codex, ZCode, WorkBuddy and OpenCode. One rail filters them;
+      every view below is the same scan round.</p></div>
+    <div class="card"><h3>macOS and Linux</h3>
+      <p>NSStatusItem on macOS, StatusNotifierItem over D-Bus on Linux. One C++17 code path
+      behind a platform shim. Interface in six languages.</p></div>
+    <div class="card"><h3>Honest by design</h3>
+      <p>Not a cost dashboard, not an auto-claimer. The README lists every number's definition
+      and every known limitation.</p></div>
+  </div>
+
+  <div class="privacy">
+    <h2>Zero network calls — verifiable, not promised</h2>
+    <p>The built binary has no undefined reference to <code>connect</code>, <code>sendto</code>,
+    <code>getaddrinfo</code> or <code>socket</code>; check it yourself with <code>nm -u</code>.
+    No server, no account, no telemetry. The README lists every file path it reads and every
+    field it takes from it.</p>
+  </div>
+
+  <h2 class="sec">Screens</h2>
+  <div class="shots">
+    <img src="fig-01-queue-en.png" alt="Overview and session detail">
+    <img src="fig-02-quota-en.png" alt="Usage, limits and rewards">
+  </div>
+
+  <footer>
+    Apache-2.0 · C++17 · Dear ImGui ·
+    <a href="https://github.com/DreamOfXM/agent-ping">github.com/DreamOfXM/agent-ping</a>
+  </footer>
+</div>
+</body>
+</html>
