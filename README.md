@@ -255,6 +255,14 @@ brew install agent-ping
 agent-ping
 ```
 
+> If `brew install` stops with `Error: Xcode alone is not sufficient on …`, that
+> is Homebrew's own gate on macOS 26, not this project's requirement: it wants
+> the Command Line Tools present before it installs anything from any tap. Run
+> `xcode-select --install` and retry. If you would rather not pull those down,
+> the [Build](#build) section compiles the same source with the clang that ships
+> inside Xcode. Linux never goes through this path either — its apt packages are
+> listed under [Build](#build).
+
 `brew trust` is needed once: this is a third-party tap, and Homebrew refuses to
 load a formula from one by its short name until you say so. Without it only the
 fully-qualified `brew install dreamofxm/agent-ping/agent-ping` works, and

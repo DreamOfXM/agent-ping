@@ -219,6 +219,12 @@ brew install agent-ping
 agent-ping
 ```
 
+> 如果 `brew install` 直接停在 `Error: Xcode alone is not sufficient on …`：那是
+> Homebrew 自己在 macOS 26 上的准入检查，不是本项目的要求 —— 它要求系统里存在命令行
+> 工具，才肯装任何 tap 里的任何 formula。跑一次 `xcode-select --install` 再重试；
+> 不想下这一份的话，下面「构建」一节用 Xcode 自带的 clang 就能编出同样的东西。
+> Linux 根本不走这条路，它要的 apt 包也在「构建」一节里。
+
 `brew trust` 只需跑一次：这是第三方 tap，Homebrew 默认不按短名加载它的 formula。
 不跑这一句的话，只有全名的 `brew install dreamofxm/agent-ping/agent-ping` 能用，
 `brew upgrade agent-ping` 会被拒绝。
