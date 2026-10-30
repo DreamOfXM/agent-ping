@@ -1,19 +1,48 @@
 name: Build macOS app and attach to release
 
 on:
-  release:
-    types: [published]
+  # 发版的正式入口：推一个 v* 的 tag 上来，这里就把两种架构的包编出来、建好 Release、挂上附件。
+  # 之所以让 tag 推送来驱动，是因为它只需要仓库自己的 GITHUB_TOKEN（见下方 permissions），
+  # 不依赖任何人手里的个人令牌 —— 谁打 tag 谁发版，权限边界最干净。
+  push:
+    tags:
+      - "v*"
+  # 手动补跑：Release 已经存在（比如附件传丢了）时用。
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach the build to (e.g. v0.1.2)"
+        description: "Release tag to attach the build to (e.g. v0.1.3)"
         required: true
 
 permissions:
   contents: write
 
+env:
+  # 三种触发方式取 tag 的写法不同：tag 推送用 ref_name，手动跑用 inputs.tag。
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
+  # Release 必须先存在，两个架构才能往上挂附件。单独一个 job 做，避免 arm64 和 x86_64
+  # 两个 runner 抢着建 Release 撞车。
+  ensure-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release if it is missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过创建"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Agent Ping ${TAG}" \
+              --notes "安装方式与本次变更见 https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/README.zh-CN.md"
+          fi
+          # 附件由下面的 build job 传；这里只保证壳子在。
+
   build-macos:
+    needs: ensure-release
     # 两个架构各出一份，cask 才能对 Apple 芯片和 Intel 都成立。
     #
     # macos-26        → arm64，标准 runner，公开仓库免费
@@ -30,12 +59,8 @@ jobs:
           - runner: macos-26-intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
-    env:
-      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
       - name: Install build dependencies
         env:
@@ -48,6 +73,8 @@ jobs:
           # hour on four cores. Only brew what is actually missing.
           command -v cmake >/dev/null || brew install cmake
           command -v ninja >/dev/null || brew install ninja
+          # freetype 的 keg 里同时装出 .a，CMakeLists 会优先静态链接它和 glfw，
+          # 这样打出来的 .app 不依赖 Homebrew 路径 —— 用户机器上没装 glfw 也能开。
           brew install glfw freetype
 
       - name: Build
@@ -57,10 +84,21 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
           cmake --build build --target pin_imgui_shell --parallel
 
-      - name: Bundle app
+      - name: Verify the bundle is self-contained
+        # 这一步是防回归：只要有人把静态链接改回动态，产物就会重新引用
+        # /opt/homebrew/opt/glfw/lib/libglfw.3.dylib 这类绝对路径，而那个文件只存在于
+        # 开发者自己的机器上 —— 用户下载后双击是 dyld: Library not loaded，界面根本不出现。
+        # 这种「编得过、装得上、打不开」的坏包不该流出去，所以在 CI 里直接判死。
         run: |
           sh Tools/make_bundle.sh
           mv "build/AgentPing-cpp.app" "build/Agent Ping.app"
+          BIN="build/Agent Ping.app/Contents/MacOS/AgentPing"
+          echo "== 非系统依赖（应当为空）=="
+          if otool -L "$BIN" | tail -n +2 | grep -vE '/usr/lib/|/System/'; then
+            echo "::error::产物仍在引用 Homebrew 里的动态库，换台机器就会打不开"
+            exit 1
+          fi
+          echo "干净：只依赖系统库"
 
       - name: Package
         run: |
@@ -77,4 +115,5 @@ jobs:
         run: |
           gh release upload "$TAG" \
             "Agent-Ping-${TAG}-macos-${{ matrix.arch }}.zip" \
-            "Agent-Ping-macos-${{ matrix.arch }}.zip" --clobber
+            "Agent-Ping-macos-${{ matrix.arch }}.zip" \
+            --repo "$GITHUB_REPOSITORY" --clobber
