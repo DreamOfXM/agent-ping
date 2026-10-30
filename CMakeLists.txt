@@ -102,7 +102,7 @@ add_executable(pin_imgui_shell
   ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
-target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1")
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.1")
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})
@@ -142,3 +142,48 @@ add_executable(claims_probe
 )
 target_include_directories(claims_probe PRIVATE src)
 target_link_libraries(claims_probe Threads::Threads)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 安装规则：解决「装完之后去哪儿找它」。
+#
+# macOS 不走这里 —— 那边由 Tools/make_bundle.sh 打成 Agent Ping.app，formula 自己
+# 拼包（brew 的构建沙箱写不了 /Applications）。这里服务 Linux / BSD 的标准布局：
+#
+#   <prefix>/bin/agent-ping                                  可执行文件
+#   <prefix>/share/agent-ping/fonts/                         内嵌字体
+#   <prefix>/share/agent-ping/sni-theme/                     托盘图标主题
+#   <prefix>/share/applications/agent-ping.desktop           应用菜单入口
+#   <prefix>/share/icons/hicolor/<size>/apps/agent-ping.png  菜单里那张图
+#
+# 资源位置由 src/pin_imgui_shell.cpp 的 BundleResources() 与
+# src/platform/statusbar_sni.cpp 的 FindThemeDir() 按可执行文件的相对位置解析，
+# 所以 bin/ 与 share/ 的相对关系不要改。
+# ─────────────────────────────────────────────────────────────────────────────
+include(GNUInstallDirs)
+
+# 装了却不知道去哪找，等于没装：Linux 用户在应用菜单里得能搜到一个有名字、有图标的条目，
+# 而不是一个叫 pin_imgui_shell 的裸二进制。这个开关只用于在非 Linux 上验证路径拼得对。
+option(AGENTPING_INSTALL_DESKTOP
+       "Install the .desktop entry and hicolor icons (default: on for Linux)" OFF)
+if(UNIX AND NOT APPLE)
+  set(AGENTPING_INSTALL_DESKTOP ON)
+endif()
+
+install(PROGRAMS $<TARGET_FILE:pin_imgui_shell>
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        RENAME agent-ping)
+
+if(UNIX AND AGENTPING_INSTALL_DESKTOP)
+  install(DIRECTORY assets/sni-theme
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/agent-ping")
+  install(DIRECTORY fonts
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/agent-ping")
+  install(FILES assets/agent-ping.desktop
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+  install(FILES assets/desktop-icons/agent-ping-256.png
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
+          RENAME agent-ping.png)
+  install(FILES assets/desktop-icons/agent-ping-512.png
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps"
+          RENAME agent-ping.png)
+endif()

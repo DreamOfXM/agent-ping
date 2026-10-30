@@ -43,7 +43,10 @@ static bool g_host_seen = false;   // 注册成功过没有——只报一次状
 static std::string g_icon_theme;   // 空＝只发 IconPixmap；非名＝同时发 IconName + IconThemePath
 static bool g_no_pixmap = false;   // 取证开关：只走名字那条路，验证宿主真能按名字取到图
 
-/// 找可执行文件旁边的图标主题目录（Tools/make_sni_theme.py 铺的那个）。
+/// 找图标主题目录（Tools/make_sni_theme.py 铺的那个）。三处按顺序试：
+///   ① 可执行文件旁边（打包好的目录里）
+///   ② <prefix>/share/agent-ping/sni-theme（cmake --install 之后的布局）
+///   ③ 仓库里的 assets/sni-theme（源码树里直接跑）
 /// 走 /proc/self/exe 而不是 argv[0]：从桌面启动器里拉起来时 argv[0] 可以没有目录段。
 static std::string FindThemeDir() {
     const char* env = getenv("AGENTPING_SNI_THEME_DIR");
@@ -58,7 +61,8 @@ static std::string FindThemeDir() {
     std::string up = dir.substr(0, dir.rfind('/')); // 再上一层（仓库内跑时是 build-linux 的父目录）
     // 这里刻意不用 "<dir>/../assets/…" 这种写法：拼出来的字符串会原样发到总线上，
     // 宿主拿到的是一个带 .. 的路径（实测 gtk-sni-tray 能读，但没必要赌每个宿主都能）。
-    const std::string cand[] = {dir + "/sni-theme", up + "/assets/sni-theme"};
+    const std::string cand[] = {dir + "/sni-theme", up + "/share/agent-ping/sni-theme",
+                                up + "/assets/sni-theme"};
     for (const std::string& p : cand) {
         struct stat st;
         if (!stat(p.c_str(), &st) && S_ISDIR(st.st_mode)) return p;

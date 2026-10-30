@@ -1519,7 +1519,18 @@ static std::string BundleResources() {
     std::string bin_dir = exe.substr(0, slash);                  // .../Contents/MacOS
     size_t up = bin_dir.rfind('/');
     if (up == std::string::npos) return {};
-    return bin_dir.substr(0, up) + "/Resources";
+    std::string parent = bin_dir.substr(0, up);
+    // 资源可以是两种布局：
+    //   ① .app 包：<...>.app/Contents/MacOS/agent-ping → <...>.app/Contents/Resources
+    //   ② cmake --install：<prefix>/bin/agent-ping      → <prefix>/share/agent-ping
+    // 先试 ②，没有再退回 ①。两种判断都是纯路径存在性检查，所以不按平台分叉：
+    // .app 里根本没有 Contents/share/agent-ping，永远落到 ①，行为与从前一致。
+    const char* env = getenv("AGENTPING_RESOURCES");
+    if (env && *env) return env;
+    struct stat st;
+    const std::string shared = parent + "/share/agent-ping";
+    if (!stat(shared.c_str(), &st) && S_ISDIR(st.st_mode)) return shared;
+    return parent + "/Resources";
 }
 
 // 双击 .app 启动时没有参数：字体跟着包走
