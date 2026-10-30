@@ -6,47 +6,48 @@
 
 [English](README.md)
 
-一个菜单栏面板，告诉你**哪一个** AI 编码 Agent 的会话此刻需要你。
+同时开着 Qoder、Claude Code、Codex、ZCode、WorkBuddy、OpenCode 的时候，你缺的不是又一块
+看板，而是「现在轮到哪一条」。Agent Ping 是一个菜单栏面板：它读这些工具已经写在你机器上
+的日志与本地库，算出谁在跑、谁在排队、谁报错停了、谁正等着你回答、谁家又出了一张可领的券；
+然后在你没看屏幕的时候提醒你，并把对应的会话或权益屏递到你面前。没有服务端、没有账号、
+没有埋点：二进制里没有任何网络调用（用 `nm -u` 核过，见[隐私](#隐私它到底读什么)）。
 
-它读的就是那些 Agent 已经写在你机器上的日志与本地库，算出谁在跑、谁在排队、谁
-报错停了、谁正等着你回答；然后在你没看屏幕的时候提醒你去，并且一键把你送回那条
-会话。没有服务端、没有账号、没有埋点：二进制里没有任何网络调用（用 `nm -u` 核过，
-见[隐私](#隐私它到底读什么)）。
+![01 · 一屏看清谁在等你：左边总览，右边会话详情，圈里的编号对应图例](docs/fig-01-queue-zh.png)
 
-![总览屏：一条在跑的会话、账户额度预览、以及等你的那一列队列](docs/panel-overview-zh.png)
-
-*这几张图由本仓库编译出的二进制自己渲出来（`AGENTPING_FIXTURE=1 AGENTPING_VIEW=0`），
-所以不必相信摆拍。表头那颗「样例数据」是产品自己挂的标签：图里的数字不是某台真机器的。*
+*本文三张组图都由本仓库编译出的二进制离屏渲出来（`AGENTPING_FIXTURE=1`），不是摆拍。
+表头那颗「样例数据」是产品自己挂的标签：图里的数字不来自任何一台真机。*
 
 ## 它是什么，以及它故意不做什么
 
 **是**：一个实时状态监视器 + 一层提醒 + 一条回到那条会话的路。价值的单位是「一行」——
 一个会话、一个状态、一个跳转目标。从 v0.1 起它也显示账户额度与 token 用量，因为
-「我这 5 小时的窗口还剩多少」是一个*此刻*的问题，不是一个记账问题。
+「我这 5 小时的窗口还剩多少」是一个*此刻*的问题，不是一个记账问题。十月起它还把三家写在自己
+磁盘上的权益领取状态摆上屏——只读、不代领，点了只会把那家 App 带到前台。
 
-**不是**：成本看板。它从不把任何东西换算成金额、从不调账单接口、从不显示一个没从本地
-日志里读到的额度。某个来源没有那个字段，界面就不画那一格，而不是填个 `0`。时间窗只有
-一个：今天。
+**不是**：成本看板，也不是自动领取器。它从不把任何东西换算成金额、从不调账单接口、从不显示
+一个没从本地日志里读到的额度、从不替你点「领取」。某个来源没有那个字段，界面就不画那一格，
+而不是填个 `0`。时间窗只有一个：今天。
 
 ## 界面
 
-一个窗口九屏。顶上那条导轨按工具筛选，下面所有屏读的都是同一轮扫描。
+一个窗口十屏。顶上那条导轨按工具筛选，下面所有屏读的都是同一轮扫描——表里把设置、接线、
+授权并成一行。
 
 | 屏 | 回答什么 |
 |---|---|
-| **总览** | 一处在跑的卡（轮次、子对话、会话 Credits）、账户额度预览、「待处理」队列按等待最久优先，页脚是今日完成的时间轴 |
+| **总览** | 一处在跑的卡（轮次、子对话、会话 Credits）、账户额度速览、「待处理」队列按等待最久优先，页脚是今日完成的时间轴 |
 | **用量与额度** | 今日 token 总量，外加每个工具一张卡：5 小时／周余额、各自何时重置、这条读数多久没更新了 |
+| **权益** | 三家的权益卡：现在可领的排最前，面值、连续签到、作废倒计时都在卡上；拿不到的字段整格不画 |
 | **账户** | 单个工具：总用量、按小时分布、输入／输出／缓存读取／缓存写入、按模型拆分 |
 | **详情** | 待回答的原文与选项，或者失败的那条命令——点任意一行的 `ⓘ` 进来 |
 | **历史** | 完成记录，新的在前，一页 12 条，滚到底自动续页 |
 | **工具** | 这台机器上有哪些采集器在，各自扫出了什么 |
 | 设置 / 接线 / 授权 | 开关、hook 接线状态、辅助功能授权提示 |
 
-![用量与额度：今日总量，然后每个工具一张额度卡](docs/panel-usage-zh.png)
+![02 · 额度、用量、权益：左边用量与额度，右边权益](docs/fig-02-quota-zh.png)
 
-![单个工具的账户屏：四格 token 拆解与按小时分布](docs/panel-account-zh.png)
-
-![今日完成：那颗蓝点表示这条你还没通过本面板打开过](docs/panel-history-zh.png)
+*一张权益卡上有三层不同的时刻：读数时刻、源文件最后写入的时刻、页脚这次扫描的时刻。它们
+对不上时，「我们没刷」和「那家没写」是可以分开看的两个答案。*
 
 ## 跨平台
 
@@ -59,7 +60,7 @@
 | 状态项 | `NSStatusItem`，标签是三个数 | D-Bus 上的 StatusNotifierItem（要 `libdbus-1-dev`，没有就退成无托盘的占位实现） |
 | 横幅 | `UNUserNotificationCenter` | 起子进程跑 `notify-send`（来自 `libnotify-bin`） |
 | 提示音 | `afplay` 播系统音 | 按安装情况依次试 `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`，并匹配文件格式（`aplay` 只吃 `.wav`，`paplay` 就不试 wav） |
-| 登录时启动 | `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist` | `$XDG_CONFIG_HOME/autostart/agentping.desktop` |
+| 登录时启动 | `~/Library/LaunchAgents` 下的 plist | `$XDG_CONFIG_HOME/autostart` 下的条目 |
 | 跳进会话 | URL scheme、AppleScript，或驱动该工具自己的 ⌘K 面板 | 唤起 App 或打开记录里的工作目录，没有面板驱动 |
 | 界面语言 | 跟随系统，可覆盖 | 跟随 `$LC_*` / `$LANG`，可覆盖 |
 
@@ -82,8 +83,12 @@ CJK 不是后贴的补丁。
   才知道它到底生效没有。
 - **陈旧读数会退场。** 总览只预览 ≤10 分钟的额度读数，更旧的退到用量屏、带上
   「上次读数」的时间戳，而不是在首页常驻一颗红色「待更新」。
+- **权益只读，不代领。** 卡上只画各家写在自己库里的字段。点卡只会把那家 App 带到前台，
+  回执直说「领取仍要你自己在那家 App 里点 — 这一层不代领」；整张卡都是落点，但落点只到 App。
 
 ## 隐私——它到底读什么
+
+![03 · 六个来源，连它们扫出了什么都摊开：左边全部工具，右边今日完成](docs/fig-03-sources-zh.png)
 
 下面每一条都是读一个你自己的工具本来就拥有的文件。不上传任何东西。Agent Ping 只写
 表后列出的那几个文件，而两份配置文件只在**你**主动装 hook 时才碰（接线屏那个按钮，
@@ -97,6 +102,7 @@ CJK 不是后贴的补丁。
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录（只读） |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`、`~/.workbuddy/projects` | 会话行、`providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db`（认 `$XDG_DATA_HOME`） | `session` 的标题/cwd/`time_updated`、`part` 的 `step-finish` token 之和与 `tool.state.status`（只读） |
+| 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/cli/log/zcode-<日期>.jsonl` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 只取「今天有没有这份日志」——它本机不写权益状态 |
 | Hook 收件箱 | `~/Library/Application Support/AgentPing/hooks/*.json` | 待回答原文与选项——由 Agent Ping 应你要求装进去的那个 `hook.sh` 写；面板自身从不往这个目录写 |
 
 Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…`（收件箱，取不到
@@ -134,6 +140,7 @@ Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…
 | `⌄ 3 条子对话` | ZCode 里 `task_type='subagent_child'` 且按 `parent_id` 挂回这条会话的记录 | ZCode 不给子对话起名；标签是从派单原文推出来的，而 ⌘K 检索用的仍是原文 |
 | `今日总用量` | 今天每条会话的 `输入 + 输出 + 缓存读取 + 缓存写入` 求和（各工具自报的四项） | 这四项在不同工具之间**不是同一个意思**，见下面那段 |
 | `66%` / `2h 16m 后重置` | 从那个工具自己的日志里读出来的一档额度窗口（比如 Codex 运行时会写 `rate_limits` 事件） | 本地读取，绝不走账单接口；工具闲置时这条读数就是旧的，界面会说是旧的 |
+| 权益卡 `100 Credits`／`6 连续签到`／`5h 20m 后作废` | 各家自己写盘的面值、连续天数与本期失效时刻 | 哪家不写就整格不画；`现在可领`／`本期已领` 是它自己的状态位，不是我们推算的；只报「何时出现」的那家，时间轨画虚线 |
 | `按小时` 柱 | 该工具的 token 累加进本地 0–23 点共 24 格 | 没有 token 的那一格留空，不画成 0 |
 
 token 之所以相加，是因为用量屏就是要一个总量；但这个和混着口径：转录层加的是
@@ -155,6 +162,11 @@ WorkBuddy 的 `inputTokens` 本身已含缓存读，OpenCode 每轮写一条 `st
 | 1 | 横幅通道不可用，退到出声 | 记账 |
 | 2 | 两条通道都不通 | 记账，并在设置屏显示出来 |
 | 3 | 平台在时限内没回执 | **键被擦掉**——本轮不算发出，下轮可重试 |
+
+**权益到账**走同一套账本、另一个键（`claim:<vendor>:<期次>`）：某家从「没有」翻成
+「现在可领」时弹一张横幅，不点不收、点了才消失，点横幅落到权益屏。设置屏的「权益到账提醒」
+可以关掉这一路（默认开），免打扰也会压住它——两者都只压投递、不清账本，所以重新打开时
+不会把关闭期间攒下的期次一次涌出来。
 
 ## 接线（可选）
 
@@ -233,11 +245,11 @@ xvfb-run -a -s "-screen 0 1400x1100x24" ./build/pin_imgui_shell --dump
 `--dump` 就是对账工具：屏幕上每个数在它里面都有一行，所以面板和现实不一致时，你在
 终端就能判是谁错了。
 
-本文顶部的截图来自同一个二进制的离屏探针——它把六语并排渲成一张 PPM：
+本文的组图来自同一个二进制的离屏探针——它把六语并排渲成一张 PPM：
 
 ```sh
 AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.ppm
-# 屏号：0 总览 · 3 详情 · 5 历史 · 6 用量 · 7 账户 · 8 工具
+# 屏号：0 总览 · 3 详情 · 4 授权 · 5 历史 · 6 用量 · 7 账户 · 8 工具 · 9 权益
 ```
 
 ## 已知限制
@@ -252,6 +264,10 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
   池里就没有这条——那是 ZCode 侧的边界。
 - **未读点不与工具联动。** ZCode 的已读状态存在它 renderer 的内存里，不落盘，所以在
   ZCode 里读完不会让这里的点消失。这个点的含义是「没通过本面板打开过」。
+- **ZCode 的权益状态读不到。** 它把状态留在自己的服务端响应里，本机日志零信号，所以那张
+  卡只会写「状态未知」。这是这一路的上限，不是加载失败。
+- **权益读数只在各家自己刷新时才变。** WorkBuddy 的 `[Checkin]` 只在它窗口聚焦时刷新；
+  面板不催它，只在卡上如实写「本机文件 X 前」，让你分得清「我们没刷」和「那家没写」。
 - **Linux 状态项很年轻。** 带 `libdbus-1` 时构建出的是真 StatusNotifierItem（三数标签、
   悬停说明、左键显隐、右键菜单）。它在容器里对着一个第三方 SNI 宿主验过，**没有**在真的
   KDE/GNOME 桌面上跑过。没有 `libdbus-1-dev` 就退成一个无托盘图标的普通窗口。
@@ -266,7 +282,7 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
   拥有原生文本框，且面板是 accessory 窗口。⌘/Ctrl+F 与 Esc 已接线、入队那段代码看得见，
   但没有人对着真窗口敲过一次查询并看着它过滤。请把搜索当作未验证；如果它不吃键，那就是
   要报的缺口。
-- **设置、接线、授权三屏还是上一版版面。** 其余六屏已按新稿重做，这三屏会跟上。
+- **设置、接线、授权三屏还是上一版版面。** 其余屏已按新稿重做，这三屏会跟上。
 - **资源重置卡不实现。** 没有任何本地日志带它，所以这个字段不建、那一块也不画。
 - **hook 安装覆盖两个 CLI。** Claude Code 与 Qoder CLI 能从面板或 `Tools/install_hook.sh`
   接上；Codex 的 `notify` 槽只检测不写；ZCode、WorkBuddy、OpenCode 没有 hook 通道，
@@ -279,14 +295,14 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 ## 目录结构
 
 ```
-src/            面板、采集层、提醒层、平台垫片
-src/platform/   notify / open / statusbar / autostart / lang，按 OS 拆在 C 头文件后面
-vendor/imgui/   Dear ImGui 1.93.0 WIP，随仓库带一份，构建不需要网络
-fonts/          OFL 许可的界面字体，连同各自许可正文
-assets/         Info.plist、App 图标、菜单栏图标、SNI 主题
-docs/           本文那些截图，由离屏探针渲出
-Tools/          install_hook.sh、make_bundle.sh、各探针
-CMakeLists.txt  两个平台，含上面那份依赖清单
+src/                面板、采集层、提醒层、平台垫片
+src/platform/       notify / open / statusbar / autostart / lang，按 OS 拆开
+vendor/imgui/       Dear ImGui 1.93.0 WIP，随仓库带一份，构建不需要网络
+fonts/              OFL 许可的界面字体，连同各自许可正文
+assets/             Info.plist、App 图标、菜单栏图标、SNI 主题
+docs/               本文那些组图，由离屏探针渲出
+Tools/              install_hook.sh、make_bundle.sh、各探针
+CMakeLists.txt      两个平台，含上面那份依赖清单
 ```
 
 字体是随仓库提交而不是下载，为的是 clone 下来能离线构建；这就是仓库里有约 40 MB 字体

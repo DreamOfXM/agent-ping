@@ -6,53 +6,60 @@
 
 [中文](README.zh-CN.md)
 
-A menu-bar panel that tells you which AI coding-agent session needs you **right now**.
+When Qoder, Claude Code, Codex, ZCode, WorkBuddy and OpenCode are all open at once,
+what you are missing is not another dashboard — it is "which one is my turn". Agent
+Ping is a menu-bar panel: it reads the logs and local databases those tools already
+write on your machine, works out who is running, who is queued, who stopped with an
+error, who is sitting there waiting for an answer, and who just put up a claimable
+reward; then it alerts you while you are not looking, and puts the session — or the
+rewards screen — in front of you. No server, no account, no telemetry: the binary
+makes no network calls (checked with `nm -u`, see
+[Privacy](#privacy--exactly-what-it-reads)).
 
-It reads the logs and local databases your agents already write, works out who is
-running, who is queued, who stopped with an error and who is sitting there waiting
-for an answer — then alerts you when you are not looking, and gets you back to the
-right session in one gesture. No server, no account, no telemetry: the binary makes
-no network calls (checked with `nm -u`, see [Privacy](#privacy--exactly-what-it-reads)).
+![01 · One screen to see who is waiting for you: overview on the left, session detail on the right; the numbered markers match the legend](docs/fig-01-queue-en.png)
 
-![The overview panel: one running session, account quota, and the queue of sessions waiting for you](docs/panel-overview-en.png)
-
-*Rendered by the binary itself from its built-in fixture
-(`AGENTPING_FIXTURE=1 AGENTPING_VIEW=0`), so nobody has to trust a staged screenshot.
-The **Sample data** pill in the header is the product's own label: those numbers are
-not a real machine's.*
+*All three figures in this README are rendered offscreen by the binary this repo
+builds (`AGENTPING_FIXTURE=1`), not staged. The **Sample data** pill in the header is
+the product's own label: those numbers do not come from any real machine.*
 
 ## What it is, and what it deliberately is not
 
 **Is**: a live state monitor, an alert layer, and a way back into the session that
 pinged you. The unit of value is one row — one session, one state, one jump target.
 Since v0.1 it also shows per-account quota and token usage, because "how much of my
-5-hour window is left" is a *right now* question, not an accounting question.
+5-hour window is left" is a *right now* question, not an accounting question. Since
+October it also puts the reward-claim state three vendors write to their own disks on
+screen — read-only, never claiming: clicking a card only brings that vendor's app to
+the front.
 
-**Is not**: a cost dashboard. It never converts anything into a currency amount,
-never calls a billing API, and never shows a quota it could not read from a local
-log. Where a source has no field for something, the cell is not drawn — it is not
-filled with `0`. One time window only: today.
+**Is not**: a cost dashboard, and not an auto-claimer. It never converts anything into
+a currency amount, never calls a billing API, never shows a quota it could not read
+from a local log, and never presses *Claim* on your behalf. Where a source has no
+field for something, the cell is not drawn — it is not filled with `0`. One time
+window only: today.
 
 ## Screens
 
-Nine views in one window. The rail at the top filters by tool; everything below it
-is a view over the same scan round.
+Ten views in one window. The rail at the top filters by tool; everything below it is
+a view over the same scan round — the table folds Settings, Connect and Permission
+into one row.
 
 | View | What answers |
 |---|---|
 | **Overview** | one running card (turn, sub-agents, session credits), account quota preview, the `Needs you` queue longest-waiting first, and a footer of today's completions |
 | **Usage & limits** | today's token total plus one card per tool: 5h / weekly remaining, when each resets, and how stale the reading is |
+| **Rewards** | the three vendors' reward cards: whatever is claimable now sorts first, with face value, streak and an expiry countdown on the card; a field the source cannot give stays undrawn |
 | **Account** | one tool: total, hourly distribution, input / output / cache read / cache write, per-model split |
 | **Detail** | the verbatim question and its options, or the failed command — opened with `ⓘ` on any row |
 | **History** | completed sessions, newest first, 12 per page, more pages load as you scroll |
 | **Tools** | which collectors are present on this machine and what each one yielded |
 | Settings / Connect / Permission | toggles, hook wiring, and the Accessibility prompt |
 
-![Usage & limits: today's tokens, then one quota card per tool](docs/panel-usage-en.png)
+![02 · Quota, usage, rewards: usage & limits on the left, rewards on the right](docs/fig-02-quota-en.png)
 
-![One tool's account view: the four token parts and an hourly distribution](docs/panel-account-en.png)
-
-![Completed today: the blue dot marks a session you have not opened through this panel](docs/panel-history-en.png)
+*A reward card carries three different clocks: when the reading was taken, when the
+source file was last written, and the footer's scan time. When they disagree, "we did
+not refresh" and "that vendor wrote nothing" become two distinguishable answers.*
 
 ## Cross-platform
 
@@ -66,7 +73,7 @@ judgement are one code path.
 | Status item | `NSStatusItem` with a three-number label | StatusNotifierItem over D-Bus (needs `libdbus-1-dev`; otherwise a stub with no tray icon) |
 | Banner | `UNUserNotificationCenter` | shells out to `notify-send` (from `libnotify-bin`) |
 | Sound | `afplay` on a system sound | `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`, picked by what is installed and what the file format allows (`aplay` takes only `.wav`, `paplay` not) |
-| Autostart | `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist` | `$XDG_CONFIG_HOME/autostart/agentping.desktop` |
+| Autostart | a plist under `~/Library/LaunchAgents` | an entry under `$XDG_CONFIG_HOME/autostart` |
 | Jump into a session | URL scheme, AppleScript, or driving the tool's own ⌘K palette | open the session's working directory / activate the app. No palette driver. |
 | Language | system locale, overridable | `$LC_*` / `$LANG`, overridable |
 
@@ -94,8 +101,14 @@ These are deliberate choices, each of which cost a bug report to learn:
 - **Stale quota retreats.** The overview only previews readings ≤ 10 min old; older
   ones move to the Usage screen with their `updated HH:MM` stamp instead of pinning a
   permanent red "needs refresh" to the first screen.
+- **Rewards are read-only.** The card draws only what each vendor writes into its own
+  store. Clicking it brings that app to the front and says so — *Claim it inside that
+  app yourself — this layer never claims for you*. The whole card is the hit area,
+  and the landing stops at the app.
 
 ## Privacy — exactly what it reads
+
+![03 · Six sources and what each one found: all tools on the left, completed today on the right](docs/fig-03-sources-en.png)
 
 Everything below is a read of a file your tools already own. Nothing is uploaded.
 The only files Agent Ping writes are listed after the table, and the two config
@@ -110,6 +123,7 @@ files are touched only when **you** install a hook (the Connect button or
 | ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows (read-only) |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`, `~/.workbuddy/projects` | session rows, `providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (honours `$XDG_DATA_HOME`) | `session` title/cwd/`time_updated`, `part` `step-finish` token sums and `tool.state.status` (read-only) |
+| Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/cli/log/zcode-<date>.jsonl` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; for ZCode only whether today's log exists — it writes no reward state locally |
 | Hook inbox | `~/Library/Application Support/AgentPing/hooks/*.json` | the verbatim question and its options — written by the small `hook.sh` that Agent Ping installs on request; the panel itself never writes into this directory |
 
 On Linux the two Agent Ping paths move to `$XDG_CONFIG_HOME/AgentPing/…`
@@ -150,6 +164,7 @@ panel the way you treat your own terminal scrollback.
 | `⌄ 3 sub-agents` | ZCode rows with `task_type='subagent_child'` attached to that parent by `parent_id` | ZCode names none of them; the label is derived from the dispatch text and the raw title is what the ⌘K search uses |
 | `Total tokens today` | Σ over today's sessions of `input + output + cache_read + cache_write` as each tool reports them | the four parts do **not** mean the same thing across tools — see below |
 | `66%` / `2h 16m to reset` | a quota window read out of that tool's own log (e.g. Codex writes `rate_limits` events while it runs) | read locally, never from a billing API; if the tool has been idle, the reading is stale and says so |
+| Reward card `100 Credits` / `6` day streak / `Expires in 5h 20m` | face value, streak and this period's expiry, as each vendor writes them to disk | a vendor that does not write a field gets the cell left undrawn; `Claimable` / `Claimed` is its own state bit, not our inference; for the vendor that only reports when a reward appeared, the track is drawn dashed |
 | `Hourly` bars | that tool's tokens summed into 24 local-hour buckets | hours with no tokens are left empty, not drawn as zero |
 
 Token counts are summed because the Usage screen asks for it, but the sum mixes
@@ -175,6 +190,13 @@ rest are held and go out on a later round rather than being dropped.
 | 1 | banner channel unavailable, fell back to a sound | recorded |
 | 2 | neither channel works | recorded, surfaced in settings |
 | 3 | platform did not answer within the deadline | **key erased** — this round is not counted, so it can retry |
+
+**Reward arrivals** ride the same ledger under a different key
+(`claim:<vendor>:<period>`): when a vendor flips from "nothing" to "claimable now",
+one banner fires and stays until you dismiss it, and tapping it lands on the Rewards
+screen. The *Reward alerts* toggle in Settings turns this path off (on by default),
+and DND holds it back too — both only suppress delivery and never clear the ledger,
+so reopening does not dump every period that piled up while they were off.
 
 ## Connecting a CLI (optional)
 
@@ -259,12 +281,13 @@ container.
 `--dump` is the reconciliation tool: every number on screen has a line in it, so a
 disagreement between the panel and reality is checkable from the terminal.
 
-The screenshots above come from the same binary's offscreen probe — it renders all
-six locales side by side into a PPM:
+The figures in this README come from the same binary's offscreen probe — it renders
+all six locales side by side into a PPM:
 
 ```sh
 AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.ppm
-# views: 0 overview · 3 detail · 5 history · 6 usage · 7 account · 8 tools
+# views: 0 overview · 3 detail · 4 permission · 5 history
+#        6 usage · 7 account · 8 tools · 9 rewards
 ```
 
 ## Known limitations
@@ -283,6 +306,13 @@ mystery.
 - **The unread dot does not sync with the tool.** ZCode keeps its read state in
   renderer memory, not on disk, so reading a session *in ZCode* will not clear the
   dot here. The dot means "not opened through this panel".
+- **ZCode's reward state cannot be read.** It keeps that state in its own server
+  response, and the local logs carry zero signal, so that card only ever says
+  `Unknown`. That is the ceiling of this path, not a load failure.
+- **Reward readings change only when the vendor itself refreshes.** WorkBuddy's
+  `[Checkin]` is rewritten only while its window is focused; the panel does not poke
+  it, it just writes *File X ago* on the card so you can tell "we did not refresh"
+  from "that vendor wrote nothing".
 - **Linux status item is young.** With `libdbus-1` the build ships a real
   StatusNotifierItem (three-number label, tooltip, left-click show/hide, right-click
   menu). Verified against a third-party SNI host inside a container; **not** run on a
@@ -321,14 +351,14 @@ mystery.
 ## Repository layout
 
 ```
-src/            panel, scan layer, alert layer, platform shims
-src/platform/   notify / open / statusbar / autostart / lang, split by OS behind C headers
-vendor/imgui/   Dear ImGui 1.93.0 WIP, vendored so the build needs no network
-fonts/          OFL-licensed UI fonts, with their license texts
-assets/         Info.plist, app icon, menu-bar icon, SNI theme
-docs/           the screenshots in this README, rendered by the offscreen probe
-Tools/          install_hook.sh, make_bundle.sh, probes
-CMakeLists.txt  both platforms, including the dependency lists above
+src/                panel, scan layer, alert layer, platform shims
+src/platform/       notify / open / statusbar / autostart / lang, split by OS
+vendor/imgui/       Dear ImGui 1.93.0 WIP, vendored so the build needs no network
+fonts/              OFL-licensed UI fonts, with their license texts
+assets/             Info.plist, app icon, menu-bar icon, SNI theme
+docs/               the figures in this README, rendered by the offscreen probe
+Tools/              install_hook.sh, make_bundle.sh, probes
+CMakeLists.txt      both platforms, including the dependency lists above
 ```
 
 Fonts are committed rather than downloaded so that a clone builds offline; that is
