@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Agent Ping
+Name[zh_CN]=Agent Ping
+GenericName=Agent session monitor
+GenericName[zh_CN]=Agent 会话监控
+Comment=See which AI coding agent is running, waiting, or stuck, from the tray
+Comment[zh_CN]=在托盘里看哪个 AI 编程 Agent 在跑、在等、还是卡住了
+Exec=agent-ping
+Icon=agent-ping
+Terminal=false
+Categories=Development;Utility;
+Keywords=agent;ai;claude;codex;opencode;monitor;tray;status;
+StartupNotify=false
+StartupWMClass=agent-ping
