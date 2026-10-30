@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Ping — 谁在跑、谁在等你，菜单栏一眼看完</title>
+    <meta name="description" content="Agent Ping：开源的 macOS / Linux 菜单栏面板，直接读 Qoder、Claude Code、Codex、ZCode、WorkBuddy、OpenCode 写在本机的日志和数据库，算出谁在跑、谁排队、谁报错、谁在等你回答，并在你没看屏幕的时候提醒你去。零网络调用、零遥测、Apache-2.0。" />
+    <link rel="canonical" href="https://dreamofxm.github.io/agent-ping/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://dreamofxm.github.io/agent-ping/" />
+    <link rel="alternate" hreflang="en" href="https://dreamofxm.github.io/agent-ping/en/" />
+    <link rel="alternate" hreflang="x-default" href="https://dreamofxm.github.io/agent-ping/en/" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#0d1016" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Agent Ping" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:url" content="https://dreamofxm.github.io/agent-ping/" />
+    <meta property="og:title" content="Agent Ping — 谁在跑、谁在等你，菜单栏一眼看完" />
+    <meta property="og:description" content="同时开着六家 coding agent 时，缺的不是又一个看板，而是「现在该看谁」。Agent Ping 只读本机日志，算出谁在跑、谁在等你、谁刚报错，然后 ping 你一下。" />
+    <meta property="og:image" content="https://dreamofxm.github.io/agent-ping/og-image-zh.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Agent Ping 总览屏：一张正在跑的会话卡、账户额度预览，和按等待时长排序的「需要你」列表" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Agent Ping — 谁在跑、谁在等你，菜单栏一眼看完" />
+    <meta name="twitter:description" content="只读本机日志的菜单栏面板，六家 coding agent 谁在等你一眼看完。零网络调用、零遥测、Apache-2.0。" />
+    <meta name="twitter:image" content="https://dreamofxm.github.io/agent-ping/og-image-zh.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Agent Ping",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS 13 or later, or Linux with X11",
+        "url": "https://dreamofxm.github.io/agent-ping/",
+        "image": "https://dreamofxm.github.io/agent-ping/og-image-zh.png",
+        "description": "Agent Ping：开源的 macOS / Linux 菜单栏面板，读本地日志与数据库，判断 Qoder、Claude Code、Codex、ZCode、WorkBuddy、OpenCode 谁在跑、谁在等你，并在你需要被叫回来时提醒。",
+        "inLanguage": "zh-CN",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "codeRepository": "https://github.com/DreamOfXM/agent-ping",
+        "sameAs": ["https://github.com/DreamOfXM/agent-ping"],
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+    <style>
+      /* 内联深色背景，避免样式表加载前的白屏闪烁（本站为纯深色设计） */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        background-color: #0d1016;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dreamofxm.github.io/agent-ping/sitemap.xml
