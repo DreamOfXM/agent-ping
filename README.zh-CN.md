@@ -234,6 +234,11 @@ Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自�
 > 它用的是 `version :latest`，所以升级必须带 `--greedy`：
 > `brew upgrade --cask --greedy agent-ping`。不带的话普通 `brew upgrade` 会跳过它。
 
+> **如果 macOS 不打开它**：那是 Gatekeeper，不是包坏了 —— 这份 bundle 是 ad-hoc 签名、
+> 没有公证（本项目背后没有付费的开发者证书），而浏览器下载和 cask 安装都会给它打隔离标记，
+> `spctl -a` 两条路都判 `rejected`。只需处理一次：在访达里右键这个 App → 打开 → 再点
+> 「打开」。在终端里也可以：`xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`。
+
 **备选：formula（从源码编译，不进 `/Applications`）**
 
 不想用预编译二进制、想自己编一份，或者 26 MB 实在下不动的时候用这条。它从本仓库
@@ -247,11 +252,14 @@ brew install agent-ping
 agent-ping
 ```
 
-> 如果 `brew install` 直接停在 `Error: Xcode alone is not sufficient on …`：那是
-> Homebrew 自己在 macOS 26 上的准入检查，不是本项目的要求 —— 它要求系统里存在命令行
-> 工具，才肯装任何 tap 里的任何 formula。跑一次 `xcode-select --install` 再重试；
-> 不想下这一份的话，下面「构建」一节用 Xcode 自带的 clang 就能编出同样的东西，或者直接
-> 改用上面的 cask。
+> 如果 `brew install` 停在 `Error: Xcode alone is not sufficient on …` 或
+> `Your Command Line Tools are too outdated`：那是 Homebrew 对**源码构建**的准入检查，
+> 不是本项目的要求 —— 它要先确认系统里有一份够新的工具链，才肯编译任何 tap 里的 formula。
+> `xcode-select --install` 只在工具完全没装时管用；装了但太旧的时候，去更新它：系统设置 →
+> 通用 → 软件更新，或者先 `softwareupdate --list`，再
+> `sudo softwareupdate -i "Command Line Tools for Xcode <版本>"`。再不然直接用上面的
+> cask，全程不碰编译器。这些都不想看，下面「构建」一节用 Xcode 自带的 clang 也能编出同样的
+> 东西 —— app 本身不挑编译器年龄：macOS 27 配一份 2025 年的命令行工具，一次就编过了。
 
 `agent-ping` 是一行启动器，打开的是 Homebrew `opt` 目录里的 App
 （`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它**不会**进 `/Applications`：

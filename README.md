@@ -272,6 +272,13 @@ only needed by the source build.
 > The cask uses `version :latest`, so upgrades must pass `--greedy`:
 > `brew upgrade --cask --greedy agent-ping`. A plain `brew upgrade` skips it.
 
+> **If macOS refuses to open it**, that is Gatekeeper, not a broken download: the
+> bundle is ad-hoc signed and unnotarized (there is no paid developer certificate
+> behind this project), and both a browser download and a cask install mark it
+> quarantined — `spctl -a` reports `rejected` either way. One fix, once:
+> right-click the app → Open → Open. From a shell:
+> `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`.
+
 **Alternative: the formula (built from source, stays out of `/Applications`)**
 
 Use this if you would rather not run a prebuilt binary, want to compile it
@@ -287,12 +294,17 @@ brew install agent-ping
 agent-ping
 ```
 
-> If `brew install` stops with `Error: Xcode alone is not sufficient on …`, that
-> is Homebrew's own gate on macOS 26, not this project's requirement: it wants
-> the Command Line Tools present before it installs anything from any tap. Run
-> `xcode-select --install` and retry. If you would rather not pull those down,
-> the [Build](#build) section compiles the same source with the clang that ships
-> inside Xcode — or just use the cask above.
+> If `brew install` stops with `Error: Xcode alone is not sufficient on …` or
+> `Your Command Line Tools are too outdated`, that is Homebrew's gate on *source
+> builds*, not this project's requirement: it wants a current toolchain before it
+> will compile anything from any tap. `xcode-select --install` only helps when the
+> tools are missing outright — when they are present but old, update them instead:
+> System Settings → General → Software Update, or `softwareupdate --list` followed
+> by `sudo softwareupdate -i "Command Line Tools for Xcode <version>"`. Or skip
+> the compiler entirely with the cask above. If you would rather not pull any of
+> that down, the [Build](#build) section compiles the same source with the clang
+> that ships inside Xcode; the app is not picky about its age — a 2025-vintage
+> command line toolchain builds it on macOS 27 on the first try.
 
 `agent-ping` is a one-line launcher for the app in Homebrew's `opt` directory
 (`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It does **not** go into
