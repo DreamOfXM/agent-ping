@@ -3,6 +3,7 @@
 ![许可证](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![平台](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![界面语言](https://img.shields.io/badge/UI-zh%20·%20en%20·%20de%20·%20it%20·%20ja%20·%20ko-lightgrey.svg)
+![版本](https://img.shields.io/github/v/tag/DreamOfXM/agent-ping?label=release&color=blue)
 
 [English](README.md)
 
@@ -207,8 +208,9 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 
 ## 用 Homebrew 安装（macOS 13+）
 
-没有预编译包可下：这个 formula 从本仓库的源码现场编译，所以第一次安装要装 Xcode
-命令行工具，Apple 芯片上大约一分钟。
+没有预编译包可下：这个 formula 从本仓库
+[v0.1.0](https://github.com/DreamOfXM/agent-ping/tree/v0.1.0) 这个标签的源码现场编译，
+所以第一次安装要装 Xcode 命令行工具，Apple 芯片上大约一分钟。
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping

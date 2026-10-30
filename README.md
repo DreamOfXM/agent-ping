@@ -3,6 +3,7 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![UI languages](https://img.shields.io/badge/UI-zh%20·%20en%20·%20de%20·%20it%20·%20ja%20·%20ko-lightgrey.svg)
+![Release](https://img.shields.io/github/v/tag/DreamOfXM/agent-ping?label=release&color=blue)
 
 [中文](README.zh-CN.md)
 
@@ -242,8 +243,10 @@ only, so questions and options stay empty for them.
 ## Install with Homebrew (macOS 13+)
 
 There is no prebuilt binary to download: the formula compiles the panel from the
-source in this repository, so the first install needs the Xcode command line
-tools and takes about a minute on an Apple-silicon Mac.
+source in this repository at the
+[v0.1.0](https://github.com/DreamOfXM/agent-ping/tree/v0.1.0) tag, so the first
+install needs the Xcode command line tools and takes about a minute on an
+Apple-silicon Mac.
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
