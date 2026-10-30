@@ -265,7 +265,7 @@ const zh: SiteContent = {
     channels: [
       {
         name: "Homebrew（macOS）",
-        desc: "Formula 就住在这个仓库的 Formula/agent-ping.rb，按 v0.1.0 标签的源码现场编译。第一次装需要 Xcode 命令行工具，Apple 芯片上约一分钟。macOS 26 上若 brew 停在 Error: Xcode alone is not sufficient，那是 Homebrew 自己的准入检查，跑一次 xcode-select --install 再重试。",
+        desc: "Formula 就住在这个仓库的 Formula/agent-ping.rb，按 v0.1.1 标签的源码现场编译。第一次装需要 Xcode 命令行工具，Apple 芯片上约一分钟。macOS 26 上若 brew 停在 Error: Xcode alone is not sufficient，那是 Homebrew 自己的准入检查，跑一次 xcode-select --install 再重试。",
         action: BREW_CMD,
       },
       {
@@ -304,7 +304,7 @@ const zh: SiteContent = {
       },
       {
         q: "为什么没有下载好的二进制？",
-        a: "这个仓库不发预编译包：Formula 从 v0.1.0 标签的源码现场编译。好处是任何人用同一条命令就能复现你机器上那个 App，坏处是第一次装要等约一分钟编译，而且需要 Xcode 命令行工具。",
+        a: "这个仓库不发预编译包：Formula 从 v0.1.1 标签的源码现场编译。好处是任何人用同一条命令就能复现你机器上那个 App，坏处是第一次装要等约一分钟编译，而且需要 Xcode 命令行工具。",
       },
       {
         q: "额度数字是不是猜的？",
@@ -333,7 +333,7 @@ const zh: SiteContent = {
     meta: "Apache-2.0 · macOS 13+ · Linux (X11) · 6 UI languages",
     getLabel: "获取",
     links: [
-      { label: "GitHub Release（v0.1.0 标签）" },
+      { label: "GitHub Release（最新发布）" },
       { label: "源码 / Issue / PR" },
       { label: "它读哪些文件（Privacy）" },
       { label: "简体中文 README" },
@@ -531,7 +531,7 @@ const en: SiteContent = {
     channels: [
       {
         name: "Homebrew (macOS)",
-        desc: "Formula/agent-ping.rb lives in this repo and compiles the source at the v0.1.0 tag. The first install needs the Xcode command line tools and takes about a minute on an Apple-silicon Mac. If brew stops with Error: Xcode alone is not sufficient on macOS 26, that is Homebrew's own gate: run xcode-select --install once and retry.",
+        desc: "Formula/agent-ping.rb lives in this repo and compiles the source at the v0.1.1 tag. The first install needs the Xcode command line tools and takes about a minute on an Apple-silicon Mac. If brew stops with Error: Xcode alone is not sufficient on macOS 26, that is Homebrew's own gate: run xcode-select --install once and retry.",
         action: BREW_CMD,
       },
       {
@@ -570,7 +570,7 @@ const en: SiteContent = {
       },
       {
         q: "Why is there no prebuilt binary?",
-        a: "This repository ships none: the formula compiles the source at the v0.1.0 tag. The upside is that anyone can reproduce the exact app on their machine with one command; the downside is a roughly one-minute compile on first install, plus the Xcode command line tools.",
+        a: "This repository ships none: the formula compiles the source at the v0.1.1 tag. The upside is that anyone can reproduce the exact app on their machine with one command; the downside is a roughly one-minute compile on first install, plus the Xcode command line tools.",
       },
       {
         q: "Are the quota numbers guesses?",
@@ -599,7 +599,7 @@ const en: SiteContent = {
     meta: "Apache-2.0 · macOS 13+ · Linux (X11) · 6 UI languages",
     getLabel: "Get it",
     links: [
-      { label: "GitHub Release (v0.1.0 tag)" },
+      { label: "GitHub Release (latest)" },
       { label: "Source / Issues / PRs" },
       { label: "What it reads (Privacy)" },
       { label: "English README" },

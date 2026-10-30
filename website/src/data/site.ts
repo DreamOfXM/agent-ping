@@ -2,9 +2,9 @@
 // 推广打法与渠道台账属内部策略，不放对外页面。
 
 export const REPO = "https://github.com/DreamOfXM/agent-ping";
-// 钉在 Release 上，不是 tree：页脚那颗写的是「GitHub Release」，点进去就得是发布说明页。
-// 这条 URL 在 v0.1.0 的 Release 建出来之前是 404——上线前必须先有那个 Release。
-export const RELEASE_TAG = `${REPO}/releases/tag/v0.1.0`;
+// 走 latest 而不是钉某个 tag：仓库每次 bump 都要改这里，漏一次页脚就指到旧版本说明。
+// 前提是至少有一个非 draft 的 Release，否则 /releases/latest 会 404。
+export const RELEASE_TAG = `${REPO}/releases/latest`;
 export const ISSUES = `${REPO}/issues`;
 
 // 安装四句与 README 的 sh 块逐字一致：页面上显示的、剪贴板里的、README 里的三者同串。
