@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(agent_ping_cpp VERSION 0.1.2 LANGUAGES CXX)
+project(agent_ping_cpp VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,44 @@ find_path(FREETYPE_INC ft2build.h
         /opt/homebrew/include /usr/local/include /usr/include
   PATH_SUFFIXES freetype2
   REQUIRED)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# macOS：glfw / freetype 一律静态链进来。
+#
+# 动态链会在产物里留下 /usr/local/opt/glfw/lib/libglfw.3.dylib、
+# /usr/local/opt/freetype/lib/libfreetype.6.dylib 这种**本机绝对路径**（Apple 芯片是
+# /opt/homebrew/...）。这样打出来的 .app 只在这台机器上活得下去：换一台没装 glfw 的 Mac，
+# 双击就是 dyld: Library not loaded，界面根本不出现——用户看到的现象就是「装了个寂寞」。
+# 而让人为了一个 .app 去现编 glfw 更不现实：Homebrew 自 2026-09 起不再为 macOS Intel
+# 出 bottle，Intel 上 brew install glfw 是现场编译。
+#
+# 所以只要找得到 .a 就静态链，.app 自成一体，不欠外部依赖。找不到才退回动态并明确警告。
+# ─────────────────────────────────────────────────────────────────────────────
+if(APPLE)
+  set(_ap_lib_hints /opt/homebrew/lib /usr/local/lib)
+  find_file(AP_GLFW_A NAMES libglfw3.a HINTS ${_ap_lib_hints})
+  find_file(AP_FREETYPE_A NAMES libfreetype.a HINTS ${_ap_lib_hints})
+  if(AP_GLFW_A AND AP_FREETYPE_A)
+    # freetype 的 .a 里带着 png / brotli 的引用，静态链必须把它们一起补上，顺序也要对；
+    # z / bz2 用系统自带的（macOS 一直随系统提供）。
+    find_file(AP_PNG_A NAMES libpng16.a libpng.a HINTS ${_ap_lib_hints})
+    find_file(AP_BROTLIDEC_A NAMES libbrotlidec.a HINTS ${_ap_lib_hints})
+    find_file(AP_BROTLICOMMON_A NAMES libbrotlicommon.a HINTS ${_ap_lib_hints})
+    find_library(AP_Z_LIB z)
+    find_library(AP_BZ2_LIB bz2)
+    # 新版 freetype 的 hvf.o 引用 libhvf（macOS 系统库，SDK 里只有 .tbd 存根，
+    # 运行期在 dyld 共享缓存里），静态链必须把它补上，否则一堆 _HVF_* 未定义符号。
+    find_library(AP_HVF_LIB hvf)
+    set(GLFW_LIB ${AP_GLFW_A})
+    set(FREETYPE_LIB ${AP_FREETYPE_A} ${AP_PNG_A} ${AP_BROTLIDEC_A} ${AP_BROTLICOMMON_A}
+                     ${AP_Z_LIB} ${AP_BZ2_LIB} ${AP_HVF_LIB})
+    message(STATUS "macOS 依赖：静态链接 glfw / freetype，产物不依赖 Homebrew 路径")
+  else()
+    message(WARNING
+      "没找到 libglfw3.a / libfreetype.a（brew install glfw freetype 会同时装出 .a），"
+      "退回动态链接：这样打出的 .app 只能跑在装了 glfw/freetype 的机器上，分发前务必确认")
+  endif()
+endif()
 
 # sqlite3 只服务 ZCode / WorkBuddy 两路；找不到就退化成「只读 JSONL」，
 # 而不是整个编译断掉 —— 采集层用 AP_HAVE_SQLITE 把这两路圈起来了。
@@ -46,7 +84,11 @@ if(APPLE)
   set_source_files_properties(${LANG_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(AUTOSTART_SRC src/platform/autostart_macos.mm)
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
-  set(PLATFORM_LIBS ${COCOA_LIB} ${IOKIT_LIB} ${OPENGL_LIB} ${COREGRAPHICS_LIB} ${USERNOTIFICATIONS_LIB})
+  # 静态链 glfw 时 cocoa_window.m 会引用 CAMetalLayer，必须自己带上 QuartzCore
+  # （动态链时是 libglfw.3.dylib 的 LC_LOAD_DYLIB 替你带进来的，静态链没人管）。
+  find_library(QUARTZCORE_LIB QuartzCore REQUIRED)
+  set(PLATFORM_LIBS ${COCOA_LIB} ${IOKIT_LIB} ${OPENGL_LIB} ${COREGRAPHICS_LIB}
+                    ${USERNOTIFICATIONS_LIB} ${QUARTZCORE_LIB})
 else()
   # Debian 12 (bookworm) aarch64 实测零 error 编过，依赖就这四个包：
   #   apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev libsqlite3-dev libgl1-mesa-dev
@@ -102,7 +144,7 @@ add_executable(pin_imgui_shell
   ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
-target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.2")
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.3")
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})

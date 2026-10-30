@@ -1,8 +1,8 @@
 class AgentPing < Formula
   desc "Menu-bar panel showing which AI coding agent is running, waiting, or stuck"
   homepage "https://github.com/DreamOfXM/agent-ping"
-  url "https://github.com/DreamOfXM/agent-ping/archive/refs/tags/v0.1.2.tar.gz"
-  version "0.1.2"
+  url "https://github.com/DreamOfXM/agent-ping/archive/refs/tags/v0.1.3.tar.gz"
+  version "0.1.3"
   sha256 "035ce144910b853e4a6e3be3b984fb2bbc81509d09880f8c3e6e0f00f8477576"
   license "Apache-2.0"
 

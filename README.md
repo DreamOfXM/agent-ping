@@ -250,7 +250,7 @@ shims.
 ## Install with Homebrew (macOS 13+)
 
 The formula builds from source — it has no bottle — using the code at the
-[v0.1.2](https://github.com/DreamOfXM/agent-ping/tree/v0.1.2) tag, so the first
+[v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) tag, so the first
 install needs the Xcode command line tools and takes about a minute on an
 Apple-silicon Mac. If you would rather not compile anything, skip to the cask at
 the end of this section.
