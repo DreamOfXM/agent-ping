@@ -21,6 +21,7 @@
 #include "platform/lang.h"
 #include "platform/autostart.h"
 #include "alert.h"
+#include "claims.h"
 #include "scan.h"
 #include "hook_install.h"
 
@@ -401,6 +402,14 @@ static const Key kStr[] = {
                         "Sospendi i nuovi avvisi, il conteggio resta",
                         "新しい通知を止めます。記録は残ります",
                         "새 알림을 멈추고 기록은 유지"}},
+    {"set_claim",      {"权益到账提醒", "Reward alerts", "Gutschein-Hinweise",
+                        "Avvisi premi", "特典のお知らせ", "쿠폰 도착 알림"}},
+    {"set_claim_sub",  {"有券时弹横幅，不点不收；只读不代领",
+                        "Stays until dismissed — read-only, no auto-claim",
+                        "Bleibt bis zum Schließen — nur lesend",
+                        "Resta finché non lo chiudi — sola lettura",
+                        "閉じるまで表示・読み取り専用",
+                        "닫을 때까지 유지 — 읽기 전용"}},
     {"set_launch",     {"登录时启动", "Launch at login", "Beim Anmelden starten",
                         "Avvia all'accesso", "ログイン時に起動", "로그인 시 시작"}},
     {"set_launch_sub", {"macOS LaunchAgent · Linux autostart",
@@ -616,6 +625,196 @@ static const Key kStr[] = {
     {"r_sessions",     {"会话", "Sessions", "Sitzungen", "Sessioni", "セッション", "세션"}},
     {"r_usage_tab",    {"用量与额度", "Usage & limits", "Nutzung & Limits", "Uso e limiti",
                         "使用量と上限", "사용량 및 한도"}},
+    // ── 权益领取（view 9）：全部字段来自各家写在自己磁盘上的读数 ──────────────
+    {"r_claim_tab",    {"权益", "Rewards", "Vorteile", "Vantaggi", "特典", "혜택"}},
+    {"r_claim_head",   {"本机读数能确认的领取", "Claims the local logs can confirm",
+                        "Anforderungen laut lokalen Protokollen", "Riscossioni verificabili dai log locali",
+                        "ローカルログで確認できる受取", "로컬 로그로 확인할 수 있는 수령"}},
+    {"r_claim_ready",  {"现在可领", "Ready to claim", "Jetzt verfügbar", "Disponibile ora",
+                        "今受け取れる", "지금 수령 가능"}},
+    {"r_claim_done",   {"本期已领", "Claimed", "Abgeholt", "Già riscosso",
+                        "受け取り済み", "수령 완료"}},
+    {"r_claim_none",   {"当前没有可领", "Nothing to claim", "Nichts verfügbar",
+                        "Nulla da riscuotere", "受け取れるものなし", "받을 항목 없음"}},
+    {"r_claim_unknown",{"状态未知", "Unknown", "Unbekannt", "Sconosciuto", "状態不明", "상태 모름"}},
+    // 数字拆出来单独放大之后，这一格只剩标签：六语都得是「光秃秃一个名词短语」，
+    // 不能带「连续…天」那种把数字包在中间的写法，否则拆完读不通。
+    {"r_claim_streak_lab", {"连续签到", "day streak", "Tage in Folge", "giorni di fila",
+                            "連続日数", "연속 일수"}},
+    {"r_claim_opens",  {"本期 %s 起可见", "Opens %s", "Ab %s sichtbar", "Disponibile dalle %s",
+                        "%sから利用可", "%s부터 열림"}},
+    {"r_claim_sincenone",{"%s 起报没有可领", "None since %s", "Keine seit %s",
+                          "Nessuno dalle %s", "%sから受取不可", "%s부터 수령 불가"}},
+    {"r_claim_expires",{"%s 后作废", "Expires in %s", "Läuft in %s ab", "Scade tra %s",
+                        "%s後に失効", "%s 후 만료"}},
+    {"r_claim_legend", {"实线＝知道它什么时候作废；虚线＝只知道它什么时候出现",
+                        "Solid = an expiry is known · dashed = only when it appeared",
+                        "Durchgehend = Ablauf bekannt · gestrichelt = nur das Erscheinen",
+                        "Pieno = scadenza nota · tratteggiato = solo la comparsa",
+                        "実線＝失効時刻まで判明／破線＝出現時刻のみ",
+                        "실선 = 만료 시각 확인 · 점선 = 등장 시각만"}},
+    {"r_claim_last",   {"上次读到可领 %s", "Last ready %s", "Zuletzt bereit %s",
+                        "Ultimo pronto %s", "最後に受取可 %s", "마지막 수령 가능 %s"}},
+    {"r_claim_seen",   {"读数 %s", "Reading %s", "Messwert %s", "Lettura %s", "読取 %s", "읽은 값 %s"}},
+    // 这一行说的是「那家自己什么时候写的盘」，与上一行（它读数里的时刻）和页脚（我们什么时候
+    // 读的）是三件事。分开的理由：只有这一行能回答「我们没刷，还是那家没写」。
+    {"r_claim_src",    {"本机文件 %s", "File %s", "Datei %s", "File %s", "ファイル %s", "파일 %s"}},
+    {"r_claim_alerted", {"上次提醒 %s", "Last alert %s", "Letzte Meldung %s",
+                         "Ultimo avviso %s", "前回の通知 %s", "마지막 알림 %s"}},
+    {"r_claim_never",  {"还没有提醒过", "No alert yet", "Noch keine Meldung", "Nessun avviso",
+                        "通知はまだありません", "알림 없음"}},
+    {"r_claim_refresh", {"刷新", "Refresh", "Aktualisieren", "Aggiorna", "更新", "새로고침"}},
+    {"r_claim_refreshed", {"已重读本机读数", "Local readings re-read", "Lokale Werte neu gelesen",
+                           "Lettura locale aggiornata", "ローカル値を再読み込み", "로컬 값 재확인"}},
+    {"r_claim_foot",   {"只读：不代领，不碰登录态", "Read-only: never claims, never reads your login",
+                        "Nur lesend: fordert nichts an, liest kein Login",
+                        "Sola lettura: non riscuote nulla, non legge il login",
+                        "読み取り専用：代行なし・ログイン情報なし",
+                        "읽기 전용: 대리 수령 없음, 로그인 정보 접근 없음"}},
+    // 2026-10-30 用户：「双击为啥没反应呢，只是提示吗，需要去 agent 领，是吗」。
+    // 权益卡原来一个命中区都没有，这三条是接上之后屏上要说的话：
+    // open_zone 是那颗命中区的名字（日志与取证序列按它寻址），后两条是点完的回执主行＋副行。
+    // 主行复用落点层现成的 land_app／land_none（「只把 X 带到了前台」／「这一跳没落到实处」），
+    // 副行必须说清「领」这个动作不在我们手里 —— 与页脚那句只读是同一件事的两种说法。
+    {"r_claim_open_zone", {"打开 %s 领", "Open %s to claim", "%s öffnen und abholen",
+                           "Apri %s e riscuoti", "%s を開けて受け取る", "%s 열어 수령"}},
+    {"r_claim_land_sub", {"领取仍要你自己在那家 App 里点 — 这一层不代领",
+                          "Claim it inside that app yourself — this layer never claims for you",
+                          "Prämie selbst in der App abholen — diese Ebene fordert nichts an",
+                          "Riscuoti tu dentro l'app — questo livello non riscuote nulla",
+                          "受け取りはアプリ内であなた自身で — この層は代行しません",
+                          "수령은 해당 앱에서 직접 하세요 — 이 계층은 대리 수령하지 않습니다"}},
+    {"r_claim_land_none_sub", {"本机没有它的 App，或它没应答 — 这一屏只读磁盘上的读数",
+                               "Its app isn't installed here, or it didn't answer — this screen "
+                               "only reads what is on disk",
+                               "Seine App fehlt hier oder antwortete nicht — diese Ansicht liest "
+                               "nur, was auf der Platte steht",
+                               "L'app non è installata qui o non risponde — questa schermata legge "
+                               "solo ciò che è su disco",
+                               "このマシンにその App が無い、または応答しませんでした — この画面はディスク上の値だけ読みます",
+                               "이 기기에 해당 앱이 없거나 응답하지 않았습니다 — 이 화면은 디스크 값만 읽습니다"}},
+    // 权益卡上那句「差在哪一档」的文案（#132：原来是采集层写死的中文，五语界面上也跟着显示
+    // 中文）。采集层只给下面这些键，翻译在这里做。Qoder 那条是 head＋缺口两段式，
+    // 模板里的 %s 由 note_arg_key 填。
+    {"cl_note_wb_nolog", {"本机没有 ~/.workbuddy/logs/main.log",
+                          "No ~/.workbuddy/logs/main.log on this machine",
+                          "~/.workbuddy/logs/main.log fehlt auf diesem Rechner",
+                          "Nessun ~/.workbuddy/logs/main.log su questa macchina",
+                          "このマシンに ~/.workbuddy/logs/main.log がありません",
+                          "이 기기에 ~/.workbuddy/logs/main.log 가 없습니다"}},
+    {"cl_note_wb_noline", {"main.log 里没有 [Checkin] 这一行（它只在窗口聚焦／页面可见时刷新，开了客户端不等于刷过）",
+                           "main.log has no [Checkin] line (it only refreshes while its window is focused or visible — having the client open is not a check-in)",
+                           "main.log enthält keine [Checkin]-Zeile (sie wird nur bei fokussiertem oder sichtbarem Fenster aktualisiert — offen heißt nicht eingecheckt)",
+                           "main.log non ha righe [Checkin] (si aggiorna solo con la finestra a fuoco o visibile: averlo aperto non è un check-in)",
+                           "main.log に [Checkin] の行がありません（ウインドウが前面か表示中のときだけ更新されます。起動している＝チェックイン済みではありません）",
+                           "main.log 에 [Checkin] 줄이 없습니다(창이 활성 상태이거나 보일 때만 갱신됩니다. 앱을 켠 것과 체크인은 다릅니다)"}},
+    {"cl_note_wb_badjson", {"[Checkin] 那行解析不了", "The [Checkin] line doesn't parse",
+                            "Die [Checkin]-Zeile lässt sich nicht lesen",
+                            "La riga [Checkin] non è leggibile",
+                            "[Checkin] の行を解釈できません", "[Checkin] 줄을 해석할 수 없습니다"}},
+    {"cl_note_wb_nofield", {"[Checkin] 那行没有 today_checked_in",
+                            "The [Checkin] line has no today_checked_in",
+                            "Der [Checkin]-Zeile fehlt today_checked_in",
+                            "Nella riga [Checkin] manca today_checked_in",
+                            "[Checkin] の行に today_checked_in がありません",
+                            "[Checkin] 줄에 today_checked_in 이 없습니다"}},
+    {"cl_note_wb_done", {"今天已领 · 下一期 00:00 重新出现（连看三晚都是 00:00 后翻回未领，但没观察到它作废）",
+                         "Claimed today · the next round appears at 00:00 (three nights watched: it flips back just after 00:00, and it was never seen expiring)",
+                         "Heute abgeholt · die nächste Runde erscheint um 00:00 (drei Nächte beobachtet: kurz nach 00:00 springt es zurück; ein Ablauf war nie zu sehen)",
+                         "Riscosso oggi · il prossimo giro appare alle 00:00 (tre notti osservate: torna disponibile subito dopo le 00:00, senza scadenza visibile)",
+                         "本日受取済み · 次の回は 00:00 に再表示（3 晩観測：00:00 直後に未受取へ戻る。失効は未観測）",
+                         "오늘 수령 완료 · 다음 회차는 00:00 에 다시 나타납니다(3일 밤 관찰: 00:00 직후 미수령으로 돌아가며, 만료는 관측되지 않음)"}},
+    {"cl_note_wb_ready", {"今天还没领", "Not claimed yet today", "Heute noch nicht abgeholt",
+                          "Non ancora riscosso oggi", "本日はまだ未受取", "오늘 아직 수령하지 않음"}},
+    {"cl_note_wb_inactive", {"签到活动当前不是 active", "The check-in campaign is not active right now",
+                             "Die Check-in-Aktion ist derzeit nicht aktiv",
+                             "La campagna di check-in non è attiva ora",
+                             "チェックイン企画は現在 active ではありません",
+                             "체크인 이벤트가 현재 active 상태가 아닙니다"}},
+    {"cl_note_qd_nodir", {"本机没有 Qoder 的启动日志目录",
+                          "No Qoder launch-log directory on this machine",
+                          "Kein Qoder-Startlog-Verzeichnis auf diesem Rechner",
+                          "Nessuna cartella dei log di avvio di Qoder su questa macchina",
+                          "このマシンに Qoder の起動ログフォルダがありません",
+                          "이 기기에 Qoder 시작 로그 폴더가 없습니다"}},
+    {"cl_note_qd_noline", {"本机 Qoder 日志这一轮没有 [Campaign] 任何一行",
+                           "No [Campaign] line in Qoder's logs this round",
+                           "In Qoders Logs fand sich diesmal keine [Campaign]-Zeile",
+                           "Nessuna riga [Campaign] nei log di Qoder in questo giro",
+                           "今回の Qoder ログに [Campaign] の行がありません",
+                           "이번 Qoder 로그에 [Campaign] 줄이 없습니다"}},
+    {"cl_note_qd_ready", {"它说有得领", "It reports a claim is available",
+                          "Es meldet eine verfügbare Prämie", "Segnala un premio disponibile",
+                          "受取可能だと報告", "수령 가능하다고 보고"}},
+    {"cl_note_qd_done", {"服务端清单说这一期的卡都已领完",
+                         "Its server-side list says every card this period is claimed",
+                         "Die Serverliste sagt: alle Karten dieser Runde sind abgeholt",
+                         "L'elenco lato server dice che tutte le carte di questo periodo sono riscosse",
+                         "サーバー側の一覧では今期のカードはすべて受取済み",
+                         "서버 목록은 이번 기간 카드를 모두 수령했다고 말합니다"}},
+    {"cl_note_qd_none_seen", {"它这一轮说没有可领的，不是本机没读到",
+                              "It says there is nothing to claim this round — this machine did read its state",
+                              "Es meldet diesmal nichts Verfügbares — der Rechner hat seinen Zustand gelesen",
+                              "Dice che non c'è nulla da riscuotere in questo giro: la macchina ha letto il suo stato",
+                              "今回は受取可能なしと報告（本機が読めていないわけではありません）",
+                              "이번에는 수령 가능한 것이 없다고 보고합니다(이 기기가 못 읽은 것이 아님)"}},
+    {"cl_note_qd_none_never", {"这一轮日志里它一直报「没有可领的」",
+                               "Every reading in this round says there is nothing to claim",
+                               "Jede Meldung dieser Runde sagt: nichts verfügbar",
+                               "Ogni lettura di questo giro dice che non c'è nulla da riscuotere",
+                               "今回のログでは一貫して「受取可能なし」",
+                               "이번 로그는 계속 '수령 가능한 것 없음'을 보고합니다"}},
+    {"cl_note_qd_gap", {"%s；卡面文案与面值它本机不写，拿不到",
+                        "%s; card copy and face value aren't written locally, so neither can be shown",
+                        "%s; Karten-Text und Nennwert schreibt es nicht lokal, daher unbekannt",
+                        "%s; testo e valore della carta non sono scritti in locale, quindi non si vedono",
+                        "%s。カードの文言と額面は本機に書かれず、取得できません",
+                        "%s. 카드 문구와 액면가는 로컬에 기록되지 않아 알 수 없습니다"}},
+    {"cl_note_qd_gap_open", {"%s；卡面文案与面值它本机不写，拿不到。你点开过它的活动面板，不再催",
+                             "%s; card copy and face value aren't written locally, so neither can be shown. You opened its panel, so it won't be reminded again",
+                             "%s; Karten-Text und Nennwert schreibt es nicht lokal, daher unbekannt. Du hast sein Panel geöffnet — keine erneute Meldung",
+                             "%s; testo e valore della carta non sono scritti in locale, quindi non si vedono. Hai aperto il suo pannello: nessun altro avviso",
+                             "%s。カードの文言と額面は本機に書かれず、取得できません。企画パネルを開いたため、再通知はしません",
+                             "%s. 카드 문구와 액면가는 로컬에 기록되지 않아 알 수 없습니다. 활동 패널을 열었으므로 다시 알리지 않습니다"}},
+    {"cl_note_zc_nolog", {"本机没有 ZCode 当天的 CLI 日志",
+                          "No ZCode CLI log for today on this machine",
+                          "Kein Tages-CLI-Log von ZCode auf diesem Rechner",
+                          "Nessun log CLI di ZCode per oggi su questa macchina",
+                          "このマシンに ZCode の当日 CLI ログがありません",
+                          "이 기기에 ZCode 오늘 CLI 로그가 없습니다"}},
+    {"cl_note_zc_none", {"本机日志零领取信号：状态只在它自己的服务端响应里，要它的登录态才拿得到",
+                         "No claim signal locally: its server holds the state, behind its login",
+                         "Kein Signal in lokalen Logs: der Zustand liegt nur in seiner Server-Antwort und braucht sein Login",
+                         "Nessun segnale nei log locali: lo stato sta solo nella risposta del server e richiede il suo login",
+                         "ローカルログに受取の手掛かりなし。状態はサーバー応答のみにあり、ログイン状態が必要です",
+                         "로컬 로그에 수령 신호가 없습니다. 상태는 서버 응답에만 있어 해당 로그인이 필요합니다"}},
+    // 券到账横幅的三段：标题的状态词、正文（有数字／没数字）、落点说明。
+    // 与会话横幅同一做法：alert 层不给文案，六种语言都在这张表里现做。
+    {"claim_word",     {"有券可领", "Reward ready", "Gutschein verfügbar", "Premio disponibile",
+                        "受け取れる特典", "쿠폰 수령 가능"}},
+    {"claim_credit",   {"%lld credits 待领", "%lld credits to claim", "%lld Credits abzuholen",
+                        "%lld credit da riscuotere", "%lld credits を受取可", "%lld 크레딧 수령 대기"}},
+    {"claim_open",     {"本期有可领的权益", "A reward is available", "Ein Gutschein ist bereit",
+                        "Un premio è disponibile", "受け取れる特典があります", "받을 수 있는 혜택이 있습니다"}},
+    // 落点这句必须用各家屏上真有的那个词（r_claim_tab：权益 / Rewards / Vorteile /
+    // Vantaggi / 特典 / 혜택）——德语那版原来写 "Vorteile-Übersicht"，屏幕上没有这个词，
+    // 而且 29 字符把整条正文挤到省略号（2026-10-30 实拍 banner_de.png 实测）。
+    {"claim_goto",     {"点一下进权益屏", "Tap to open Rewards", "Antippen → Vorteile",
+                        "Tocca → Vantaggi", "タップして特典画面へ", "누르면 혜택 화면"}},
+    // 点完之后的回执，跟上面那句不是一件事：那句是横幅上的引导，这一句是「已经带你到了」。
+    // 拿引导语当回执会在屏上留下一句读不通的话（2026-10-30 实拍 banner_after_click.png）。
+    {"claim_opened",   {"已进权益屏", "Rewards opened", "Vorteile geöffnet",
+                        "Vantaggi aperti", "特典画面を開きました", "혜택 화면을 열었습니다"}},
+    // 自绘横幅那张卡的两个词：表头与右侧入口。文案不进 alert 层（那里只给身份）。
+    {"banner_head",    {"权益到账", "Rewards ready", "Gutscheine bereit", "Premi disponibili",
+                        "特典が届きました", "쿠폰 도착"}},
+    {"banner_view",    {"查看", "View", "Ansehen", "Vedi", "見る", "보기"}},
+    {"r_claim_hint",   {"只画各家写在自己磁盘上的读数；拿不到的字段整格不画，也不从别处推算。",
+                        "Only fields a vendor writes to its own disk are drawn. Anything unavailable stays blank — never inferred.",
+                        "Gezeichnet wird nur, was ein Anbieter selbst auf die Platte schreibt. Fehlendes bleibt leer — nie erschlossen.",
+                        "Si mostra solo ciò che ogni fornitore scrive sul proprio disco. Ciò che manca resta vuoto, mai dedotto.",
+                        "各ベンダーが自身のディスクに書いた値だけを描きます。取れない項目は空欄のままで、推定しません。",
+                        "각 벤더가 자기 디스크에 쓴 값만 그립니다. 없는 항목은 비워 두며 추정하지 않습니다."}},
     {"r_today",        {"今日", "Today", "Heute", "Oggi", "本日", "오늘"}},
     {"r_today_usage",  {"今日用量", "Today’s usage", "Heutige Nutzung", "Uso di oggi",
                         "本日の使用量", "오늘 사용량"}},
@@ -974,7 +1173,10 @@ enum Tier { T_NUM, T_TITLE, T_CHIP, T_TURNS, T_FAIL, T_BTN, T_GLYPH, T_GLYPH_SM,
             //   T_S16B 16/600（空态标题 .empty h2；app.css 覆盖 base 的 17px，脚本看不到）
             //   T_S17B 17/600（详情屏工具名 .detail-identity .agent-name，与 T_S17=17/500 不同档）
             //   T_N20  20/500（账户页拆解大数 .breakdown strong，与 T_S20=20/600 字重不同）
-            T_S10B, T_S11, T_S15B, T_S23B, T_S8, T_S9B, T_S16B, T_S17B, T_N20, TIER_N };
+            T_S10B, T_S11, T_S15B, T_S23B, T_S8, T_S9B, T_S16B, T_S17B, T_N20,
+            // T_N40 40/600：权益卡的面值。2026-10-30 用户「权益数字要醒目一点，不然都看不出来」，
+            // 原 T_N28 与卡上品牌名只差 2.3 倍、又同色同墨，一整块读起来就是一行正文。
+            T_N40, TIER_N };
 static const float kTierPx[TIER_N]   = {26.0f, 12.5f, 11.0f, 11.0f, 10.5f, 10.5f, 10.0f, 6.0f,
                                         10.0f, 9.5f, 9.5f, 9.0f,
                                         10.0f, 11.0f, 11.5f, 12.0f, 9.0f, 15.0f,
@@ -983,7 +1185,7 @@ static const float kTierPx[TIER_N]   = {26.0f, 12.5f, 11.0f, 11.0f, 10.5f, 10.5f
                                         9.0f, 11.0f, 12.0f, 13.0f, 14.0f, 14.0f, 17.0f,
                                         20.0f, 22.0f, 23.0f, 28.0f, 35.0f, 39.0f,
                                         10.0f, 11.0f, 15.0f, 23.0f,
-                                        8.0f, 9.0f, 16.0f, 17.0f, 20.0f};
+                                        8.0f, 9.0f, 16.0f, 17.0f, 20.0f, 40.0f};
 static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false, false, false,
                                         true,  false, true,  true,
                                         true,  true,  false, false, false, false,
@@ -992,7 +1194,7 @@ static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false
                                         false, false, false, false, false, false, false,
                                         false, false, false, false, false, false,
                                         false, false, false, false,
-                                        false, false, false, false, false};
+                                        false, false, false, false, false, false};
 // 稿子里的粗体只有两处落在 mono 上（num-xl 600、「N 轮」semibold），本机有
 // JetBrainsMono-SemiBold 可以直接对应。sans 侧的 500/600/650 没有第二份文件，
 // 靠 g_fontB 那张「同一文件 + 轮廓加粗」的烘焙出来（见下面的 FaceFont）。
@@ -1004,7 +1206,7 @@ static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false
                                         false, false, false, false, false, false, false,
                                         false, false, false, false, false, false,
                                         false, false, false, false,
-                                        false, false, false, false, false};
+                                        false, false, false, false, false, false};
 // 0＝400 / 1＝500 / 2＝600。字体包里的 sans 只有 Regular 一档，>0 的档在烘焙时多烘一张
 // 轮廓加粗的脸（g_fontB，见 FaceFont）；mono 档有真 SemiBold，不再烘这一张。
 static const unsigned char kTierW[TIER_N] = {0, 2, 0, 0, 0, 1, 1, 1,
@@ -1014,7 +1216,7 @@ static const unsigned char kTierW[TIER_N] = {0, 2, 0, 0, 0, 1, 1, 1,
                                              2, 1, 1, 0, 0, 1,
                                              0, 2, 0, 2, 0, 2, 1, 2, 2, 1, 1, 1, 1,
                                              2, 1, 2, 2,
-                                             0, 2, 2, 2, 1};
+                                             0, 2, 2, 2, 1, 2};
 static bool MonoTier(int t) { return kTierMono[t]; }
 static int  MonoFace(int t) { return kTierBold[t] ? MONO_SB : MONO_R; }
 // 这张脸在这一档有没有可能被选中：mono 档只可能用到「它那一号等宽脸 + 四张正文脸」
@@ -1428,6 +1630,9 @@ struct UIRow {
     /// 一行的身份：agent id + 该 agent 里的会话 id。已读/稍后/落点都按这个键记，
     /// 单独用会话 id 会跨采集器撞名（两家都用 uuid，但不同家同名 uuid 不是没可能）。
     std::string key, agent_id, native_id;
+    /// 这一行的会话形态签原文（IDE／CLI）。空＝采集层没给出正证，那一格整格不画。
+    /// 值只由 ClientTagOf 给；不再按 agent 名字硬编码，否则 App 里开的会话会被写成 CLI。
+    std::string client;
     /// 今天这一段的跨度（秒）：`.live` 的「连续 4h 12m」。起点不在今天就是 0，界面不画。
     double span_sec = 0;
     /// `.live` 的 `$ cmd`：尾部最后一条 tool_use 的真命令；空＝整行不画。
@@ -1476,7 +1681,9 @@ struct Tool {
     std::vector<ap::ModelUse> models;
     std::array<long, 24> hourly{};
     ap::Quota quota;
-    std::string client = "CLI";
+    /// 这一路的会话形态（IDE／CLI）。空＝没有正证，那一格整格不画。
+    /// 值一律由 ClientTagOf 给，不在这里按名字猜。
+    std::string client;
     int wait_n = 0;
     bool present() const {
         return rows > 0 || usage.total() > 0 || has_credits || quota.known || available;
@@ -1486,6 +1693,7 @@ struct PanelData {
     std::vector<UIRow> rows;
     std::vector<Chip> chips;             // 每个采集器一格（数字＝本轮真摆出来的行）
     std::vector<Tool> tools;             // 全部采集器，含本机没有的那几路
+    std::vector<ap::Claim> claims;       // 权益领取：各家写在自己磁盘上的读数（只读层）
     std::vector<std::string> quiet;      // 今天没活动的采集器名
     std::vector<std::string> errors;     // 「某采集器：读失败原因」
     int hook_live = 0;                   // Hook 收件箱里这轮真数得到的信号文件数（数据源那一格）
@@ -1565,6 +1773,9 @@ static bool g_panelVisible = true;
 static GLFWwindow* g_win = nullptr;      // 点击要跳走时得先把这块面板收起来
 /// 出图模式：这一轮是给取证的，点完不许真把窗口藏了（那样拍不到点击后的状态），也不许跳走。
 static const char* g_shot_to = getenv("AGENTPING_SHOT");
+/// 离屏探针轮：AGENTPING_CLICK 在这一轮是合成的，落点必须走假档（AGENTPING_LAND_SHOT 指定），
+/// 否则「给六语并排图取证」会把他的桌面一家家点开。g_shot_to 在这一轮是空的，所以它拦不住。
+static bool g_probe_round = false;
 
 // ── 设置屏接的三个活口子 ────────────────────────────────────────────────────
 // g_cfg 是「屏幕上那一屏」与 alert.cpp 的持久化之间唯一的桥：启动时 load、每次点击 save。
@@ -1594,22 +1805,45 @@ static ImU64 g_brandTex36 = 0, g_brandTex68 = 0;
 static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
 /// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
 static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
+// ── 自绘横幅：券到账时在桌面弹一块小卡（2026-10-30 用户拍板「我们自己画一块横幅窗」）──
+// 为什么不走系统横幅：那条通道先要过「系统设置→通知→Agent Ping」这道闸，本机实测档位是
+// 「被关着」，ap_notify_post 于是只返回 1（兜底出声）——人眼前什么都没有。自己画不欠授权。
+// 它吃同一颗开关（AlertCfg::claims）与同一颗免打扰：关掉＝真不弹，不是弹了不响。
+struct BannerItem {
+    std::string agent;   // 厂商 id：Brand31 认它，落点也按它认
+    std::string key;     // 整条券键 claim:<vendor>:<日期>
+    std::string title;   // 「WorkBuddy · 有券可领」
+    std::string body;    // 「100 credits 待领 · 点横幅进权益屏」
+};
+static std::vector<BannerItem> g_banners;
+static bool g_bannerActive = false;   // 本帧画的是横幅而不是面板
+static bool g_bannerShown = false;    // 窗口因横幅被叫醒：收起时要还它睡回去
+static float g_bannerH = 0.0f;        // 绘制那一趟量出来的卡高，供 WantedWindowH 下一帧用
+// 没有倒计时：2026-10-30 用户拍板「弹的话不点就常驻，点了才没」。收起只有三条路——
+// 点那一行（进权益屏）、表头 ✕（整块收掉）、以及那张券自己不再可领（见 RunAlertRound 的撤账）。
+/// 一批横幅的卡高：绘制层和「叫醒窗口那一帧的尺寸」用同一条式子。
+/// 第一帧还没量过时若按 0 开窗，窗口会先是一条空白再被 settle 拉长。
+static float BannerHeight(int n) { return 38.0f + 62.0f * (float)n + 10.0f; }
+
 /// 换屏。r20 每屏各有自己的滚动位置，切过去必须从头顶开始——稿子每次 render() 重建 DOM，
 /// `.body` 的 scrollTop 自然归零；这边不清就会把上一屏滚到 halfway 的偏移带过去。
 /// 同一屏内的位置要留着（滚下去点一行再返回，不该被弹回头顶），所以只清目标屏那一格。
+/// 屏号不连续：权益屏占的是 9（4 号在 r20 就空出来了），只按「最大号」写死会把新屏的
+/// 一次切换静默吃掉——实测点「权益」标签，命中区、DoAction 全走通了，屏却没换。
 static void GotoView(int v) {
-    if (v < 0 || v > 8) return;
+    if (v < 0 || v > 9) return;
     g_view = v;
     g_scroll[v] = 0.0f;
     g_scrollTarget[v] = 0.0f;
     g_relayout = true;
 }
-/// 这一轮界面用哪一语（kStr 六列的下标）。启动时由「settings.txt 的 lang → AGENTPING_LANG
-/// → 平台层探测」这条顺序定，之后设置屏那颗 .sel 可以改它（HIT_LANG）：六语的界面固定文案
+/// 这一轮界面用哪一语（kStr 六列的下标）。优先级从低到高：平台层探测 → settings.txt
+/// 的 lang（设置屏那颗 .sel 写的）→ AGENTPING_LANG（取证口，必须盖得过他存的偏好，
+/// 否则同一份设置只能拍出一种语言）。取值口径见 [语言] 那行打印。六语的界面固定文案
 /// 在启动时就全烘进图集（AddChromeText 遍历 kLocales），会话标题那类活文本由这一版 ImGui
 /// 按需栅格化，所以运行时改口不会出现半屏旧字半屏新字。
 /// 改完必须 g_relayout：RefFace 决定行框高，换语等于换度量。
-/// 初值只在「main 还没跑到检测」时生效，取值口径见 [语言] 那行打印。
+/// 初值只在「main 还没跑到检测」时生效。
 static int g_loc = AP_LANG_ZH;
 /// 上一轮「还在动」（非静置）的会话身份键。设置屏打开「已完成」那一档后，只有
 /// 从这条集合里掉出来的会话才允许响 —— 没有它，第一次打开就会把几十条几天前静置的
@@ -1935,17 +2169,25 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               // HIT_SUBTOG 队列行/运行卡上那颗「N 条子对话」的展开开关
               HIT_SUBTOG = 36,
               HIT_H31MORE = 38,      // 完成记录「还有 N 条」补位行（自动续页的兜底入口）
-              HIT_QUEUEALL = 39,
+              HIT_QUEUEALL = 39,     // 首页队列「还有 N 条」：展开全部待处理行
               // HIT_AXGO 接线屏第三步那颗「去系统设置」：开到「隐私与安全性 → 辅助功能」
-              HIT_AXGO = 40 };   // 首页队列「还有 N 条」：展开全部待处理行
+              // HIT_BANNER 自绘横幅上的一行券（key＝券键，opt＝第几条）；HIT_BANNERCLOSE 是右上角✕
+              // HIT_CLAIMREFRESH 权益屏表头那颗「刷新」：立刻重读三家落盘读数
+              // HIT_CLAIMCARD 权益卡整张：把这家的 App 唤到前台（领取仍归他自己点）
+              HIT_AXGO = 40, HIT_BANNER = 41, HIT_BANNERCLOSE = 42, HIT_CLAIMREFRESH = 43,
+              HIT_CLAIMCARD = 44 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
 /// SC_NOTIFY（屏上「系统通知」对账上 dnd 要取反）那样绕一道。
 static void Toast(const std::string& a, const std::string& b, bool go = false);   // 定义在 r20 段
 static const Tool* AgentTool(const char* id);   // 定义在绘制段；落点回执要先认得出这一路的工具名
+/// 面板上念的那个产品名（providers 表）。定义在文件末尾 include 的 r31_views.inc。
+/// 权益卡的回执必须与卡头同名。实测点击那一帧 g_pd.tools 还是空的（日志 tools=0），
+/// 走 AgentTool 就退回采集器 id，屏幕上成了「只把 workbuddy 带到了前台」。
+static std::string R31Agent(const std::string& id, int loc);
 enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
-              SC_TOP, SC_ROWS, SC_DND, SC_LAUNCH, SC_QUIT };
+              SC_TOP, SC_ROWS, SC_DND, SC_CLAIMS, SC_LAUNCH, SC_QUIT };
 struct Hit {
     float x0, y0, x1, y1;
     int act = 0, row = 0, opt = 0;
@@ -2139,6 +2381,8 @@ static void FlipSet(int ctl, int opt) {
         // 日志把两边都念出来，对账时才不会把「一个开一个关」误读成 bug。
         case SC_NOTIFY: g_cfg.dnd        = !g_cfg.dnd;        b = !g_cfg.dnd;       key = "sys_notify"; break;
         case SC_DND:    g_cfg.dnd        = !g_cfg.dnd;        b = g_cfg.dnd;        key = "set_dnd"; break;
+        // 「权益到账」不看会话，只看各家磁盘上的领取读数；关掉期间不记账（见 select_claim_alerts）。
+        case SC_CLAIMS: g_cfg.claims     = !g_cfg.claims;     b = g_cfg.claims;     key = "set_claim"; break;
         case SC_TOP:    g_cfg.on_top     = !g_cfg.on_top;      b = g_cfg.on_top;    key = "on_top"; break;
         case SC_ROWS:   g_cfg.max_rows   = opt;               b = true;             key = "max_rows"; break;
         case SC_QUIT:   // 设置屏底部「退出」：走窗口正常关闭（扫描线程在 join 里收）
@@ -2467,6 +2711,10 @@ static const char* ActName(int act) {
         case HIT_HOOKINST: return "写入接线";
         case HIT_JUMP:     return "跳转会话";
         case HIT_AXGO:     return "去系统设置";
+        case HIT_BANNER:   return "横幅·券";
+        case HIT_BANNERCLOSE: return "横幅·关掉";
+        case HIT_CLAIMREFRESH: return "权益·刷新";
+        case HIT_CLAIMCARD:    return "权益·卡";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -2716,6 +2964,29 @@ static void OnBannerClick(const char* agent, const char* session, void*) {
     fflush(stderr);
 }
 
+/// 券那条横幅的落点：收横幅 → 唤窗口 → 切权益屏。系统横幅和自绘横幅共用这一条，
+/// 两条路点下去必须是同一个地方，不然「点横幅」这件事就有两种答案。
+/// 不跳那家 App：券要在它自己的界面里领，而那几家的读数我们本来就摆在同一屏上了
+/// （Ready 那张卡已被 R31Claims 排到最前，所以不动来源导轨：导轨一改，会话屏跟着被筛到
+/// 同一家，那是横幅点不该带的副作用）。
+static void OpenClaimScreen(const std::string& agent, const std::string& key) {
+    // 「点了就没了」只对他点的那一条成立：同块卡上并着的另一家还欠他一次决定，
+    // 顺手清掉等于替他按了 ✕。系统横幅那条回传的 key 可能只是厂商 id，所以两个都认。
+    const size_t before = g_banners.size();
+    g_banners.erase(std::remove_if(g_banners.begin(), g_banners.end(),
+                                   [&](const BannerItem& b) {
+                                       return b.key == key || (!agent.empty() && b.agent == agent);
+                                   }),
+                    g_banners.end());
+    ShowPanel();
+    if (g_win) glfwFocusWindow(g_win);
+    GotoView(9);
+    printf("[横幅点击] 券 %s/%s → 权益屏｜撤下 %zu 条，屏上还剩 %zu 条\n", agent.c_str(),
+           key.c_str(), before - g_banners.size(), g_banners.size());
+    fflush(stdout);
+    Toast(std::string(T("claim_opened", g_loc)), "");
+}
+
 static void DrainBannerClick() {
     std::string agent, ses;
     {
@@ -2726,6 +2997,11 @@ static void DrainBannerClick() {
     }
     Hit h;
     h.agent_id = agent;
+    // 券那张横幅没有「会话」可定位：它的 session_id 是整条 claim 键。
+    if (ap::is_claim_key(ses)) {
+        OpenClaimScreen(agent, ses);
+        return;
+    }
     h.native_id = NativeId(agent, ses);
     // 标题必须一起带上：会话级落点认的就是标题（Qoder 托盘里没有 URL 可认）。
     // 上一版这里只填了 agent/id，于是点横幅永远走不到托盘点名那一级，
@@ -2879,6 +3155,65 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             JumpAndReport(h);
             return;
         }
+        case HIT_BANNER:                        // 自绘横幅那一行券：落点与系统横幅同一条出口
+            OpenClaimScreen(h.agent_id, h.key);
+            return;
+        case HIT_BANNERCLOSE: {                 // 横幅右上角✕：只收横幅，不叫醒面板
+            // 表头这一颗管整块卡（它是卡级的关闭，不是某一行的「稍后」）；
+            // 常驻之后它是唯一一条「我现在不想处理、但也不看权益屏」的出口。
+            const size_t n = g_banners.size();
+            g_banners.clear();
+            printf("[横幅] 手动关掉 %zu 条（账本已记，本期不再弹）\n", n);
+            fflush(stdout);
+            return;
+        }
+        case HIT_CLAIMREFRESH: {          // 权益屏表头那颗「刷新」：立刻重读三家落盘的读数
+            // 只重读，不触发提醒轮：面板开着的时候提醒那一档本来就不记账（见 RunAlertRound
+            // 里那条门），在这里顺手跑一轮会把当天的券静默吃掉。
+            const auto t0 = std::chrono::steady_clock::now();
+            const double t = (double)std::time(nullptr);
+            std::vector<ap::Claim> cs = ap::claims_scan(t);
+            const double ms = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - t0).count();
+            int ready = 0;
+            for (const auto& c : cs) if (c.ready) ready++;
+            g_pd.claims = std::move(cs);
+            g_pd.now = t;               // 页脚那个「读数于」跟着推到当下——这是按钮唯一的可见回执
+            g_relayout = true;
+            printf("[权益刷新] 重读 %zu 家｜可领 %d｜%.1fms\n", g_pd.claims.size(), ready, ms);
+            fflush(stdout);
+            Toast(T("r_claim_refreshed", g_loc), "");
+            return;
+        }
+        case HIT_CLAIMCARD: {   // 权益卡整张：把那家 App 唤到前台，领取仍由他自己点
+            // 2026-10-30 用户：「双击为啥没反应呢，只是提示吗，需要去 agent 领，是吗」。
+            // 这一跳刻意不走会话级那两把钥匙：权益面板不是会话，没有「那一条对话」可落。
+            // 会话 id 传空串 → 平台层的 DeepURL 对空 id 直接返回 nil，所以设计上就只可能
+            // 停在 layer 2（把 App 带到前台）；真跳不到（没装／唤不起）就报落空，不猜。
+            const int loc = LocOfZid(h.zid);
+            char why[256]; why[0] = 0;
+            int layer = 0;
+            int rc = 1;
+            if (!g_shot_to && !g_probe_round) {
+                rc = ap_open3(h.agent_id.c_str(), "", nullptr, why, (int)sizeof why, &layer);
+            } else {
+                // 出图轮与离屏探针：合成点击是给取证的，真跳会把他的桌面点开（与
+                // JumpAndReport 同一层含义）。这一档落在哪由 AGENTPING_LAND_SHOT 指定，
+                // 拍到的字与真跳走的是同一条 Toast 通路。
+                const char* e = getenv("AGENTPING_LAND_SHOT");
+                rc = (e && !strcmp(e, "app")) ? 0 : 1;
+                layer = rc == 0 ? 2 : 0;
+                snprintf(why, sizeof why, "出图轮预览，未发起真跳转");
+            }
+            const std::string name = R31Agent(h.agent_id, loc);
+            printf("[权益落点] %s → rc=%d layer=%d｜%s\n", h.agent_id.c_str(), rc, layer, why);
+            fflush(stdout);
+            char tb[256];
+            snprintf(tb, sizeof tb, T(rc == 0 ? "land_app" : "land_none", loc), name.c_str());
+            Toast(tb, T(rc == 0 ? "r_claim_land_sub" : "r_claim_land_none_sub", loc));
+            g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
+            return;
+        }
         case HIT_COPY: {                        // 详情屏的选项：只进剪贴板，不跳走
             if (!h.label.empty()) ImGui::SetClipboardText(h.label.c_str());
             const int loc = LocOfZid(h.zid);
@@ -2913,8 +3248,8 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_scroll[g_view] = 0.0f;
             g_relayout = true;
             return;
-        case HIT_TAB31:                         // 会话 / 用量两个标签（opt＝目标屏）
-            g_tab = (h.opt == 6) ? 6 : 0;
+        case HIT_TAB31:                         // 会话 / 用量 / 权益三个标签（opt＝目标屏）
+            g_tab = (h.opt == 6 || h.opt == 9) ? h.opt : 0;
             GotoView(g_tab);
             return;
         case HIT_INFO31: {                      // 行上的 ⓘ：进详情，不动跳转
@@ -3298,12 +3633,12 @@ static void HandleInput(const ImGuiIO& io, double now) {
     // 稿子 app.js:177 的两条键盘路（「能补就补」档）：⌘/Ctrl+F 唤出搜索并聚焦；
     // Esc 在根屏收搜索、在子屏等于点「← 来处」。输入框收字时 Esc 仍归输入框。
     if (!g_r31_focus && !escTaken && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        if ((g_view == 0 || g_view == 6) && g_r31_search) {
+        if ((g_view == 0 || g_view == 6 || g_view == 9) && g_r31_search) {
             g_r31_search = false;
             g_r31_query.clear();
             g_r31_focus = 0;
             g_relayout = true;
-        } else if (g_view != 0 && g_view != 6) {
+        } else if (g_view != 0 && g_view != 6 && g_view != 9) {
             Hit back_hit;
             back_hit.act = HIT_R31BACK;
             DoAction(back_hit, mp);
@@ -3665,6 +4000,7 @@ static const char* ViewTag(int v) {
         case 6: return "usage";
         case 7: return "account";
         case 8: return "tools";
+        case 9: return "claims";
         default: return "pin";
     }
 }
@@ -3678,6 +4014,7 @@ static const char* ViewName(int v) {
         case 6: return "用量与额度";
         case 7: return "工具用量";
         case 8: return "全部工具";
+        case 9: return "权益领取";
         default: return "会话总览";
     }
 }
@@ -4579,12 +4916,14 @@ static void RebuildPanel(const ap::Snapshot& s) {
 
     for (const auto& ag : s.agents) {
         bool has_today = false;
+        bool app_seen = false;
         int shown = 0;
         for (const auto& se : ag.sessions) {
             // 「今日已结束」＝今天有过动静、但已经不跑的会话（稿子 done 组）。
             // 昨天及更早的静置会话不进面板 —— 稿子的组名就写着「今日」。
             if (se.state == ap::ST_RESTING && se.last_activity < s.window_start) continue;
             has_today = has_today || (se.last_activity >= s.window_start);
+            app_seen = app_seen || se.app_indexed;
             UIRow row;
             row.state = se.state;
             // 「等你多久」问的是这次停下来的时长。hook 说得出就按信号时刻算；
@@ -4598,6 +4937,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.project = se.project;
             row.agent = ag.name;
             row.agent_id = ag.id;
+            row.client = ClientTagOf(ag.id, se.app_indexed);
             row.key = ag.id + "/" + se.id;
             row.native_id = NativeId(ag.id, se.id);   // 前缀摘掉，规则与横幅点击同一份
             row.acked = g_ack.count(row.key) > 0;
@@ -4659,9 +4999,9 @@ static void RebuildPanel(const ap::Snapshot& s) {
         tl.models = ag.models;
         tl.hourly = ag.hourly;
         tl.quota = ag.quota;
-        // 两种客户端形态是来源自己决定的，不是按名字猜的：ZCode / WorkBuddy 是 IDE 内的
-        // 会话，其余是命令行。屏上那个 client 小签只念这一件事。
-        tl.client = (ag.id == "zcode" || ag.id == "workbuddy") ? "IDE" : "CLI";
+        // 形态签按这一路今天真摆出来的会话给：Qoder 只要有一条被 App 的会话库索引到就写
+        // IDE，一条都没有就留空（留空＝不知道，不等于「它是 CLI」）。屏上那颗小签只念这一件事。
+        tl.client = ClientTagOf(ag.id, app_seen);
         pd.tools.push_back(std::move(tl));
     }
     pd.hook_live = s.hook_live;
@@ -4692,6 +5032,8 @@ static void RebuildPanel(const ap::Snapshot& s) {
     // 今日用量是整轮口径（scan_all 已汇总），不由逐项拼出来
     pd.credits = s.today_credits;
     pd.yday_credits = s.yesterday_credits;
+    // 权益层与快照分开取：它读的是各家另外的日志，一轮 <10ms（实测），不必进快照缓存。
+    pd.claims = ap::claims_scan(now);
     pd.now = now;
     pd.window_start = s.window_start;
     // 每个工具「在等」几条：R31 的工具列表要摆这一格，判据与总览队列同源。
@@ -4815,6 +5157,92 @@ static void RunAlertRound(const ap::Snapshot& s) {
                                                                      : "两边都不通", why);
         fflush(stderr);
     }
+    // ── 券到账这一轮：接在同一本账之后，靠 claim: 前缀各扫各的 ────────────────
+    // 这里必须自己 scan，不能读 g_pd.claims：那一份是「画那一趟」的产物，
+    // 面板收起时主循环根本不去画，而提醒恰恰要在收起的时候干活。
+    // 面板开着的时候整段跳过，而且**不记账**：本机实测踩过——App 一启动面板就是开着的，
+    // 当轮就把当天那张券判成「已提醒」写进账本，于是横幅永远弹不出来（只有一句两秒的
+    // toast）。跳过而不记账，等他收起面板的那一轮再真弹，才是「有通知」这句话的意思。
+    int claim_posted = 0, claim_retired = 0, claim_hits = 0, claim_fresh = 0;
+    if (!g_panelVisible) {
+        const std::vector<ap::Claim> cs = ap::claims_scan(now);
+        std::set<std::string> cnext;
+        const ap::AlertRound cr = ap::select_claim_alerts(cs, next, g_cfg, &cnext);
+        claim_hits = cr.hits; claim_fresh = cr.fresh;
+        claim_retired = cr.retired;
+        for (const auto& p : cr.to_post) {
+            const ap::Claim* c = nullptr;
+            for (const auto& x : cs) if (x.vendor == p.agent_id) { c = &x; break; }
+            // 正文优先报数字：WorkBuddy 那条每天 100 credits，读数里有就说读数里的。
+            char line[192];
+            if (c && c->credit_known)
+                snprintf(line, sizeof line, T("claim_credit", g_loc), (long long)c->credit);
+            else
+                snprintf(line, sizeof line, "%s", T("claim_open", g_loc));
+            const std::string body = std::string(line) + " · " + T("claim_goto", g_loc);
+            const std::string title = p.agent_name + " · " + T("claim_word", g_loc);
+            // 自己画，不发系统横幅（2026-10-30 用户拍板）。两条理由：
+            // ① 系统那条通道先要过「系统设置→通知」这道闸，本机实测档位是被关着，
+            //    发出去只返回 1（出声），人眼前什么都没有，而账本照记＝这一期再也不弹；
+            // ② 一旦他哪天开了权限，系统横幅和我们自己的卡会同时出现，同一件事响两遍。
+            BannerItem bi;
+            bi.agent = p.agent_id; bi.key = p.session_id; bi.title = title; bi.body = body;
+            // 常驻之后同一家可能连着来两张（昨天的他没点，今天这张又出了）：换字，不叠第二行。
+            // 叠上去那块卡会长高，而两行写着同一家「有券可领」的卡看不出是两件事。
+            bool rewrote = false;
+            for (auto& b : g_banners)
+                if (b.agent == p.agent_id) { b = bi; rewrote = true; break; }
+            if (!rewrote) g_banners.push_back(bi);
+            claim_posted++;
+            fprintf(stderr, "[权益提醒] %s｜%s｜自绘横幅在屏 %d 条%s\n", title.c_str(),
+                    body.c_str(), (int)g_banners.size(),
+                    rewrote ? "（同厂商换期，没叠第二行）" : "");
+            fflush(stderr);
+        }
+        if (claim_posted && g_cfg.sound) {
+            // 只在「这一轮真推了新横幅」时响一次。挂在 g_banners 非空上会每 3 秒重扫
+            // 就补一声——横幅改成常驻之后，那张卡会一路响个没完（2026-10-30 活机
+            // 日志在 8 秒版上就实测到一张卡补了三声）。
+            char why[256] = {0};
+            const int sr = ap_sound_test(why, (int)sizeof why);
+            fprintf(stderr, "[权益提醒] 提示音%s：%s\n", sr == 0 ? "已出" : "没出成", why);
+            fflush(stderr);
+        }
+        // 「上次提醒」的时刻得活过重启，所以落 settings.txt；只在真推了横幅那一轮写盘——
+        // 这一轮每 3 秒跑一次，无条件写就把设置文件当心跳文件刷了。
+        if (claim_posted) {
+            g_cfg.last_claim_at = (long long)std::time(nullptr);
+            std::string serr;
+            if (!ap::save_alert_cfg(g_cfg, &serr))
+                fprintf(stderr, "[权益提醒] 上次提醒的时刻没写进去：%s\n",
+                        serr.empty() ? "原因未回" : serr.c_str());
+            fflush(stderr);
+        }
+        next = std::move(cnext);
+        if (cr.posted || cr.retired) {
+            printf("[权益提醒] 命中 %d｜首次 %d｜发出 %d｜压掉 %d｜摘账 %d｜开关%s｜免打扰%s\n",
+                   cr.hits, cr.fresh, cr.posted, cr.capped, cr.retired,
+                   g_cfg.claims ? "开" : "关", g_cfg.dnd ? "开" : "关");
+            fflush(stdout);
+        }
+    }
+    // 撤掉倒计时之后，「这张券其实已经不用提醒了」只能靠每轮拿当前读数对一次键来收。
+    // 这一小段故意放在 !g_panelVisible 那道门外面：面板开着的时候横幅虽然不画，但卡还挂在
+    // g_banners 里，等他领完券把面板一收，屏上就剩下几张永远点不完的旧卡。
+    if (!g_banners.empty()) {
+        const std::vector<ap::Claim> live = ap::claims_scan(now);
+        std::set<std::string> still;
+        for (const auto& c : live) if (c.ready) still.insert(c.vendor);
+        const size_t before = g_banners.size();
+        g_banners.erase(std::remove_if(g_banners.begin(), g_banners.end(),
+                                       [&](const BannerItem& b) { return !still.count(b.agent); }),
+                        g_banners.end());
+        if (g_banners.size() != before) {
+            printf("[横幅] 券已不在可领状态，撤下 %zu 条（屏上剩 %zu 条）\n",
+                   before - g_banners.size(), g_banners.size());
+            fflush(stdout);
+        }
+    }
     g_ledger = next;
     std::string err;
     if (!ap::save_alerted(g_ledger, &err)) {
@@ -4822,9 +5250,11 @@ static void RunAlertRound(const ap::Snapshot& s) {
                 err.empty() ? "原因未回" : err.c_str());
         fflush(stderr);
     }
-    if (g_alert_first || r.posted || r.retired || held) {
-        printf("[提醒] 命中 %d｜首次 %d｜发出 %zu｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜账本 %zu 条｜免打扰%s｜刚静置 %zu 条\n",
-               r.hits, r.fresh, keep.size(), r.capped, r.retired, held, g_ledger.size(),
+    if (g_alert_first || r.posted || r.retired || held || claim_posted || claim_retired) {
+        printf("[提醒] 命中 %d｜首次 %d｜发出 %zu｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜"
+               "券 %d/%d/%d｜账本 %zu 条｜免打扰%s｜刚静置 %zu 条\n",
+               r.hits, r.fresh, keep.size(), r.capped, r.retired, held,
+               claim_hits, claim_fresh, claim_posted, g_ledger.size(),
                g_cfg.dnd ? "开" : "关", just_finished.size());
         fflush(stdout);
     }
@@ -4842,6 +5272,8 @@ static float g_budgetH = 850.0f;
 
 /// 窗口该收到多高：r20 是固定 640 高的浮层，内容超出走屏内滚动；只有屏幕放不下时才压到预算。
 static int WantedWindowH() {
+    // 横幅那一档不套 400 的下限：通知卡就该只有通知卡那么大，撑到 400 会变成一块空玻璃。
+    if (g_bannerActive) return (int)(g_bannerH + 0.5f);
     // R31 的面板高跟内容走：几行会话就收成几行高（下不再挂一大截空白），
     // 上限仍是屏预算与 850。r20 三屏画不满 640，由各自 Draw 返回值兜住。
     float h = g_panelH;
@@ -4893,6 +5325,8 @@ static void LoadProbeFixture() {
         r.project = proj;
         r.agent = agent;
         r.agent_id = aid;
+        // 样例数据：这一条按「桌面 App 的会话库里有它」摆，好让形态签那一格仍能对版式。
+        r.client = ClientTagOf(aid, true);
         r.native_id = sess;
         r.key = std::string(aid) + ":" + sess;
         r.initial = InitialOf(agent);
@@ -4987,6 +5421,7 @@ static void LoadProbeFixture() {
         tl.quiet = quiet;
         tl.rows = rows;
         tl.hue = HueFor(name);
+        tl.client = ClientTagOf(id, true);   // 同上面的样例口径：一律当成有正证那一档，好把格子摆满
         pd.tools.push_back(std::move(tl));
         return &pd.tools.back();
     };
@@ -5031,7 +5466,6 @@ static void LoadProbeFixture() {
     }
     {
         Tool* t = tool("zcode", "ZCode", true, false, 0);
-        t->client = "IDE";    // 稿子 providers：zcode 是 IDE
         t->quota.known = true;
         t->quota.plan = "Pro";
         t->quota.five.known = true;
@@ -5042,7 +5476,6 @@ static void LoadProbeFixture() {
     }
     {
         Tool* t = tool("workbuddy", "WorkBuddy", true, false, 0);
-        t->client = "IDE";    // 稿子 providers：workbuddy 是 IDE
         t->quota.known = true;
         t->quota.plan = "Team";
         t->quota.five.known = true;
@@ -5064,6 +5497,48 @@ static void LoadProbeFixture() {
     }
     // Codex 也要一条完成记录：完成记录屏 / 详情屏才有第二个工具可点。
     row(ap::ST_RESTING, "kitchen-timer", "Codex", "codex", "h9", at(11, 8), 9);
+
+    // 权益屏（view 9）的样例读数。原先这一屏在探针里走的是「本机盘上没有读数」的空态，
+    // 文档图没东西可拍。三家的形态按采集层真实能产出的形状各写一种：有面值+连续签到+
+    // 失效时刻 / 只有面值和一个出现时刻 / 状态未知。最后这家不能写成「本期已领」——
+    // ZCode 把权益留在服务端，本机日志零信号，from_zcode 恒为 known=false（见 claims.cpp）。
+    // ZCode 的说明行用采集层同一个键：图上每个语言栏看到的是那一栏自己的语言。
+    {
+        auto ep = [&](int hh, int mm) { return now - at(hh, mm); };   // at() 给的是「多久以前」
+        ap::Claim w;
+        w.vendor = "workbuddy"; w.name = "WorkBuddy";
+        w.known = w.ready = true;
+        w.credit = 100; w.credit_known = true;
+        w.streak = 6; w.streak_known = true;
+        w.appears_at = ep(19, 0);
+        w.expires_at = now + 5 * 3600.0 + 20 * 60.0;
+        w.last_ready_at = now - 2 * 3600.0;
+        w.seen_at = now - 45.0;
+        w.log_mtime = now - 8 * 60.0;
+        w.source = "~/.workbuddy/logs/main.log";
+        pd.claims.push_back(w);
+
+        ap::Claim q;
+        q.vendor = "qoder"; q.name = "Qoder";
+        q.known = q.ready = true;
+        q.credit = 20; q.credit_known = true;
+        q.notif = 3; q.notif_known = true;
+        q.appears_at = ep(17, 30);
+        q.last_ready_at = now - 10 * 60.0;
+        q.seen_at = now - 30.0;
+        q.log_mtime = now - 3 * 60.0;
+        q.source = "~/Library/Application Support/com.qoder.app.stable/logs/<newest>/main.log";
+        pd.claims.push_back(q);
+
+        // ZCode：采集层恒 known=false，所以卡上只有状态胶囊和出处那一行，没有面值也没有时间轨。
+        ap::Claim z;
+        z.vendor = "zcode"; z.name = "ZCode";
+        z.log_mtime = now - 20 * 60.0;
+        z.source = "~/.zcode/cli/log/zcode-2026-10-30.jsonl";
+        z.note_key = "cl_note_zc_none";
+        pd.claims.push_back(z);
+        g_cfg.last_claim_at = now - 2 * 3600.0;   // 屏上那行「上次提醒 2h 前」
+    }
 
     pd.now = now;
     pd.window_start = midnight;
@@ -5200,11 +5675,20 @@ int main(int argc, char** argv) {
     // 设置盘的八个开关在窗口建起来之前就要落进 g_cfg：常驻置顶是建窗 hint，
     // 先开窗再改会让他在启动瞬间看见一次「本该置顶却没置顶」的闪。
     g_cfg = ap::load_alert_cfg();
+    // 设置屏改过语言就得活过重启：HIT_LANG 把 lang=0..5 写进 settings.txt，但这一版
+    // 原来只有「写」没有「读」——他选德语、重启，界面又回中文（2026-10-30 实拍发现）。
+    // 优先级是 探测 < settings.txt < AGENTPING_LANG：环境变量是取证口，必须能盖过他
+    // 存下来的偏好，否则同一份 settings.txt 只能拍出一种语言的图。
+    if (g_cfg.lang >= 0 && !getenv("AGENTPING_LANG")) {
+        g_loc = g_cfg.lang;
+        printf("[语言] 用 settings.txt 存的 lang=%d → %s\n", g_cfg.lang, kLocTag[g_loc]);
+        fflush(stdout);
+    }
     if (const char* v = getenv("AGENTPING_VIEW")) {
         g_view = atoi(v);
         // 探针要拍「停在该屏」的样子：底部标签条的高亮跟 g_tab 走，不同步就每屏都亮总览。
-        // R31 的根屏标签是 会话(0)/用量(6)，历史(5) 与设置(1) 也各认各的。
-        g_tab = (g_view == 1) ? 1 : (g_view == 5) ? 5 : (g_view == 6) ? 6 : 0;
+        // R31 的根屏标签是 会话(0)/用量(6)/权益(9)，历史(5) 与设置(1) 也各认各的。
+        g_tab = (g_view == 1) ? 1 : (g_view == 5) ? 5 : (g_view == 6 || g_view == 9) ? g_view : 0;
     }
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
@@ -5379,7 +5863,10 @@ int main(int argc, char** argv) {
 
         // 分屏路由（§2.3.1）：设置 / 接线 / 授权聚焦仍是 r20 版面（产品未要求重做），
         // 其余六屏走 R31。两者都要回写 g_bodyTop/g_bodyBot/g_contentH/g_scrollMax。
-        if (view == 1 || view == 2 || view == 4)
+        // 横幅那一档不在这张路由表里：它不是「一屏」，是同一块窗口换了一副尺寸。
+        if (g_bannerActive)
+            g_panelH = g_bannerH = R31Banner(dl, x, y, w, loc, tn);
+        else if (view == 1 || view == 2 || view == 4)
             g_panelH = R20Draw(dl, x, y, w, (float)WantedWindowH(), loc, view, tn);
         else
             g_panelH = R31Draw(dl, x, y, w, (float)WantedWindowH(), loc, view, tn);
@@ -5446,6 +5933,31 @@ int main(int argc, char** argv) {
         if (alerts_on) ap_notify_on_click(OnBannerClick, nullptr);
         else fprintf(stderr, "[提醒] 本轮不响（出图／AGENTPING_ALERT=0／非窗口模式）\n");
         fflush(stderr);
+        // AGENTPING_BANNER=1：把券横幅摆上屏取证。文案与数字都还走 claims_scan 的磁盘真读数，
+        // 只是不等「本期第一次」那道判据——出图轮的账本本来就指向临时目录。
+        {
+            const char* seed = getenv("AGENTPING_BANNER");
+            if (seed && *seed && strcmp(seed, "0") != 0) {
+                const double nowSec = (double)std::time(nullptr);
+                for (const auto& c : ap::claims_scan(nowSec)) {
+                    if (!c.ready) continue;
+                    char line[192];
+                    if (c.credit_known)
+                        snprintf(line, sizeof line, T("claim_credit", g_loc), (long long)c.credit);
+                    else
+                        snprintf(line, sizeof line, "%s", T("claim_open", g_loc));
+                    BannerItem bi;
+                    bi.agent = c.vendor; bi.key = "claim:" + c.vendor;
+                    bi.title = c.name + " · " + T("claim_word", g_loc);
+                    bi.body = std::string(line) + " · " + T("claim_goto", g_loc);
+                    g_banners.push_back(bi);
+                }
+                g_panelVisible = false;
+                printf("[横幅] 摆样 %d 条（AGENTPING_BANNER，只读磁盘上的真读数）\n",
+                       (int)g_banners.size());
+                fflush(stdout);
+            }
+        }
         double lastResize = glfwGetTime();
         int settle = 0;
         // AGENTPING_SNI_HOLD=毫秒：只挂着总线就收摊的取证模式。
@@ -5455,6 +5967,16 @@ int main(int argc, char** argv) {
         static const char* kHolding = getenv("AGENTPING_SNI_HOLD");
         const double hold_ms = kHolding ? atof(kHolding) : 0.0;
         const double hold_until = hold_ms > 0.0 ? glfwGetTime() + hold_ms / 1000.0 : 0.0;
+        // AGENTPING_PANEL=0：以「面板收着」起跑。真机上收面板是点菜单栏那颗，探针点不到它，
+        // 而券横幅恰恰只在收着的时候才该出现——不补这个口，「开关能不能拦住横幅」就没法验。
+        if (const char* pv = getenv("AGENTPING_PANEL")) {
+            if (!strcmp(pv, "0")) {
+                g_panelVisible = false;
+                glfwHideWindow(win);
+                printf("[面板] 按 AGENTPING_PANEL=0 起跑在收起态\n");
+                fflush(stdout);
+            }
+        }
         while (!glfwWindowShouldClose(win)) {
             glfwPollEvents();
             sb_pump();
@@ -5500,9 +6022,56 @@ int main(int argc, char** argv) {
                     { std::lock_guard<std::mutex> lk(g_mtx); copy = g_snap; }
                     RunAlertRound(copy);
                 }
-                DrainBannerClick();
             }
-            if (!g_panelVisible) {          // 收起时不空转 GPU，但扫描线程照跑，数字仍是活的
+            // AGENTPING_BANNER_CLICK=<agent>/<session>：自己灌一次「有人点了横幅」。
+            // 为什么要这条：系统横幅要先有通知授权才存在，而本机档位是「系统里被关着」，
+            // 于是「点横幅落到哪一屏」这条主张在活机上永远拍不到。这里把它接到平台回调
+            // 同一个登记口，走的还是 DrainBannerClick 那条真路，不是另搭的假状态。
+            {
+                static bool injected = false;
+                const char* bc = getenv("AGENTPING_BANNER_CLICK");
+                if (!injected && bc && *bc) {
+                    injected = true;
+                    const std::string s = bc;
+                    const size_t slash = s.find('/');
+                    OnBannerClick(s.substr(0, slash).c_str(),
+                                  slash == std::string::npos ? "" : s.c_str() + slash + 1, nullptr);
+                }
+            }
+            DrainBannerClick();
+            // ── 自绘横幅的开机与收起 ────────────────────────────────────────────
+            // 排在这里（可见性判断之前）：面板收着的时候才是它干活的时候，而窗口本
+            // 就是那块玻璃，只是换一副尺寸露一下脸。
+            {
+                // 面板开着就不换画面；横幅只在「面板没占着窗口」时才有屏可占。
+                const bool want = !g_banners.empty() && !g_panelVisible;
+                if (want && !g_bannerActive) {
+                    g_bannerActive = true;
+                    g_bannerH = BannerHeight((int)g_banners.size());
+                    if (!g_bannerShown) {
+                        g_bannerShown = true;
+                        // 不许抢焦点：他正在别的 App 里打字，一块提示不该把输入法带出来。
+                        glfwSetWindowAttrib(win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+                        glfwShowWindow(win);
+                        glfwSetWindowAttrib(win, GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+                        g_relayout = true;
+                        printf("[横幅] 弹出 %d 条，不点不收\n", (int)g_banners.size());
+                        fflush(stdout);
+                    }
+                } else if (!want && g_bannerActive) {
+                    g_bannerActive = false;
+                    g_relayout = true;
+                    if (g_panelVisible)
+                        g_bannerShown = false;   // 窗口交给面板拿着了，收它归 TogglePanel 那条路
+                    else if (g_bannerShown) {
+                        g_bannerShown = false;
+                        glfwHideWindow(win);
+                        printf("[横幅] 画面撤了，窗口睡回去（不留在屏上占地方）\n");
+                        fflush(stdout);
+                    }
+                }
+            }
+            if (!g_panelVisible && !g_bannerActive) {   // 收起时不空转 GPU，但扫描线程照跑，数字仍是活的
                 g_hits.clear();             // 命中区跟着画面一起作废，放回来时不许点在旧几何上
                 usleep(16000);
                 continue;
@@ -5725,6 +6294,7 @@ int main(int argc, char** argv) {
     // kTileGap 必须 > kPanelW(416)，否则相邻 tile 压叠 62pt，六语并排图整张作废。
     const float kTileY = 50.0f, kTileGap = 440.0f;
     g_budgetH = 850.0f;
+    g_probe_round = true;   // 从这一行起，合成点击只许走假落点，见 g_probe_round 的声明
     for (int i = 0; i < 400 && g_seq.load() == 0; i++) usleep(50000);
     for (int pass = 0; pass < 3; pass++) {
         glClearColor(0, 0, 0, 1);   // 探针窗口不透明：底色清成纯黑，卡框边缘才量得准

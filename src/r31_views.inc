@@ -615,9 +615,19 @@ static std::string R31Short(const std::string& id) {
     if (const Tool* t = R31ToolOf(id)) return t->initial.empty() ? t->name : t->name;
     return id;
 }
+/// 会话形态（行上那颗小签）的唯一出处。两种形态是来源自己决定的，不按名字猜：
+/// ZCode／WorkBuddy 的会话只存在 IDE 侧；Qoder 的桌面 App 与 CLI 共用同一个日志目录，
+/// 只能逐条看它有没有被 App 自己的会话库索引到 —— 没索引到不代表它就是 CLI，
+/// 那时返回空串，界面那一格不画（2026-10-30 用户：「我们在用的 qoder 其实是 IDE，
+/// 但展示的是 CLI，我并没有用 cli」；原来的写法是所有非 zcode/workbuddy 一律 CLI）。
+static std::string ClientTagOf(const std::string& id, bool app_indexed) {
+    if (id == "zcode" || id == "workbuddy") return "IDE";
+    if (id == "qoder") return app_indexed ? "IDE" : std::string();
+    return "CLI";
+}
 static std::string R31Client(const std::string& id) {
     if (const Tool* t = R31ToolOf(id)) return t->client;
-    return (id == "zcode" || id == "workbuddy") ? "IDE" : "CLI";
+    return ClientTagOf(id, false);
 }
 /// 品牌标：有官方像素的五路贴图；Codex 没有独立 logo，稿子给的就是通用终端块。
 static void Brand31(ImDrawList* dl, float x, float y, float s, const std::string& id, int loc) {
@@ -644,8 +654,10 @@ static void Brand31(ImDrawList* dl, float x, float y, float s, const std::string
     RAgentTile(dl, x, y, s, s * 0.235f, hue, ini, loc, "");
 }
 /// `.client-tag`（详情身份那颗）：mono 10/500（实测框高 13，不是声明推的 16）。
-static float R31ClientTag(ImDrawList* dl, float x, float cy, const std::string& id, int loc) {
-    const std::string s = R31Client(id);
+/// client 为空＝这一条没有形态正证，整格不画且返回 0，让左边那一截自己收拢。
+static float R31ClientTag(ImDrawList* dl, float x, float cy, const std::string& client, int loc) {
+    const std::string s = client;
+    if (s.empty()) return 0.0f;
     const float tw = TextWidth(s, loc, T_M10B);
     const float w = tw + 6.0f + 2.0f, h = 13.0f;
     dl->AddRect(ImVec2(x + 0.5f, cy - h * 0.5f + 0.5f), ImVec2(x + w - 0.5f, cy + h * 0.5f - 0.5f),
@@ -722,7 +734,7 @@ static void R31StatusRight(ImDrawList* dl, float x1, float cy, const UIRow& r, i
 static bool R31Match(const UIRow& r, const std::string& q) {
     if (q.empty()) return true;
     const std::string hay = R31Lower(r.project + " " + R31Agent(r.agent_id, 0) + " " +
-                                     R31Client(r.agent_id) + " " + r.question + " " +
+                                     r.client + " " + r.question + " " +
                                      r.title + " " + r.tool);
     return hay.find(q) != std::string::npos;
 }
@@ -857,7 +869,7 @@ static void R31March(ImDrawList* dl, float x, float y, float w, float h, double 
 // ── 表头：根屏＝产品名 + 模式标 + 齿轮 + 搜索；子屏＝← 来处 ──────────────────
 static void R31Head(ImDrawList* dl, float x, float y, float w, int loc, int view) {
     const float L = x + 18.0f, R = x + w - 18.0f, cy = y + 27.0f;
-    const bool root = (view == 0 || view == 6);
+    const bool root = (view == 0 || view == 6 || view == 9);
     const std::string mode = R31ModeText(loc);
     const float mw = R31ModeW(mode, loc);
     if (root) {
@@ -1035,6 +1047,32 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
         AddHit(g_hits, tx - 2.0f, y, tx + tw + 2.0f, y + 34.0f, HIT_TAB31, 600, 6, loc, t1,
                on ? 1 : 0);
+        tx += tw + 18.0f;
+    }
+    {
+        // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数。
+        const bool on = (g_view == 9);
+        const float x0 = tx;
+        const std::string t2 = T("r_claim_tab", loc);
+        const float tw = TextWidth(t2, loc, T_S12);
+        R31Mid(dl, tx, y + 17.0f, t2, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
+        if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
+        tx += tw;
+        int ready = 0;
+        for (const ap::Claim& c : g_pd.claims) if (c.ready) ready++;
+        if (ready > 0) {
+            // 2026-10-30 用户：「这个数字也要醒目点，比如颜色啥的」。原来它和左边 tab 名同灰、
+            // 底是 6% 白，一整条读起来没有重点。改走权益卡「现在可领」那颗的同一支蓝：
+            // 颜色只承担一件事——真有券才亮，没券时这一格根本不出现。
+            char cb[24];
+            snprintf(cb, sizeof cb, "%d", ready);
+            const float bw = TextWidth(cb, loc, T_S10B) + 8.0f;
+            dl->AddRectFilled(ImVec2(tx + 3.0f, y + 9.0f), ImVec2(tx + 3.0f + bw, y + 25.0f),
+                              WithA(k31Blue, 96), 4.0f);
+            DrawTextRun(dl, tx + 7.0f, TextMid(y + 17.0f, T_S10B, loc), cb, loc, k31Fg, T_S10B);
+            tx += bw + 3.0f;
+        }
+        AddHit(g_hits, x0 - 2.0f, y, tx + 2.0f, y + 34.0f, HIT_TAB31, 600, 9, loc, t2, on ? 1 : 0);
     }
 }
 
@@ -1083,8 +1121,10 @@ static std::string R31RowName(const UIRow& r) {
     return r.agent;
 }
 /// 行内 client 标签：mono 9（就近档 T_MICRO）、实测框高 16（line-height 14 + 上下边框）。
-static float R31RowTag(ImDrawList* dl, float x, float cy, const std::string& id, int loc) {
-    const std::string s = R31Client(id);
+/// client 为空＝没有形态正证，整格不画且返回 0。
+static float R31RowTag(ImDrawList* dl, float x, float cy, const std::string& client, int loc) {
+    const std::string s = client;
+    if (s.empty()) return 0.0f;
     const float tw = TextWidth(s, loc, T_MICRO, 0.3f);
     const float w = tw + 6.0f + 2.0f, h = 16.0f;
     dl->AddRect(ImVec2(x + 0.5f, cy - h * 0.5f + 0.5f), ImVec2(x + w - 0.5f, cy + h * 0.5f - 0.5f),
@@ -1197,7 +1237,8 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
     const float topCy = y + 18.0f;
     float cx = R31AgentName(dl, mx, topCy, r.agent_id, loc);
     cx += 5.0f;
-    cx += R31RowTag(dl, cx, topCy, r.agent_id, loc) + 5.0f;
+    const float tw1 = R31RowTag(dl, cx, topCy, r.client, loc);
+    cx += tw1 + (tw1 > 0.0f ? 5.0f : 0.0f);   // 没画就不留间距
     R31StatusRight(dl, mainR - 2.0f, topCy, r, loc);
     // row-title：y+30..+46（有子对话时，项目名给「⌄ N 条子对话」芯片让位）
     {
@@ -1283,7 +1324,8 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
     Brand31(dl, inL, y + 10.0f, 24.0f, r.agent_id, loc);
     float nx = R31AgentName(dl, inL + 24.0f + 6.0f, y + 22.0f, r.agent_id, loc);
     nx += 5.0f;
-    nx += R31ClientTag(dl, nx, y + 22.0f, r.agent_id, loc) + 6.0f;
+    const float tw2 = R31ClientTag(dl, nx, y + 22.0f, r.client, loc);
+    nx += tw2 + (tw2 > 0.0f ? 6.0f : 0.0f);
     {
         const float ibx = x + 354.0f;   // 370..392
         DrawTextRight(dl, ibx - 6.0f, TextMid(y + 22.0f, T_S10, loc), T("just_now", loc), loc,
@@ -1863,7 +1905,7 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 const float nx = L + 12.0f + 24.0f + 10.0f;
                 R31Mid(dl, nx, ry + 20.0f, R31Agent(t.id, loc), loc, k31Fg, T_S12B);
                 const std::string sub = t.has_credits ? R31Num(t.credits) + " Credits"
-                                                      : R31Client(t.id);
+                                                      : t.client;
                 R31Mid(dl, nx, ry + 38.0f, sub, loc, k31Muted, T_S9);
                 if (t.usage.total() > 0) {
                     const std::string v = R31Compact((double)t.usage.total());
@@ -1897,6 +1939,293 @@ static void R31UsageFoot(ImDrawList* dl, float x, float y, float w, int loc) {
     DrawTextRun(dl, tx + 17.0f, TextMid(y + 20.5f, T_S9, loc), left, loc, k31Muted, T_S9);
     DrawTextRight(dl, x + w - 19.0f, TextMid(y + 20.5f, T_S9, loc), T("r_not_billing", loc), loc,
                   k31Muted, T_S9);
+}
+
+// ── 权益领取（view 9）：整块滚动（162..809），页脚 41 ──────────────────────────
+static bool R31SameDay(double a, double b) {
+    std::tm x{}, y{};
+    const std::time_t ta = (std::time_t)a, tb = (std::time_t)b;
+    localtime_r(&ta, &x);
+    localtime_r(&tb, &y);
+    return x.tm_year == y.tm_year && x.tm_yday == y.tm_yday;
+}
+/// 只到「时:分」的时刻，跨了天就会被读成今天：WorkBuddy 的 00:00 是今天，Qoder 的
+/// 21:24 是昨天，两者在屏上长得一样就成了假话。带不带日期由调用方按上面那条规则算。
+static std::string R31ClaimStamp(double t, bool withDate) {
+    int hh = 0, mm = 0;
+    RTimeOfDay(t, &hh, &mm);
+    char sb[24];
+    if (!withDate) {
+        snprintf(sb, sizeof sb, "%02d:%02d", hh, mm);
+        return sb;
+    }
+    std::tm a{};
+    const std::time_t ta = (std::time_t)t;
+    localtime_r(&ta, &a);
+    snprintf(sb, sizeof sb, "%02d-%02d %02d:%02d", a.tm_mon + 1, a.tm_mday, hh, mm);
+    return sb;
+}
+
+/// 这一屏只允许画 ap::Claim 里真存在的字段。取不到的整块不画（不填 0、不写「—」占位），
+/// 时间轨按稿子的约定分三种：实线＝知道什么时候作废／虚线＝只知道什么时候出现／
+/// 红＝失效不到 6 小时。三家各自的缺口写在该卡的 note 行里，原样来自采集层。
+static void R31ClaimTrack(ImDrawList* dl, float x, float y, float w, const ap::Claim& c,
+                          int loc, double now) {
+    const bool hasEnd = c.expires_at > 0;
+    const bool urgent = hasEnd && c.expires_at - now < 6 * 3600.0;
+    const ImU32 col = urgent ? k31Red : k31Blue;
+    dl->AddLine(ImVec2(x, y), ImVec2(x + w, y), k31Line, 1.0f);
+    float frac = 0.0f;
+    if (c.appears_at > 0 && hasEnd && c.expires_at > c.appears_at)
+        frac = (float)((now - c.appears_at) / (c.expires_at - c.appears_at));
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    if (hasEnd) {
+        dl->AddLine(ImVec2(x, y), ImVec2(x + w * frac, y), col, 2.0f);
+        dl->AddCircleFilled(ImVec2(x + w * frac, y), 2.6f, col);
+    } else {
+        // 虚线：不知道什么时候作废，就不画「进度」——只画「它确实在这个时刻出现过」。
+        for (float sx = x; sx < x + w; sx += 7.0f)
+            dl->AddLine(ImVec2(sx, y), ImVec2(std::min(sx + 3.5f, x + w), y), WithA(k31Faint, 170), 1.4f);
+        dl->AddCircleFilled(ImVec2(x, y), 2.6f, WithA(k31Faint, 200));
+    }
+    std::string left;
+    const bool hasOpens = c.appears_at > 0;
+    const bool hasLast = c.last_ready_at > 0 && !c.ready;
+    if (hasOpens || hasLast) {
+        // 同一行两个时刻若在同一天，日期只写一次；今天的那个永远不带日期。
+        const bool d1 = hasOpens && !R31SameDay(c.appears_at, now);
+        const bool d2 = hasLast && !R31SameDay(c.last_ready_at, now) &&
+                        !(d1 && hasOpens && R31SameDay(c.appears_at, c.last_ready_at));
+        if (hasOpens)
+            left = RFmt(c.ready || c.done ? T("r_claim_opens", loc) : T("r_claim_sincenone", loc),
+                        R31ClaimStamp(c.appears_at, d1).c_str());
+        // 这一行是本屏唯一的「反证」：它现在说没有，但它昨天说过有 —— 后者才是「现在说没有」
+        // 可信的依据，只有时间戳的话分不开「本来就发完」和「刚被领走」。
+        if (hasLast)
+            left += (left.empty() ? std::string() : std::string(" · ")) +
+                    RFmt(T("r_claim_last", loc), R31ClaimStamp(c.last_ready_at, d2).c_str());
+    }
+    if (!left.empty()) R31Mid(dl, x, y + 12.0f, left, loc, k31Muted, T_S9);
+    // 虚线那一档不在每张卡上重复「本机没有失效时刻」——那句话是轨型本身的含义，
+    // 由屏顶的图例说一次；卡上只画真拿得到的作废倒计时。
+    if (hasEnd)
+        DrawTextRight(dl, x + w, TextMid(y + 12.0f, T_S9, loc),
+                      RFmt(T("r_claim_expires", loc), Dur(c.expires_at - now, loc).c_str()), loc,
+                      urgent ? k31Red : k31Muted, T_S9);
+}
+
+/// 卡上那句「差在哪一档」：采集层只给文案键，这里按当前语言取全文；
+/// 两段式（Qoder 的 head + 缺口）再把 head 键填进模板的 %s。
+static std::string R31ClaimNote(const ap::Claim& c, int loc) {
+    if (c.note_key.empty()) return std::string();
+    if (c.note_arg_key.empty()) return T(c.note_key.c_str(), loc);
+    return RFmt(T(c.note_key.c_str(), loc), T(c.note_arg_key.c_str(), loc));
+}
+
+/// 一张卡的高度随该卡的读数长：没有面值就没有那一行，note 几行就是几行。
+/// idx 只用来给命中区编一个稳定的地址号（同一屏多张卡要能各自寻址）。
+static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::Claim& c, int loc,
+                          double now, int idx) {
+    const std::string note = R31ClaimNote(c, loc);
+    const int noteLines = std::max(1, (int)R31Wrap(note, w - 28.0f, loc, T_S9, 4).size());
+    const bool hasMetric = c.credit_known || c.streak_known;
+    // 度量带 56：分隔线 1 + 线上留白 8 + 数字行框 44 + 线下留白 3。
+    const float metricH = hasMetric ? 56.0f : 0.0f;
+    // 落点那一行（2026-10-30）：他双击没反应，是因为这张屏上没有一个字说过「这里能点」。
+    // 只给「现在真有得领」且「落点表里这一路有客户端」的卡画 —— ap_has_client 读的就是
+    // ap_open3 同一张表（open_macos.mm:790），两处不许各判各的；表里没客户端的（claude/codex
+    // 这类纯 CLI）不写「打开」，那是个做不到的承诺。
+    const bool can_open = c.ready && ap_has_client(c.vendor.c_str()) == 1;
+    // 那一行落在 note 之后 6pt、框高 14pt，底下仍留 13pt（与卡内其它留白同档），
+    // 所以可点的卡只比原来高 14pt。
+    const float footH = can_open ? 14.0f : 0.0f;
+    // 连一条读数都没有的卡不画时间轨：没有起点的轨道画出来就是「本机没有失效时刻」这句
+    // 空话，而它真正的意思是「这台机器上根本没有这一家的领取读数」——那句话写在 note 里。
+    const float trackH = c.known ? 30.0f : 0.0f;
+    const float ch = 53.0f + metricH + trackH + 8.0f + 13.5f * noteLines + footH + 13.0f;
+    R31Glass(dl, x, y, w, ch, 13.0f);
+    // 2026-10-30 用户：「双击为啥没反应呢」。这张卡原来一个命中区都没有（整屏只有表头
+    // 那颗刷新可点），点哪儿都不会有反馈。挂上之后悬停要有，否则它看着就还是块说明文字。
+    // 配方沿用工具列表那一层：玻璃之后、内容之前，8% 白压在卡底上不糊字。
+    const float hovc = TxPeekNew(Zid(loc, 4300 + idx, HIT_CLAIMCARD, 0), 0.0f);
+    if (hovc > 0.01f)
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + ch), k31Hover, 13.0f);
+    const float px = x + 14.0f;
+
+    // head 53：品牌块 + 名字 + 这行读数的新鲜度；右侧一枚状态胶囊
+    {
+        Brand31(dl, px, y + 14.0f, 24.0f, c.vendor, loc);
+        const float nx = px + 24.0f + 9.0f;
+        R31Mid(dl, nx, y + 19.5f, R31Agent(c.vendor, loc), loc, k31Fg, T_S12B);
+        const char* st = !c.known ? T("r_claim_unknown", loc)
+                     : c.ready ? T("r_claim_ready", loc)
+                     : c.done ? T("r_claim_done", loc) : T("r_claim_none", loc);
+        const ImU32 sfg = c.ready ? k31Fg : !c.known ? k31Muted : k31Sec;
+        const ImU32 sbg = c.ready ? WithA(k31Blue, 46) : k31Badge;
+        const float pw = TextWidth(st, loc, T_S10B) + 18.0f;
+        dl->AddRectFilled(ImVec2(x + w - 14.0f - pw, y + 15.5f), ImVec2(x + w - 14.0f, y + 37.5f),
+                          sbg, 8.0f);
+        DrawTextRun(dl, x + w - 14.0f - pw + 9.0f, TextMid(y + 26.5f, T_S10B, loc), st, loc, sfg,
+                    T_S10B);
+        if (c.known && c.seen_at > 0) {
+            R31Mid(dl, nx, y + 38.0f,
+                   RFmt(T("r_claim_seen", loc),
+                        R31ClaimStamp(c.seen_at, !R31SameDay(c.seen_at, now)).c_str()),
+                   loc, k31Muted, T_S9);
+        } else {
+            // 出处那行只到文件名级别：家目录全称画在屏上，用户名就跟着进了截图。
+            static const std::string home = [] {
+                const char* h = getenv("HOME");
+                return h ? std::string(h) : std::string();
+            }();
+            std::string src = c.source;
+            if (!home.empty() && src.compare(0, home.size(), home) == 0)
+                src = "~" + src.substr(home.size());
+            auto lines = R31Wrap(src, w - 100.0f, loc, T_S9, 1);
+            R31Mid(dl, nx, y + 38.0f, lines.empty() ? std::string() : lines.front(), loc, k31Faint,
+                   T_S9);
+        }
+        // 右侧这一行是「那家自己最后一次写盘是什么时候」。它和左边的读数时刻、页脚的
+        // 扫描时刻是三件事：只有这一行能回答「我们没刷，还是那家没写」。拿不到 mtime
+        // （文件不存在）就整行不画——占位会让「没有这一家」和「这一家从没写过」看着一样。
+        if (c.log_mtime > 0) {
+            const double age = now > c.log_mtime ? now - c.log_mtime : 0.0;
+            DrawTextRight(dl, x + w - 14.0f, TextMid(y + 38.0f, T_S9, loc),
+                          RFmt(T("r_claim_src", loc), Ago(age, loc).c_str()), loc, k31Faint, T_S9);
+        }
+    }
+    float cy = y + 53.0f;
+    if (hasMetric) {
+        // 2026-10-30 用户：「权益数字要醒目一点，不然都看不出来」。原来面值 28/500 与卡上
+        // 品牌名 12/600 只差 2.3 倍、又是同一支墨，一整块读起来就是一行正文。这里改的不是
+        // 字号而是层级与布局：面值升成整卡唯一的大数字、单位贴它的基线（不再浮在中间当后缀
+        // 糊成一团）、连续天数从右边那句灰话拆成第二格度量（数字在上、标签在下、与面值底对齐）。
+        // 颜色只承担一件事：只有「现在可领」的数字用强调蓝（与下方时间轨同一支），
+        // 已领／没有的退成 k31Sec——喊的是要你动手的那张，不是每张都喊。
+        dl->AddLine(ImVec2(px, cy + 0.5f), ImVec2(x + w - 14.0f, cy + 0.5f), k31LineSoft, 1.0f);
+        const float top = cy + 9.0f;
+        if (c.credit_known) {
+            char vb[24];
+            snprintf(vb, sizeof vb, "%ld", c.credit);
+            const ImU32 ncol = c.ready ? k31Blue : k31Sec;
+            const float nw = TextWidth(vb, loc, T_N40, -1.4f);
+            const float ntop = TextTop(top, 44.0f, T_N40, loc);
+            DrawTextRun(dl, px, ntop, vb, loc, ncol, T_N40, -1.4f);
+            const float base = ntop + AscentPx(T_N40, RefFace(T_N40, loc));
+            DrawTextRun(dl, px + nw + 6.0f, base - AscentPx(T_S11B, RefFace(T_S11B, loc)), "Credits",
+                        loc, c.ready ? k31Muted : k31Faint, T_S11B, 0.2f);
+        }
+        if (c.streak_known) {
+            char sb[16];
+            snprintf(sb, sizeof sb, "%d", c.streak);
+            const float RE = x + w - 14.0f;
+            DrawTextRight(dl, RE, TextTop(top, 26.0f, T_N20, loc), sb, loc,
+                          c.ready ? k31Sec : k31Muted, T_N20, -0.4f);
+            DrawTextRight(dl, RE, TextTop(top + 26.0f, 14.0f, T_S9, loc),
+                          T("r_claim_streak_lab", loc), loc, k31Faint, T_S9);
+        }
+        cy += metricH;
+    }
+    if (c.known) {
+        R31ClaimTrack(dl, px, cy + 8.0f, w - 28.0f, c, loc, now);
+        cy += 30.0f;
+    }
+    R31DrawWrap(dl, note, px, cy + 2.0f, w - 28.0f, loc, T_S9, 13.5f, k31Muted, 4);
+    const std::string act = RFmt(T("r_claim_open_zone", loc), R31Agent(c.vendor, loc).c_str());
+    if (can_open) {
+        // 图标与「跳到了哪儿」那条回执用的是同一颗 I31_LAUNCH：屏上写的和回执画的是同一件事。
+        const float fy = cy + 2.0f + 13.5f * noteLines + 6.0f;
+        I31(dl, I31_LAUNCH, px, fy, 11.0f, k31Blue);
+        DrawTextRun(dl, px + 16.0f, TextMid(fy + 5.5f, T_S9, loc), act, loc, k31Blue, T_S9);
+    }
+    // 命中区登记在内容之后、卡片底部已知（ch），所以整张卡都是落点。agent_id 带的是采集器
+    // id，DoAction 拿它去问平台层「这一路在本机有没有可唤的客户端」。
+    AddHit(g_hits, x, y, x + w, y + ch, HIT_CLAIMCARD, 4300 + idx, 0, loc, act, 0);
+    g_hits.back().agent_id = c.vendor;
+    g_hits.back().key = "claim:" + c.vendor;
+    return y + ch;
+}
+
+static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
+    const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
+    const float L = x + 16.0f, listW = w - 32.0f;
+    // 来源那一排（rail）在这一屏同样生效：选中某家就只留那一家的卡。
+    std::vector<const ap::Claim*> cs;
+    for (const ap::Claim& c : g_pd.claims)
+        if (g_r31_src == "all" || c.vendor == g_r31_src) cs.push_back(&c);
+    if (cs.empty())
+        return R31Empty(dl, L, y, listW, 180.0f, T("r_claim_unknown", loc), T("r_claim_hint", loc),
+                        nullptr, 0, loc);
+    float cy = y;
+    // section-heading（与用量屏同一档：margin 17 5 10）
+    {
+        cy += 17.0f;
+        I31(dl, I31_CARD, L + 5.0f, cy + 2.0f, 12.0f, k31Sec);
+        R31Mid(dl, L + 5.0f + 17.0f, cy + 8.0f, T("r_claim_head", loc), loc, k31Sec, T_S11B);
+        // 表头右侧那颗「刷新」：按下去立刻重读三家落盘的读数（DoAction 的 HIT_CLAIMREFRESH）。
+        // 它拉不到任何网络上的东西——各家什么时候写盘由各家决定，这一颗只把「我们多久没读」
+        // 清零，所以页脚那个时刻就是它给的唯一回执。
+        {
+            const std::string rl = T("r_claim_refresh", loc);
+            const float RE = x + w - 16.0f;
+            const float ix = RE - TextWidth(rl, loc, T_S10B) - 18.0f;   // 图标 12 + 间距 6
+            const float hov = TxPeekNew(Zid(loc, 4200, HIT_CLAIMREFRESH, 0), 0.0f);
+            if (hov > 0.01f)
+                dl->AddRectFilled(ImVec2(ix - 6.0f, cy - 4.0f), ImVec2(RE + 6.0f, cy + 20.0f),
+                                  k31Hover, 7.0f);
+            I31(dl, I31_REFRESH, ix, cy + 2.0f, 12.0f, k31Sec);
+            DrawTextRun(dl, ix + 18.0f, TextMid(cy + 8.0f, T_S10B, loc), rl, loc, k31Sec, T_S10B);
+            AddHit(g_hits, ix - 6.0f, cy - 4.0f, RE + 6.0f, cy + 20.0f, HIT_CLAIMREFRESH, 4200, 0,
+                   loc, rl, 0);
+        }
+        cy += 21.0f;
+        cy = R31DrawWrap(dl, T("r_claim_legend", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S9,
+                         13.5f, k31Faint, 2) + 6.0f;
+        // 上次弹横幅的时刻：回答「它到底有没有吵过我、什么时候」。跟上面那行「上次读到可领」
+        // 不是一回事——那说的是券的出现时刻，这说的是我们的提醒动作。
+        {
+            const std::string la =
+                g_cfg.last_claim_at > 0
+                    ? RFmt(T("r_claim_alerted", loc),
+                           Ago(now - (double)g_cfg.last_claim_at, loc).c_str())
+                    : std::string(T("r_claim_never", loc));
+            I31(dl, I31_CLOCK, L + 5.0f, cy + 1.0f, 11.0f, k31Faint);
+            R31Mid(dl, L + 5.0f + 16.0f, cy + 7.0f, la, loc, k31Faint, T_S9);
+            cy += 17.0f;
+        }
+    }
+    // 可领的排最前，其余按采集层的固定顺序（WorkBuddy / Qoder / ZCode）
+    std::stable_sort(cs.begin(), cs.end(), [](const ap::Claim* a, const ap::Claim* b) {
+        return (a->ready ? 0 : 1) < (b->ready ? 0 : 1);
+    });
+    for (size_t i = 0; i < cs.size(); i++)
+        cy = R31ClaimCard(dl, L, cy, listW, *cs[i], loc, now, (int)i) + 10.0f;
+    cy += 5.0f;
+    cy = R31DrawWrap(dl, T("r_claim_hint", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S10, 17.5f,
+                     k31Muted, 3);
+    return cy + 16.0f;
+}
+
+/// 权益页脚（809..850）：把「只读」这件事写在屏上而不是只在代码注释里。
+static void R31ClaimsFoot(ImDrawList* dl, float x, float y, float w, int loc) {
+    RHair(dl, x, y, x + w, k31Line);
+    float tx = x + 19.0f;
+    I31(dl, I31_LOCK, tx, y + 20.5f - 6.0f, 12.0f, k31Muted);
+    DrawTextRun(dl, tx + 17.0f, TextMid(y + 20.5f, T_S9, loc), T("r_claim_foot", loc), loc,
+                k31Muted, T_S9);
+    const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
+    int hh = 0, mm = 0;
+    RTimeOfDay(now, &hh, &mm);
+    // 到秒，不只到分钟：这一屏那颗「刷新」把时刻推到当下，只到分钟的话按下去看不出任何变化，
+    // 「我们多久没读」也就永远读不出来。
+    std::tm tv;
+    const std::time_t tt = (std::time_t)now;
+    localtime_r(&tt, &tv);
+    char sb[12];
+    snprintf(sb, sizeof sb, "%02d:%02d:%02d", hh, mm, tv.tm_sec);
+    DrawTextRight(dl, x + w - 19.0f, TextMid(y + 20.5f, T_S9, loc),
+                  std::string(R31ModeText(loc)) + " " + sb, loc, k31Muted, T_S9);
 }
 
 // ── 账户（view 7）：整块滚动（54..789），页脚 61 ─────────────────────────────
@@ -2141,7 +2470,7 @@ static float R31ToolsList(ImDrawList* dl, float x, float yTop, float w, int loc)
     const std::string q = R31Lower(g_r31_toolq);
     for (const auto* t : present) {
         if (!q.empty()) {
-            const std::string hay = R31Lower(R31Agent(t->id, 0) + " " + R31Client(t->id) + " " + t->name);
+            const std::string hay = R31Lower(R31Agent(t->id, 0) + " " + t->client + " " + t->name);
             if (hay.find(q) == std::string::npos) continue;
         }
         keys.push_back(t);
@@ -2163,7 +2492,7 @@ static float R31ToolsList(ImDrawList* dl, float x, float yTop, float w, int loc)
         Brand31(dl, listX + 15.0f, ry + 19.0f, 30.0f, t.id, loc);
         const float nx = listX + 15.0f + 30.0f + 12.0f;
         float cx2 = R31Mid(dl, nx, ry + 23.0f, R31Agent(t.id, loc), loc, k31Fg, T_S13B);
-        R31RowTag(dl, cx2 + 6.0f, ry + 23.0f, t.id, loc);
+        R31RowTag(dl, cx2 + 6.0f, ry + 23.0f, t.client, loc);
         int rows = 0, wait = 0;
         for (const auto& r : g_pd.rows) {
             if (r.agent_id != t.id) continue;
@@ -2197,7 +2526,7 @@ static void R31DetailHead(ImDrawList* dl, float x, float y, float w, int loc, co
     DrawTextRun(dl, nx, TextMid(y + 77.0f, T_S17B, loc),
                 ClipToWidth(R31Agent(r->agent_id, loc), x + 392.0f - nx, loc, T_S17B), loc, k31Fg,
                 T_S17B);
-    R31ClientTag(dl, nx, y + 103.5f, r->agent_id, loc);
+    R31ClientTag(dl, nx, y + 103.5f, r->client, loc);
     DrawTextRun(dl, x + 24.0f, TextTop(y + 129.0f, 26.0f, T_S22, loc),
                 ClipToWidth(R31RowName(*r), 368.0f, loc, T_S22), loc, k31Fg, T_S22, -0.5f);
     {
@@ -2388,7 +2717,8 @@ static float R31HistoryList(ImDrawList* dl, float x, float yTop, float w, int lo
         {
             float sx = R31Mid(dl, nx, iy + 41.0f, R31Agent(r.agent_id, loc), loc, k31Muted, T_S10);
             sx += 5.0f;
-            sx += R31RowTag(dl, sx, iy + 41.0f, r.agent_id, loc) + 5.0f;
+            const float tw3 = R31RowTag(dl, sx, iy + 41.0f, r.client, loc);
+            sx += tw3 + (tw3 > 0.0f ? 5.0f : 0.0f);   // 没画就不留间距
             sx += R31Mid(dl, sx, iy + 41.0f, RFmt(T("r_turn", loc), r.turns), loc, k31Muted, T_S10);
             if (!r.children.empty()) {                     // 副行右端挂「⌄ N 条子对话」
                 const std::string lab = RFmt(T("r_children", loc), (int)r.children.size());
@@ -2422,6 +2752,71 @@ static float R31HistoryList(ImDrawList* dl, float x, float yTop, float w, int lo
     return cy + listH;
 }
 
+// ── 券到账横幅 ───────────────────────────────────────────────────────────────
+/// 窗口这时整块就是这张卡（面板收着）：同一副玻璃材质，只是换了尺寸，所以底框仍走
+/// R31Frame——它顺手把 g31 上下文设成本卡的几何，卡里的玻璃采样才不会读到上一屏的面板。
+/// 返回卡高；main 用它收放窗口（WantedWindowH）。这块卡没有倒计时——2026-10-30 用户拍板
+/// 「弹的话不点就常驻」，所以能撤下它的只有三件事：点这一行、表头那颗 ✕、那张券自己过期。
+static float R31Banner(ImDrawList* dl, float x, float y, float w, int loc, double tn) {
+    const int n = (int)g_banners.size();
+    const float headH = 38.0f, rowH = 62.0f, botPad = 10.0f, padX = 16.0f;
+    const float h = BannerHeight(n);
+    R31Frame(dl, x, y, w, h, tn);
+
+    // 表头：我们的标 + 产品名（与面板表头同一串字面量），右端一句「权益到账」和 ✕。
+    // 厂商标不放在这——每一行自己带，两行券是两家，表头再挑一家就是替它们排序。
+    BrandMark(dl, x + padX, y + 12.5f, 13.0f);
+    DrawTextRun(dl, x + 35.0f, TextMid(y + headH * 0.5f, T_S11, loc), "Agent Ping", loc,
+                k31Faint, T_S11, -0.2f);
+    {
+        const std::string hd = T("banner_head", loc);
+        const float hw = TextWidth(hd, loc, T_S11B);
+        const float bx = x + w - padX - 24.0f;          // ✕ 的块宽 24
+        DrawTextRight(dl, bx - 8.0f, TextMid(y + headH * 0.5f, T_S11B, loc), hd, loc, k31Sec,
+                      T_S11B);
+        const float hov = TxPeekNew(Zid(loc, 4130, HIT_BANNERCLOSE, 0), 0.0f);
+        if (hov > 0.01f)
+            dl->AddRectFilled(ImVec2(bx, y + 7.0f), ImVec2(bx + 24.0f, y + headH - 7.0f),
+                              k31Hover, 6.0f);
+        I31(dl, I31_CLOSE, bx + 6.0f, y + headH * 0.5f - 6.0f, 12.0f, k31Faint);
+        AddHit(g_hits, bx, y + 7.0f, bx + 24.0f, y + headH - 7.0f, HIT_BANNERCLOSE, 4130, 0, loc,
+               "", 0);
+    }
+    RHair(dl, x + padX, y + headH, x + w - padX, k31LineSoft);
+
+    for (int i = 0; i < n; i++) {
+        const BannerItem& b = g_banners[(size_t)i];
+        const float ry = y + headH + (float)i * rowH;
+        const long zid = Zid(loc, 4100 + i, HIT_BANNER, 0);
+        const float hov = TxPeekNew(zid, 0.0f);
+        if (hov > 0.01f)
+            dl->AddRectFilled(ImVec2(x + 6.0f, ry + 2.0f), ImVec2(x + w - 6.0f, ry + rowH - 2.0f),
+                              WithA(k31Sel, (int)(hov * 255.0f + 0.5f)), 10.0f);
+        Brand31(dl, x + padX, ry + 17.0f, 28.0f, b.agent, loc);
+        // 右端「查看 →」整列宽度先量出来，左边两行才有确定的可摆宽度（德语那句最长）。
+        const std::string go = T("banner_view", loc);
+        const float gw = TextWidth(go, loc, T_S11B);
+        const float txtX = x + padX + 28.0f + 12.0f;
+        const float rightEdge = x + w - padX;
+        const float maxW = rightEdge - gw - 4.0f - 12.0f - 10.0f - txtX;
+        const float cy1 = ry + 24.0f, cy2 = ry + 42.0f;
+        DrawTextRun(dl, txtX, TextMid(cy1, T_S13B, loc), ClipToWidth(b.title, maxW, loc, T_S13B),
+                    loc, k31Fg, T_S13B);
+        DrawTextRun(dl, txtX, TextMid(cy2, T_S11, loc), ClipToWidth(b.body, maxW, loc, T_S11),
+                    loc, k31Muted, T_S11);
+        DrawTextRight(dl, rightEdge - 16.0f, TextMid(ry + rowH * 0.5f, T_S11B, loc), go, loc,
+                      k31Blue, T_S11B);
+        I31(dl, I31_RIGHT, rightEdge - 12.0f, ry + rowH * 0.5f - 6.0f, 12.0f, k31Blue);
+        Hit hb;
+        hb.x0 = x + 6.0f; hb.y0 = ry + 2.0f; hb.x1 = x + w - 6.0f; hb.y1 = ry + rowH - 2.0f;
+        hb.act = HIT_BANNER; hb.row = 4100 + i; hb.opt = 0; hb.zid = zid;
+        hb.key = b.key; hb.agent_id = b.agent; hb.title = b.title; hb.label = b.title;
+        g_hits.push_back(hb);
+        if (i + 1 < n) RHair(dl, txtX, ry + rowH, rightEdge, k31LineSoft);
+    }
+    return h;
+}
+
 // ── 一屏总装 ─────────────────────────────────────────────────────────────────
 /// 返回面板高（固定 850）。签名与 R20Draw 对齐，body 账本同样回写。
 static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc, int view,
@@ -2429,7 +2824,7 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
     float panelOut = h;      // 本屏内容高（收放目标）；各屏覆写，返回给 drawPanel 驱动窗口
     R31Frame(dl, x, y, w, h, tn);
     R31Head(dl, x, y, w, loc, view);
-    if (view == 0 || view == 6) {
+    if (view == 0 || view == 6 || view == 9) {
         R31Sources(dl, x, y, w, loc);
         R31Tabs(dl, x, y + 117.0f, w, loc);
     }
@@ -2472,6 +2867,23 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
         RCullHits(hits0, x + 16.0f, bodyTop, x + w - 16.0f, bodyBot);
         R31UsageFoot(dl, x, y + h - 41.0f, w, loc);
+        panelOut = std::fmin(endY - startY + 41.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
+    } else if (view == 9) {
+        // 与用量屏同一档：表头＋来源＋页签占到 162，页脚 41。
+        const float bodyTop = y + 162.0f, bodyBot = y + h - 41.0f;
+        g_bodyTop[view] = ImVec2(x + 16.0f, bodyTop);
+        g_bodyBot[view] = ImVec2(x + w - 16.0f, bodyBot);
+        g_bodyValid[view] = true;
+        if (g_scroll[view] > g_scrollMax[view]) g_scroll[view] = g_scrollMax[view];
+        const size_t hits0 = g_hits.size();
+        dl->PushClipRect(ImVec2(x + 16.0f, bodyTop), ImVec2(x + w - 16.0f, bodyBot), true);
+        const float startY = bodyTop - g_scroll[view];
+        const float endY = R31Claims(dl, x, startY, w, loc);
+        dl->PopClipRect();
+        g_contentH[view] = endY - startY;
+        g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
+        RCullHits(hits0, x + 16.0f, bodyTop, x + w - 16.0f, bodyBot);
+        R31ClaimsFoot(dl, x, y + h - 41.0f, w, loc);
         panelOut = std::fmin(endY - startY + 41.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
     } else if (view == 7) {
         const float bodyTop = y + 54.0f, bodyBot = y + h - 61.0f;

@@ -34,6 +34,25 @@ ap::Session ses(const char* id, const char* title, ap::State st, bool inferred =
     s.id = id; s.title = title; s.project = "probe"; s.state = st; s.inferred_wait = inferred;
     return s;
 }
+/// 一张券的样例读数。只填判据看得见的字段：ready 是「它亲口说有得领」，
+/// appears_at 是这一期的可见时刻（键就按它落在哪一天算）。
+ap::Claim clm(const char* vendor, const char* name, bool ready, double appears_at,
+              long credit = 0) {
+    ap::Claim c;
+    c.vendor = vendor; c.name = name; c.known = true; c.ready = ready; c.appears_at = appears_at;
+    if (credit > 0) { c.credit = credit; c.credit_known = true; }
+    return c;
+}
+/// 今天本地 09:00 与明天本地 09:00：跨「期次」的两条读数，差一天。
+void two_days(double* d0, double* d1) {
+    time_t t = std::time(nullptr);
+    struct tm lt{};
+    ::localtime_r(&t, &lt);
+    lt.tm_hour = 9; lt.tm_min = 0; lt.tm_sec = 0;
+    const time_t base = ::mktime(&lt);
+    *d0 = (double)base;
+    *d1 = (double)(base + 86400);
+}
 ap::Snapshot snap_with(std::initializer_list<ap::Session> qoder,
                        std::initializer_list<ap::Session> claude = {}) {
     ap::Snapshot s;
@@ -154,14 +173,19 @@ int selftest() {
     setenv("AGENTPING_DND", "0", 1);
     expect_true("设置：env 能压过文件（取证专用）", !ap::load_alert_cfg().dnd);
     unsetenv("AGENTPING_DND");
+    setenv("AGENTPING_CLAIMS", "0", 1);
+    expect_true("设置：env 能压过文件（权益档）", !ap::load_alert_cfg().claims);
+    unsetenv("AGENTPING_CLAIMS");
 
-    // ⑧b 设置屏写下去的八档必须全数读回来：界面上亮着、文件里没记，重启后就是「骗人的开关」
+    // ⑧b 设置屏写下去的每一档必须全数读回来：界面上亮着、文件里没记，重启后就是「骗人的开关」
     ap::AlertCfg all;
     all.sound = false; all.dnd = true; all.needs_user = true; all.await_perm = false;
     all.failed = true; all.done = true; all.on_top = false; all.max_rows = 5;
-    expect_true("设置：八档一起写", ap::save_alert_cfg(all, &err));
+    all.claims = false;
+    expect_true("设置：九档一起写", ap::save_alert_cfg(all, &err));
     ap::AlertCfg rb = ap::load_alert_cfg();
     expect_true("设置：读回逐档相等（提示音/免打扰）", rb.sound == all.sound && rb.dnd == all.dnd);
+    expect_true("设置：读回逐档相等（权益到账）", rb.claims == all.claims);
     expect_true("设置：读回逐档相等（四档状态）",
                 rb.needs_user == all.needs_user && rb.await_perm == all.await_perm &&
                 rb.failed == all.failed && rb.done == all.done);
@@ -219,6 +243,73 @@ int selftest() {
         ap::AlertRound r9 = ap::select_alerts(sd, led2, done, &out2, &jf2);
         expect("已完成：次轮不重复吵", (long)r9.to_post.size(), 0);
         expect("已完成：跳变过去后就摘账（下次跑完还能再报）", r9.retired, 1);
+    }
+
+    {
+        // ⑩ 券到账：键的形状。同一天同一家＝同一条期次（只响一次），换一天＝新期次（该再响）。
+        double d0, d1; two_days(&d0, &d1);
+        const std::string k0 = ap::claim_alert_key("workbuddy", d0);
+        expect("券键：带上前缀才算券（与会话键分家）", ap::is_claim_key(k0) ? 1 : 0, 1);
+        expect("券键：会话键不会被误认成券", ap::is_claim_key(ap::alert_key("qoder", "a")) ? 1 : 0, 0);
+        expect("券键：同一天同一家同键", ap::claim_alert_key("workbuddy", d0 + 600) == k0 ? 1 : 0, 1);
+        expect("券键：换日是新期次", ap::claim_alert_key("workbuddy", d1) == k0 ? 1 : 0, 0);
+        expect("券键：别家不共用一条", ap::claim_alert_key("qoder", d0) == k0 ? 1 : 0, 0);
+
+        const std::vector<ap::Claim> one = { clm("workbuddy", "WorkBuddy", true, d0, 100),
+                                             clm("qoder", "Qoder", false, d0) };
+        std::set<std::string> cled, cout;
+        ap::AlertRound c1 = ap::select_claim_alerts(one, cled, kOn, &cout);
+        expect("券：只有它说有得领才够格", c1.hits, 1);
+        expect("券：首轮待发出", (long)c1.to_post.size(), 1);
+        expect_true("券：横幅身份带整条券键",
+                    c1.to_post.size() == 1 && c1.to_post[0].session_id == k0);
+        expect("券：首轮落账", (long)cout.size(), 1);
+        cled = cout;
+        // 次轮同一期：不许多响（这一条是「每天 00:00 那条券会不会被 3 秒重扫吵穿」的答案）
+        ap::AlertRound c2 = ap::select_claim_alerts(one, cled, kOn, &cout);
+        expect("券：次轮仍命中但不重复吵", (long)c2.to_post.size(), 0);
+        expect("券：次轮摘账为 0", c2.retired, 0);
+        // 换期：新一天是新键，必须再响一次
+        const std::vector<ap::Claim> next_day = { clm("workbuddy", "WorkBuddy", true, d1, 100),
+                                                  clm("qoder", "Qoder", false, d0) };
+        ap::AlertRound c3 = ap::select_claim_alerts(next_day, cled, kOn, &cout);
+        expect("券：换期再响", (long)c3.to_post.size(), 1);
+        expect("券：旧期次随领掉摘账", c3.retired, 1);
+        expect("券：账本只留当期", (long)cout.size(), 1);
+        // 领掉了（ready 翻回 false）→ 摘账；摘了账下次这一期还能报（不会顶着「已提醒过」永远沉默）
+        const std::vector<ap::Claim> none = { clm("workbuddy", "WorkBuddy", false, d1),
+                                              clm("qoder", "Qoder", false, d0) };
+        ap::AlertRound c4 = ap::select_claim_alerts(none, cout, kOn, &cout);
+        expect("券：领掉后摘账", c4.retired, 1);
+        expect("券：摘完账本空", (long)cout.size(), 0);
+        ap::AlertRound c5 = ap::select_claim_alerts(next_day, cout, kOn, &cout);
+        expect("券：摘过之后再回到可领还能响", (long)c5.to_post.size(), 1);
+        // 两颗压投递的开关都不许清账
+        std::set<std::string> before_c = cout;
+        ap::AlertRound c6 = ap::select_claim_alerts(next_day, before_c, kDnd, &cout);
+        expect_true("券：免打扰不发", c6.to_post.empty());
+        expect_true("券：免打扰不清账", cout == before_c);
+        ap::AlertCfg kOff = kOn; kOff.claims = false;
+        ap::AlertRound c7 = ap::select_claim_alerts(next_day, before_c, kOff, &cout);
+        expect_true("券：开关关掉不发", c7.to_post.empty());
+        expect_true("券：开关关掉不清账", cout == before_c);
+        expect("券：开关关掉时命中数不统计（整轮跳过）", c7.hits, 0);
+
+        // 分界：两本共用一个文件，任何一轮都不许清掉对家的去重记录。
+        // 少了这道分界，会话每 3 秒重扫就会把券键当「不再待处理」摘掉，那条券每轮都算新的。
+        const std::string sk = ap::alert_key("qoder", "a"), ck = ap::claim_alert_key("workbuddy", d0);
+        // 方向一：会话这轮重扫，且本轮没有任何待处理会话 —— 它该摘掉自己的会话键，券键必须活着。
+        std::set<std::string> mix = { sk, ck }, m1;
+        ap::Snapshot es; es.scanned_at = 1;
+        ap::AlertRound i1 = ap::select_alerts(es, mix, kOn, &m1);
+        expect("分界：会话轮摘掉的只有会话键", i1.retired, 1);
+        expect("分界：券键活过会话轮", (long)m1.count(ck), 1);
+        // 方向二：券这轮重扫，且这一期已经领掉 —— 反过来，会话的去重记录不许被它清掉。
+        // 会话键故意留着：它是「刚响过、还在待处理」的那条，被券轮摘掉就等于下一轮再吵一遍。
+        std::set<std::string> mix2 = { sk, ck }, m2;
+        ap::AlertRound i2 = ap::select_claim_alerts(none, mix2, kOn, &m2);
+        expect("分界：券轮摘掉的只有券键", i2.retired, 1);
+        expect("分界：会话键活过券轮", (long)m2.count(sk), 1);
     }
 
     printf("[自检] 断言 %d 条，通过 %d，不符 %d\n", g_pass + g_fail, g_pass, g_fail);

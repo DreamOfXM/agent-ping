@@ -64,7 +64,10 @@ AlertRound select_alerts(const Snapshot& snap, const std::set<std::string>& ledg
     }
     // 已经不再待处理的会话要从账本里摘掉，否则它下次回到该状态不会再响
     // （「等你回复」→ 你回了 → 又问你一次，第二问必须还能吵你）。
+    // 券那类键不归这一轮扫：它们的「不再待处理」由 select_claim_alerts 自己摘，
+    // 在这里一起清掉会让本期那条券在下一轮重扫时又变成「首次」。
     for (auto it = next.begin(); it != next.end(); ) {
+        if (is_claim_key(*it)) { ++it; continue; }
         if (!live.count(*it)) { it = next.erase(it); r.retired++; } else ++it;
     }
     if ((int)r.to_post.size() > kMaxPerRound) {
@@ -72,6 +75,58 @@ AlertRound select_alerts(const Snapshot& snap, const std::set<std::string>& ledg
         r.to_post.resize(kMaxPerRound);
     }
     for (const auto& p : r.to_post) next.insert(alert_key(p.agent_id, p.session_id));
+    r.posted = (int)r.to_post.size();
+    if (out_ledger) *out_ledger = next;
+    return r;
+}
+
+std::string claim_alert_key(const std::string& vendor, double appears_at) {
+    char day[16] = {0};
+    if (appears_at > 0) {
+        const time_t tt = (time_t)appears_at;
+        struct tm lt{};
+        ::localtime_r(&tt, &lt);
+        ::strftime(day, sizeof day, "%Y-%m-%d", &lt);
+    }
+    // 取不到期次就不带日期：宁可这一家整条只响一次，也不要每 3 秒的重扫各吵一遍。
+    return std::string(kClaimKeyPrefix) + vendor + (day[0] ? ":" : "") + day;
+}
+
+AlertRound select_claim_alerts(const std::vector<Claim>& claims,
+                               const std::set<std::string>& ledger, const AlertCfg& cfg,
+                               std::set<std::string>* out_ledger) {
+    AlertRound r;
+    r.dnd = cfg.dnd;
+    std::set<std::string> next = ledger;
+    // 免打扰与「权益到账」那颗开关都只压投递、不改账本：关掉期间攒下的期次，
+    // 不许在他重新打开的那一刻一起涌出来（会话那轮同一口径）。
+    if (cfg.dnd || !cfg.claims) { if (out_ledger) *out_ledger = next; return r; }
+
+    std::set<std::string> live;
+    for (const auto& c : claims) {
+        if (!c.ready) continue;              // 只有它亲口说「现在有得领」才够格
+        const std::string k = claim_alert_key(c.vendor, c.appears_at);
+        live.insert(k);
+        r.hits++;
+        if (ledger.count(k)) continue;
+        r.fresh++;
+        Pending p;
+        p.agent_id = c.vendor;
+        p.agent_name = c.name;
+        p.session_id = k;                    // 整条券键：横幅点回来靠前缀认身份
+        r.to_post.push_back(p);
+    }
+    // 这一期不再可领（领掉了／换期了）就把键摘掉：不摘，账本会天天涨，
+    // 而且明年同一天若真又是这一期，它会顶着「已提醒过」永远不再响。
+    for (auto it = next.begin(); it != next.end(); ) {
+        if (!is_claim_key(*it)) { ++it; continue; }
+        if (!live.count(*it)) { it = next.erase(it); r.retired++; } else ++it;
+    }
+    if ((int)r.to_post.size() > kMaxPerRound) {
+        r.capped = (int)r.to_post.size() - kMaxPerRound;
+        r.to_post.resize(kMaxPerRound);
+    }
+    for (const auto& p : r.to_post) next.insert(p.session_id);
     r.posted = (int)r.to_post.size();
     if (out_ledger) *out_ledger = next;
     return r;
@@ -158,6 +213,7 @@ AlertCfg load_alert_cfg() {
         else if (k == "alert_await") { if (b >= 0) c.await_perm = b; }
         else if (k == "alert_failed") { if (b >= 0) c.failed = b; }
         else if (k == "alert_done") { if (b >= 0) c.done = b; }
+        else if (k == "alert_claims") { if (b >= 0) c.claims = b; }
         else if (k == "on_top") { if (b >= 0) c.on_top = b; }
         else if (k == "max_rows") {
             int n = atoi(v.c_str());
@@ -168,6 +224,7 @@ AlertCfg load_alert_cfg() {
             if (n >= 0 && n <= 5) c.lang = n;           // -1（没写过）留在探测那条路上
         }
         else if (k == "seen_until") { c.seen_until = atoll(v.c_str()); }
+        else if (k == "last_claim_at") { c.last_claim_at = atoll(v.c_str()); }
         else if (k == "win_x") { c.win_x = atoi(v.c_str()); }
         else if (k == "win_y") { c.win_y = atoi(v.c_str()); }
     }
@@ -177,6 +234,7 @@ AlertCfg load_alert_cfg() {
     // 环境变量只用于取证：同一份判据要能在不碰他真实设置文件的前提下验出「免打扰确实压住了」。
     if (const char* e = getenv("AGENTPING_DND")) c.dnd = (*e == '1');
     if (const char* e = getenv("AGENTPING_SOUND")) c.sound = (*e != '0');
+    if (const char* e = getenv("AGENTPING_CLAIMS")) c.claims = (*e == '1');
     return c;
 }
 
@@ -191,10 +249,12 @@ bool save_alert_cfg(const AlertCfg& cfg, std::string* err) {
       << "alert_await=" << (cfg.await_perm ? 1 : 0) << "\n"
       << "alert_failed=" << (cfg.failed ? 1 : 0) << "\n"
       << "alert_done=" << (cfg.done ? 1 : 0) << "\n"
+      << "alert_claims=" << (cfg.claims ? 1 : 0) << "\n"
       << "on_top=" << (cfg.on_top ? 1 : 0) << "\n"
       << "max_rows=" << cfg.max_rows << "\n"
       << "lang=" << cfg.lang << "\n"
       << "seen_until=" << cfg.seen_until << "\n"
+      << "last_claim_at=" << cfg.last_claim_at << "\n"
       << "win_x=" << cfg.win_x << "\n"
       << "win_y=" << cfg.win_y << "\n";
     f.flush();

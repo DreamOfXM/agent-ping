@@ -83,6 +83,7 @@ add_executable(pin_imgui_shell
   src/jsonl.cpp
   src/scan.cpp
   src/alert.cpp
+  src/claims.cpp
   src/hook_install.cpp
   ${STATUSBAR_SRC}
   ${OPEN_SRC}
@@ -125,3 +126,13 @@ if(SQLITE3_LIB)
   target_compile_definitions(alert_probe PRIVATE AP_HAVE_SQLITE=1)
   target_link_libraries(alert_probe ${SQLITE3_LIB})
 endif()
+
+# 权益层的取证工具：只依赖 <ctime>/POSIX，不链 ImGui/GLFW/Cocoa ——
+# 「这一格本机到底有没有读数」必须能在没有窗口的环境里判，不然它就是不可验证的主张。
+add_executable(claims_probe
+  src/claims_probe.cpp
+  src/claims.cpp
+  src/jsonl.cpp
+)
+target_include_directories(claims_probe PRIVATE src)
+target_link_libraries(claims_probe Threads::Threads)

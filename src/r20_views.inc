@@ -787,6 +787,10 @@ static float RSettings(ImDrawList* dl, float L, float R, float y, int loc) {
         Zid(loc, SC_SOUND, HIT_SET, 0), T("sound", loc));
     row(RI_BELLOFF, "set_dnd", RFmt("AGENTPING_DND · %s", T("set_dnd_sub", loc)),
         SC_DND, g_cfg.dnd, true, Zid(loc, SC_DND, HIT_SET, 0), T("set_dnd", loc));
+    // 权益到账：另一类事，不看会话只看各家磁盘上的领取读数。它吃同一颗「免打扰」
+    // （那一档压的是所有投递），但也只压投递、不清账本——判据见 alert.cpp 的 select_claim_alerts。
+    row(RI_CARD, "set_claim", T("set_claim_sub", loc), SC_CLAIMS, g_cfg.claims, false,
+        Zid(loc, SC_CLAIMS, HIT_SET, 0), T("set_claim", loc));
     // 「登录时启动」不是画出来的：开关的真源就是登录项那个文件在不在（macOS LaunchAgent /
     // Linux XDG autostart），点了当场写/删，下次进设置读的还是那个文件。
     char launch_where[512] = {0};

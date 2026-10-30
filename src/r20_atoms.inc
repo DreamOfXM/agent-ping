@@ -194,10 +194,10 @@ static void RParseD(const char* d, std::vector<RPoly>& out) {
     }
 }
 
-// ── 18 个图标：路径数据逐字搬自 r20 的 ICON 表 ──────────────────────────────
+// ── 19 个图标：前 18 条路径数据逐字搬自 r20 的 ICON 表 ──────────────────────
 enum RIconId { RI_LIST, RI_CLOCK, RI_SLIDERS, RI_COPY, RI_JUMP, RI_BACK, RI_CHEV, RI_TERM,
                RI_FILE, RI_CHECK, RI_BELL, RI_BELLOFF, RI_PLUG, RI_SHIELD, RI_INFO,
-               RI_LAUNCH, RI_GLOBE, RI_EYE, RI_N };
+               RI_LAUNCH, RI_GLOBE, RI_EYE, RI_CARD, RI_N };
 /// kind 0＝path（d）；1＝circle（a,b,c = cx,cy,r）；2＝rect（a,b,c,e,f = x,y,w,h,rx）
 struct RShapeSpec { int kind; const char* d; float a, b, c, e, f; };
 static const RShapeSpec kRShape[RI_N][4] = {
@@ -229,6 +229,9 @@ static const RShapeSpec kRShape[RI_N][4] = {
                    {0, "M2.4 8h11.2M8 2.4c-1.6 1.6-2.4 3.5-2.4 5.6s.8 4 2.4 5.6c1.6-1.6 2.4-3.5 2.4-5.6S9.6 4 8 2.4Z"}},
     /* eye     */ {{0, "M1.8 8s2.3-3.8 6.2-3.8S14.2 8 14.2 8 11.9 11.8 8 11.8 1.8 8 1.8 8Z"},
                    {1, nullptr, 8, 8, 1.7f, 0}},
+    // card：权益屏那一格的标记（k31Shape 的 card）等比降到 16 网格 —— 24 与 16 两系
+    // 不能混着调（见 r31_views.inc 顶上那句），所以这里搬形状而不是直接引用 I31_CARD。
+    /* card    */ {{2, nullptr, 2.0f, 3.3f, 12.0f, 9.4f, 2.0f}, {0, "M2 6.7h12M4.7 10h2.7"}},
 };
 static std::vector<RIconDef> g_ricon;
 static void RBuildIcons() {

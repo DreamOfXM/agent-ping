@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "claims.h"
 #include "scan.h"
 
 // 提醒层：把「有一条会话在等你」这件事变成一次打断。
@@ -26,6 +27,13 @@ struct AlertCfg {
     bool await_perm = true;   // 等待确认（ST_AWAIT 且非推断出来的那个）
     bool failed = true;       // 失败中断
     bool done = false;        // 已完成（ST_RESTING）
+    /// 有券可领时弹一条。与会话那四档分开放：会话那排是「哪种状态允许吵」，
+    /// 这一条是「另一类事」——它不看会话，只看各家自己写在磁盘上的领取读数。
+    bool claims = true;
+    /// 上一次弹「有券可领」横幅的时刻（0＝从来没有过）。权益屏要把这句话摆在明面上：
+    /// 用户想知道的是「它到底有没有吵过我、什么时候」，而账本里那些 claim: 键只有日期、
+    /// 且会随券过期被摘掉，回答不了这个问题。
+    long long last_claim_at = 0;
     /// 「已读水位线」：完成时刻 ≤ 它的会话都算看过（小点点不亮）。冷启动没有这个键时
     /// 取当前时刻——存量的完成记录不倒灌成未读，只给今后新完成的起点。
     long long seen_until = 0;
@@ -55,6 +63,18 @@ struct Pending {
     bool inferred = false;
 };
 
+/// 券到账用的身份键前缀。会话键是「agent/会话 id」，券键是「claim:厂商:期次日」——
+/// 两边共用同一本账本，靠这个前缀各扫各的：会话那轮不许把券键当「不再待处理」摘掉，
+/// 券这轮也不许动会话键。少了这道分界，任何一轮重扫都会清掉对家的去重记录，
+/// 于是每天 00:00 那条券会被同一期反复吵。
+constexpr const char* kClaimKeyPrefix = "claim:";
+inline bool is_claim_key(const std::string& k) { return k.rfind(kClaimKeyPrefix, 0) == 0; }
+
+/// 一条券的到账键：厂商 + 那一期的本地日期（appears_at 落在哪一天）。
+/// 用「期次」而不是「本轮 ready 的跳变」做键：WorkBuddy 每天 00:00 翻回未领，
+/// 换一天就是一个新键（该再响）；同一期内重扫几十轮只响一次。
+std::string claim_alert_key(const std::string& vendor, double appears_at);
+
 /// 一轮的账：命中几条、其中几条已提醒过、真发出几条、被上限压掉几条、从账本摘掉几条。
 /// 这五个数必须能打印出来 —— 「没响」有四种成因，只报「已通知」等于什么都没验。
 struct AlertRound {
@@ -76,6 +96,15 @@ constexpr int kMaxPerRound = 4;
 AlertRound select_alerts(const Snapshot& snap, const std::set<std::string>& ledger,
                          const AlertCfg& cfg, std::set<std::string>* out_ledger,
                          const std::set<std::string>* just_finished = nullptr);
+
+/// 券到账的一轮判定。与 select_alerts 同一套规矩：dnd 整轮跳过且不清账、
+/// 每轮最多 kMaxPerRound 条、不再 ready 的券键从账本摘掉。
+/// cfg.claims 关掉时不改账本（只跳过），否则他哪天把开关打开，前几天攒下的会一起涌出来。
+/// Pending 里：agent_id＝厂商 id、agent_name＝界面上的名字、session_id＝整条券键
+/// （横幅点回来时靠它的前缀认出那是券、落到权益屏）、title 留空：文案由界面层按语言现做。
+AlertRound select_claim_alerts(const std::vector<Claim>& claims,
+                               const std::set<std::string>& ledger, const AlertCfg& cfg,
+                               std::set<std::string>* out_ledger);
 
 /// 一行通知的身份键：agent id + 会话 id。单独用会话 id 会跨采集器撞名（两家都用 uuid）。
 std::string alert_key(const std::string& agent_id, const std::string& session_id);

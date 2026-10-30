@@ -95,6 +95,11 @@ struct Session {
     /// hook 信号自带的触发说明（Notification 的 message）。只有 hook 真给了才非空：
     /// 授权详情用它顶替「工具」那一行，日志推出来的推断不许编一句说明。
     std::string trigger;
+    /// 桌面 App 自己的会话库（main.sqlite → chat_sessions）里有这一条。
+    /// Qoder 的 App 与 CLI 共用 ~/.qoder/projects 这一个日志目录，日志里两种会话都写
+    /// entrypoint:"cli"，认不出来源；被 App 索引到过是唯一能拿得出手的正证。
+    /// 只当正证用：false 不代表「它是 CLI」，只代表「这一条的形态我们不知道」。
+    bool app_indexed = false;
 };
 
 struct AgentSnap {

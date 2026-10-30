@@ -332,6 +332,7 @@ State derive(const Raw& r, double now, bool& inferred) {
 
 AgentSnap scan_transcript(const std::string& id, const std::string& name, const std::string& root,
                           double now, double since, const std::map<std::string, std::string>& titled,
+                          const std::set<std::string>& app_indexed,
                           long* y_tokens, double* y_credits) {
     AgentSnap snap;
     snap.id = id;
@@ -355,6 +356,7 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
 
             Session s;
             s.id = strip_ext(f);
+            s.app_indexed = app_indexed.count(s.id) > 0;
             s.last_activity = r.last_ts;
             s.error_text = r.error_text;
             s.state = derive(r, now, s.inferred_wait);
@@ -703,6 +705,34 @@ std::map<std::string, std::string> sidebar_titles(const std::string& db_path) {
                 std::string title = trim(t);
                 if (!title.empty()) out[sid] = title;
             }
+        }
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return out;
+}
+
+/// 桌面 App 会话库里在架的全部 session_id（不看标题）：侧栏那张表里有这一条，
+/// 就说明这条会话确实是 App 里开的，界面才敢给它写「IDE」。
+/// 与 sidebar_titles 分开查是因为标题为空的会话也在表里，用它判形态才不漏；
+/// 上限放宽到 2000：判据漏一条就是把 App 的会话标成没形态，比多读几百行贵。
+std::set<std::string> app_session_ids(const std::string& db_path) {
+    std::set<std::string> out;
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return out;
+    }
+    sqlite3_busy_timeout(db, 250);
+    sqlite3_exec(db, "PRAGMA query_only=1;", nullptr, nullptr, nullptr);
+    const char* sql =
+        "select session_id from chat_sessions "
+        "where session_id is not null and coalesce(deleted_at, 0) = 0 limit 2000;";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* sid = (const char*)sqlite3_column_text(st, 0);
+            if (sid && *sid) out.insert(trim(sid));
         }
     }
     sqlite3_finalize(st);
@@ -1444,16 +1474,20 @@ Snapshot scan_all(double now_epoch) {
 
     std::string h = home();
 #ifdef AP_HAVE_SQLITE
-    std::map<std::string, std::string> titled =
-        sidebar_titles(join(h, "Library/Application Support/com.qoder.app.stable/main.sqlite"));
+    const std::string qdb =
+        join(h, "Library/Application Support/com.qoder.app.stable/main.sqlite");
+    std::map<std::string, std::string> titled = sidebar_titles(qdb);
+    // 同一张表再取一次「在架 id」：标题只用来起名，判形态要看 id 在不在，与有没有标题无关。
+    std::set<std::string> qids = app_session_ids(qdb);
 #else
     std::map<std::string, std::string> titled;
+    std::set<std::string> qids;
 #endif
     snap.agents.push_back(scan_transcript("qoder", "Qoder CLI", join(h, ".qoder/projects"), now, since, titled,
-                                          &snap.yesterday_tokens, &snap.yesterday_credits));
+                                          qids, &snap.yesterday_tokens, &snap.yesterday_credits));
     // Claude 的标题写在日志里（customTitle/agentName），不借 Qoder 侧栏那张表。
     snap.agents.push_back(scan_transcript("claude", "Claude Code", join(h, ".claude/projects"), now, since, {},
-                                          &snap.yesterday_tokens, &snap.yesterday_credits));
+                                          {}, &snap.yesterday_tokens, &snap.yesterday_credits));
     snap.agents.push_back(scan_codex("Codex", join(h, ".codex/sessions"), now, since));
 #ifdef AP_HAVE_SQLITE
     snap.agents.push_back(scan_zcode("ZCode", join(h, ".zcode/cli/db/db.sqlite"), now, since));
