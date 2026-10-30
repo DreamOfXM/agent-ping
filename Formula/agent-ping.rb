@@ -3,7 +3,7 @@ class AgentPing < Formula
   homepage "https://github.com/DreamOfXM/agent-ping"
   url "https://github.com/DreamOfXM/agent-ping/archive/refs/tags/v0.1.3.tar.gz"
   version "0.1.3"
-  sha256 "035ce144910b853e4a6e3be3b984fb2bbc81509d09880f8c3e6e0f00f8477576"
+  sha256 "619029f5aa33c183aba60a67fc554e88313dc4e647301660316322a66c69f28d"
   license "Apache-2.0"
 
   depends_on macos: :ventura
