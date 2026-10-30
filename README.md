@@ -249,11 +249,36 @@ shims.
 
 ## Install with Homebrew (macOS 13+)
 
-The formula builds from source — it has no bottle — using the code at the
+Same app either way. The only real difference is **whether it lands in your
+Applications folder**. If you want the double-clickable one, take the first path.
+
+**Recommended: the cask (prebuilt, goes into `/Applications`)**
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping          # third-party tap, needed once
+brew install --cask agent-ping
+```
+
+Both Apple silicon and Intel get a prebuilt bundle (~26 MB each) and the cask
+picks the right one for the machine, so an Intel Mac never pulls the arm64 zip.
+Afterwards `Agent Ping.app` sits in `/Applications` and shows up in Launchpad and
+Finder.
+
+The bundle is self-contained: glfw and freetype are linked statically into the
+executable, so you do **not** need those dependencies installed first — they are
+only needed by the source build.
+
+> The cask uses `version :latest`, so upgrades must pass `--greedy`:
+> `brew upgrade --cask --greedy agent-ping`. A plain `brew upgrade` skips it.
+
+**Alternative: the formula (built from source, stays out of `/Applications`)**
+
+Use this if you would rather not run a prebuilt binary, want to compile it
+yourself, or simply cannot pull 26 MB. It builds from source at the
 [v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) tag, so the first
 install needs the Xcode command line tools and takes about a minute on an
-Apple-silicon Mac. If you would rather not compile anything, skip to the cask at
-the end of this section.
+Apple-silicon Mac.
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
@@ -267,37 +292,32 @@ agent-ping
 > the Command Line Tools present before it installs anything from any tap. Run
 > `xcode-select --install` and retry. If you would rather not pull those down,
 > the [Build](#build) section compiles the same source with the clang that ships
-> inside Xcode.
-
-`brew trust` is needed once: this is a third-party tap, and Homebrew refuses to
-load a formula from one by its short name until you say so. Without it only the
-fully-qualified `brew install dreamofxm/agent-ping/agent-ping` works, and
-`brew upgrade agent-ping` refuses to run.
+> inside Xcode — or just use the cask above.
 
 `agent-ping` is a one-line launcher for the app in Homebrew's `opt` directory
-(`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It stays out of
+(`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It does **not** go into
 `/Applications` because Homebrew runs builds inside a sandbox that cannot write
-there. To start it with the session, turn on **Launch at login** in the app's
-settings; that writes a LaunchAgent pointing at the `opt` path, so the login
-item keeps working across `brew upgrade`.
+there — for that copy, use the cask. To start it with the session, turn on
+**Launch at login** in the app's settings; that writes a LaunchAgent pointing at
+the `opt` path, so the login item keeps working across `brew upgrade`.
 
-**Looking for it after install?** There is no Dock icon, nothing in
-`/Applications`, and Spotlight will not find it either — by design, since
-`LSUIElement` is set. The whole UI is the menu bar: once `agent-ping` runs, the
-oval icon with a star appears at the right end of the bar, next to the clock.
-The first launch opens the panel itself, so you get a window to look at; close it
-and the icon stays behind. If you would rather have an app in `/Applications`
-that you can double-click, the cask does exactly that — it ships prebuilt for
-both Apple silicon and Intel:
+**Looking for it after install?** There is no Dock icon and Spotlight will not
+find it either — by design, since `LSUIElement` is set. The whole UI is the menu
+bar: once it runs, the oval icon with a star appears at the right end of the bar,
+next to the clock. The first launch opens the panel itself, so you get a window
+to look at; close it and the icon stays behind.
 
-```sh
-brew install --cask agent-ping     # copies Agent Ping.app into /Applications
-```
+**Upgrade and uninstall**
 
 ```sh
-brew upgrade agent-ping
+brew upgrade --cask --greedy agent-ping   # cask; --greedy is required
+brew upgrade agent-ping                   # formula
+
+brew uninstall --cask agent-ping
 brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
 ```
+
+If you installed both, you get two icons in the menu bar — keep one.
 
 ## Build
 

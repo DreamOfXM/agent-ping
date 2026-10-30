@@ -24,6 +24,9 @@ cask "agent-ping" do
     Agent Ping has no Dock icon. It appears at the right end of the menu bar —
     the oval icon with a star, next to the clock.
 
+    This cask tracks "latest", so upgrade it with --greedy:
+      brew upgrade --cask --greedy agent-ping
+
     Turn on "Launch at login" in its settings if you want it to start with the
     session.
 

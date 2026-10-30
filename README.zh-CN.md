@@ -214,10 +214,31 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 
 ## 用 Homebrew 安装（macOS 13+）
 
-这个 formula 没有预编译包，它从本仓库
-[v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) 这个标签的源码现场编译，
-所以第一次安装要装 Xcode 命令行工具，Apple 芯片上大约一分钟。不想编译的话，直接跳到
-本节末尾的 cask。
+装的是同一个 App，两条路只差一件事：**它落不落在「应用程序」文件夹里**。想要双击就能打开
+的那种，走第一条。
+
+**推荐：cask（预编译，进 `/Applications`）**
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping          # 第三方 tap，只需要跑一次
+brew install --cask agent-ping
+```
+
+Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自己挑，不会把 Apple 芯片的包
+装到 Intel 机器上。装完 `/Applications/Agent Ping.app` 里就有它，启动台和访达都看得到。
+
+包是自包含的：glfw 与 freetype 静态链在可执行文件里，**不需要**你先装这两个依赖 ——
+那两个是编译版（formula）才需要的。
+
+> 它用的是 `version :latest`，所以升级必须带 `--greedy`：
+> `brew upgrade --cask --greedy agent-ping`。不带的话普通 `brew upgrade` 会跳过它。
+
+**备选：formula（从源码编译，不进 `/Applications`）**
+
+不想用预编译二进制、想自己编一份，或者 26 MB 实在下不动的时候用这条。它从本仓库
+[v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) 标签的源码现场编译，
+第一次装需要 Xcode 命令行工具，Apple 芯片上大约一分钟。
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
@@ -229,30 +250,30 @@ agent-ping
 > 如果 `brew install` 直接停在 `Error: Xcode alone is not sufficient on …`：那是
 > Homebrew 自己在 macOS 26 上的准入检查，不是本项目的要求 —— 它要求系统里存在命令行
 > 工具，才肯装任何 tap 里的任何 formula。跑一次 `xcode-select --install` 再重试；
-> 不想下这一份的话，下面「构建」一节用 Xcode 自带的 clang 就能编出同样的东西。
-
-`brew trust` 只需跑一次：这是第三方 tap，Homebrew 默认不按短名加载它的 formula。
-不跑这一句的话，只有全名的 `brew install dreamofxm/agent-ping/agent-ping` 能用，
-`brew upgrade agent-ping` 会被拒绝。
+> 不想下这一份的话，下面「构建」一节用 Xcode 自带的 clang 就能编出同样的东西，或者直接
+> 改用上面的 cask。
 
 `agent-ping` 是一行启动器，打开的是 Homebrew `opt` 目录里的 App
-（`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它不进 `/Applications`：
-Homebrew 的构建跑在沙箱里，写不了那里。要开机自启，在面板里打开**登录时启动**；它写的
-LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade` 之后登录项仍然有效。
+（`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它**不会**进 `/Applications`：
+Homebrew 的构建跑在沙箱里，写不了那里 —— 想要应用程序文件夹里那一份，用 cask。要开机自启，
+在面板里打开**登录时启动**；它写的 LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade`
+之后登录项仍然有效。
 
-**装完之后找不到它？** 它没有 Dock 图标、不在 `/Applications`、聚焦也搜不到——这是设计
-使然（`LSUIElement`）。全部 UI 就是菜单栏：`agent-ping` 一跑起来，菜单栏右端、时钟旁边
-会出现那个「椭圆里一颗星」的图标；第一次启动它会把面板自己弹出来，所以你能看到东西，
-关掉之后图标留在那儿。想要一个能双击的 App，改用 cask —— Apple 芯片和 Intel 都有预编译包：
+**装完之后找不到它？** 它没有 Dock 图标，聚焦也搜不到——这是设计使然（`LSUIElement`）。
+全部 UI 就是菜单栏：跑起来之后，菜单栏右端、时钟左边会出现那个「椭圆里一颗星」的图标；
+第一次启动它会把面板自己弹出来，所以你能看到东西，关掉之后图标留在那儿。
 
-```sh
-brew install --cask agent-ping     # 把 Agent Ping.app 放进 /Applications
-```
+**升级与卸载**
 
 ```sh
-brew upgrade agent-ping
+brew upgrade --cask --greedy agent-ping   # cask，--greedy 必须带
+brew upgrade agent-ping                   # formula
+
+brew uninstall --cask agent-ping
 brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
 ```
+
+两种都装过的话，菜单栏会同时出现两个图标——留一个就好。
 
 ## 构建
 
