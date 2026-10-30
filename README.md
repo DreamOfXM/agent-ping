@@ -239,6 +239,36 @@ only, so questions and options stay empty for them.
 - macOS 13+ **or** Linux with X11; `notify-send` for banners and any of
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` for sound
 
+## Install with Homebrew (macOS 13+)
+
+There is no prebuilt binary to download: the formula compiles the panel from the
+source in this repository, so the first install needs the Xcode command line
+tools and takes about a minute on an Apple-silicon Mac.
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping
+brew install agent-ping
+agent-ping
+```
+
+`brew trust` is needed once: this is a third-party tap, and Homebrew refuses to
+load a formula from one by its short name until you say so. Without it only the
+fully-qualified `brew install dreamofxm/agent-ping/agent-ping` works, and
+`brew upgrade agent-ping` refuses to run.
+
+`agent-ping` is a one-line launcher for the app in Homebrew's `opt` directory
+(`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It stays out of
+`/Applications` because Homebrew runs builds inside a sandbox that cannot write
+there. To start it with the session, turn on **Launch at login** in the app's
+settings; that writes a LaunchAgent pointing at the `opt` path, so the login
+item keeps working across `brew upgrade`.
+
+```sh
+brew upgrade agent-ping
+brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
+```
+
 ## Build
 
 macOS (last run 2026-10-28, produces `build/AgentPing-cpp.app` — about 40 MB of
@@ -358,6 +388,7 @@ fonts/              OFL-licensed UI fonts, with their license texts
 assets/             Info.plist, app icon, menu-bar icon, SNI theme
 docs/               the figures in this README, rendered by the offscreen probe
 Tools/              install_hook.sh, make_bundle.sh, probes
+Formula/            the Homebrew formula, compiled from this source on install
 CMakeLists.txt      both platforms, including the dependency lists above
 ```
 

@@ -205,6 +205,32 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 - macOS 13+ **或** 带 X11 的 Linux；横幅要 `notify-send`，出声要
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` 里任意一个
 
+## 用 Homebrew 安装（macOS 13+）
+
+没有预编译包可下：这个 formula 从本仓库的源码现场编译，所以第一次安装要装 Xcode
+命令行工具，Apple 芯片上大约一分钟。
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping
+brew install agent-ping
+agent-ping
+```
+
+`brew trust` 只需跑一次：这是第三方 tap，Homebrew 默认不按短名加载它的 formula。
+不跑这一句的话，只有全名的 `brew install dreamofxm/agent-ping/agent-ping` 能用，
+`brew upgrade agent-ping` 会被拒绝。
+
+`agent-ping` 是一行启动器，打开的是 Homebrew `opt` 目录里的 App
+（`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它不进 `/Applications`：
+Homebrew 的构建跑在沙箱里，写不了那里。要开机自启，在面板里打开**登录时启动**；它写的
+LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade` 之后登录项仍然有效。
+
+```sh
+brew upgrade agent-ping
+brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
+```
+
 ## 构建
 
 macOS（最近一次实跑 2026-10-28，产出 `build/AgentPing-cpp.app`；其中约 40 MB 是随包
@@ -302,6 +328,7 @@ fonts/              OFL 许可的界面字体，连同各自许可正文
 assets/             Info.plist、App 图标、菜单栏图标、SNI 主题
 docs/               本文那些组图，由离屏探针渲出
 Tools/              install_hook.sh、make_bundle.sh、各探针
+Formula/            Homebrew formula，安装时从这份源码现场编译
 CMakeLists.txt      两个平台，含上面那份依赖清单
 ```
 
