@@ -32,7 +32,21 @@ std::string ExePath() {
     uint32_t n = sizeof buf;
     if (_NSGetExecutablePath(buf, &n) != 0) return {};
     char real[2048];
-    return realpath(buf, real) ? std::string(real) : std::string(buf);
+    std::string p = realpath(buf, real) ? std::string(real) : std::string(buf);
+
+    // brew 把每个版本装进 Cellar/<name>/<version>/，升级时旧目录整个删掉；
+    // opt/<name> 是跟着版本走的软链。开机项要活过 brew upgrade，就得记 opt 那条。
+    const std::string cellar = "/Cellar/";
+    size_t at = p.find(cellar);
+    if (at != std::string::npos) {
+        size_t name_end = p.find('/', at + cellar.size());
+        size_t ver_end = name_end == std::string::npos ? std::string::npos : p.find('/', name_end + 1);
+        if (name_end != std::string::npos && ver_end != std::string::npos) {
+            std::string name = p.substr(at + cellar.size(), name_end - (at + cellar.size()));
+            p = p.substr(0, at) + "/opt/" + name + p.substr(ver_end);
+        }
+    }
+    return p;
 }
 
 void Say(char* reason, int n, const std::string& s) {
