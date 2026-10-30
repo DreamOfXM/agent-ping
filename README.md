@@ -349,7 +349,9 @@ cmake -S . -B build -G Ninja && cmake --build build
 sh Tools/make_bundle.sh
 ```
 
-Linux (Debian 12 package names, last run 2026-10-28):
+Linux (Debian 12 package names; installed, built, and run from a clean Debian 12
+container on 2026-10-30 — the UI rendered and the tray item registered on the
+session bus):
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \

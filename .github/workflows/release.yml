@@ -1,4 +1,4 @@
-name: Build macOS app and attach to release
+name: Build and release
 
 on:
   # 发版的正式入口：推一个 v* 的 tag 上来，这里就把两种架构的包编出来、建好 Release、挂上附件。
@@ -117,3 +117,70 @@ jobs:
             "Agent-Ping-${TAG}-macos-${{ matrix.arch }}.zip" \
             "Agent-Ping-macos-${{ matrix.arch }}.zip" \
             --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Linux 不发预编译包（各发行版的 GL/字体库版本差异太大，发一个 tar.gz 出去
+  # 反而会变成「下载了跑不起来」），但「源码能不能编、装完东西在不在该在的位置」
+  # 必须每次发版都验一遍：README 让 Linux 用户走 cmake 构建这条路，
+  # 这条路要是悄悄断了，用户拿到的是一个编不过的源码树。
+  build-linux:
+    needs: ensure-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential pkg-config \
+            libglfw3-dev libfreetype6-dev libsqlite3-dev \
+            libgl1-mesa-dev libdbus-1-dev libx11-dev \
+            desktop-file-utils xvfb
+
+      - name: Build
+        run: |
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-linux --parallel
+
+      - name: Install and check the layout
+        # 用户不是把一个裸二进制拷到 PATH 里，而是让它出现在应用菜单里。
+        # 这里逐项确认 install 规则真的把可执行文件、.desktop、图标、资源装到了
+        # GNUInstallDirs 规定的标准位置，少一个都算失败。
+        run: |
+          sudo cmake --install build-linux
+          fail=0
+          for p in \
+            /usr/local/bin/agent-ping \
+            /usr/local/share/applications/agent-ping.desktop \
+            /usr/local/share/icons/hicolor/256x256/apps/agent-ping.png \
+            /usr/local/share/icons/hicolor/512x512/apps/agent-ping.png \
+            /usr/local/share/agent-ping/fonts \
+            /usr/local/share/agent-ping/sni-theme ; do
+            if [ -e "$p" ]; then
+              echo "OK   $p"
+            else
+              echo "::error::缺少 $p"
+              fail=1
+            fi
+          done
+          desktop-file-validate /usr/local/share/applications/agent-ping.desktop
+          exit $fail
+
+      - name: Run it under a virtual X server
+        # 构建过 ≠ 起得来。在 Xvfb 里真跑几秒：静态资源和字体如果没随
+        # install 一起落地，这里会立刻挂掉；能活到被 timeout 杀掉才算过。
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1440x900x24 >/dev/null 2>&1 &
+          sleep 2
+          set +e
+          timeout 10 /usr/local/bin/agent-ping > /tmp/run.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/run.log
+          # 124 = 被 timeout 杀掉，说明它一直在跑，正是我们要的结果。
+          if [ "$code" -ne 124 ]; then
+            echo "::error::应用在 10 秒内就退出了（exit $code），见上面的输出"
+            exit 1
+          fi
+          echo "存活满 10 秒，被 timeout 正常终止"

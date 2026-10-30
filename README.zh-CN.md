@@ -300,7 +300,7 @@ cmake -S . -B build -G Ninja && cmake --build build
 sh Tools/make_bundle.sh
 ```
 
-Linux（Debian 12 包名，最近一次实跑 2026-10-28）：
+Linux（Debian 12 包名；2026-10-30 在全新 Debian 12 容器里照下面三行装成、构建、跑起来并截到界面）：
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
