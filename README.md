@@ -251,7 +251,7 @@ shims.
 
 There is no prebuilt binary to download: the formula compiles the panel from the
 source in this repository at the
-[v0.1.0](https://github.com/DreamOfXM/agent-ping/tree/v0.1.0) tag, so the first
+[v0.1.1](https://github.com/DreamOfXM/agent-ping/tree/v0.1.1) tag, so the first
 install needs the Xcode command line tools and takes about a minute on an
 Apple-silicon Mac.
 

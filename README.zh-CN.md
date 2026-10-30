@@ -215,7 +215,7 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 ## 用 Homebrew 安装（macOS 13+）
 
 没有预编译包可下：这个 formula 从本仓库
-[v0.1.0](https://github.com/DreamOfXM/agent-ping/tree/v0.1.0) 这个标签的源码现场编译，
+[v0.1.1](https://github.com/DreamOfXM/agent-ping/tree/v0.1.1) 这个标签的源码现场编译，
 所以第一次安装要装 Xcode 命令行工具，Apple 芯片上大约一分钟。
 
 ```sh
