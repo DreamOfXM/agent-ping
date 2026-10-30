@@ -272,19 +272,26 @@ only needed by the source build.
 > The cask uses `version :latest`, so upgrades must pass `--greedy`:
 > `brew upgrade --cask --greedy agent-ping`. A plain `brew upgrade` skips it.
 
-> **If macOS says it cannot verify the developer**, that is Gatekeeper, not a
-> broken download: the bundle is ad-hoc signed and unnotarized (there is no paid
-> developer certificate behind this project), and both a browser download and a
-> cask install mark it quarantined — `spctl -a` reports `rejected` either way.
-> The dialog offers only *Done* and *Move to Trash*; right-click → Open no longer
-> gets past it on recent macOS. Two ways that do work, once each:
+> **About the "cannot verify the developer" dialog**: since v0.1.3 both prebuilt
+> bundles are signed with a Developer ID certificate, notarized by Apple, and
+> stapled. `spctl -a` reports `accepted` from `Notarized Developer ID`; a browser
+> download and a cask install both still tag it quarantined, and it passes anyway.
+>
+> A normal install should never show that dialog. If it does, suspect a stale
+> bundle first (upgrades of a `version :latest` cask must pass `--greedy`): run
+> `brew upgrade --cask --greedy agent-ping`. A swapped upstream binary looks the
+> same way, so **check the signature before you allow it**:
+>
+> ```sh
+> codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
+> # expect: Developer ID Application: Xiaoming Guo (448JJF25MY)
+> ```
+>
+> If the Team ID matches and you do need to allow it once:
 >
 > - System Settings → Privacy & Security, scroll down to the line saying *Agent
 >   Ping was blocked*, and press **Open Anyway**.
 > - Or from a shell: `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
->
-> The real fix is a paid Developer ID plus notarization; until then every first
-> install takes one of those two steps.
 
 **Alternative: the formula (built from source, stays out of `/Applications`)**
 
@@ -409,9 +416,11 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 Read this before filing a bug — each item is a known gap with its cause, not a
 mystery.
 
-- **macOS banners may be denied.** A build that is not properly signed and
-  registered is silently refused by the notification system; the panel then falls
-  back to a sound (code 1). Allow it under System Settings → Notifications.
+- **macOS banners may be denied.** Since v0.1.3 the bundle is signed with a
+  Developer ID and notarized, so the notification system no longer silently
+  refuses it for being improperly signed and registered; what remains is the
+  system notification permission, and the panel then falls back to a sound
+  (code 1). Allow it under System Settings → Notifications.
 - **Jumping into a ZCode session is a workaround, not an API.** ZCode exposes no
   session-level URL and no CLI; the panel types the session's search tokens into its
   ⌘K palette, which needs macOS Accessibility permission. Without it the jump
