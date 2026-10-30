@@ -44,13 +44,20 @@ class AgentPing < Formula
 
   def caveats
     <<~EOS
-      Agent Ping is a menu-bar app. Start it with:
+      Agent Ping has no Dock icon and no entry in /Applications. Once it runs it
+      lives at the right end of the menu bar — the oval icon with a star, next to
+      the clock.
+
+      Start it now with:
         agent-ping
 
-      It lives in Homebrew's opt directory (#{opt_prefix}/Agent Ping.app) rather
-      than /Applications, because Homebrew builds inside a sandbox that cannot
-      write there. Turn on "Launch at login" in the app's settings to start it
-      with the session.
+      The app itself is at:
+        #{opt_prefix}/Agent Ping.app
+
+      Homebrew builds inside a sandbox that cannot write to /Applications, which
+      is why the bundle stays in the opt path. Turn on "Launch at login" in the
+      app's settings to start it with your session; that writes a LaunchAgent
+      pointing here, so it keeps working across `brew upgrade`.
 
       Uninstall with:
         brew uninstall agent-ping

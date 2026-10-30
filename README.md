@@ -281,6 +281,18 @@ there. To start it with the session, turn on **Launch at login** in the app's
 settings; that writes a LaunchAgent pointing at the `opt` path, so the login
 item keeps working across `brew upgrade`.
 
+**Looking for it after install?** There is no Dock icon, nothing in
+`/Applications`, and Spotlight will not find it either — by design, since
+`LSUIElement` is set. The whole UI is the menu bar: once `agent-ping` runs, the
+oval icon with a star appears at the right end of the bar, next to the clock.
+The first launch opens the panel itself, so you get a window to look at; close it
+and the icon stays behind. If you would rather have an app in `/Applications`
+that you can double-click, use the cask on Apple silicon:
+
+```sh
+brew install --cask agent-ping     # copies Agent Ping.app into /Applications
+```
+
 ```sh
 brew upgrade agent-ping
 brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
@@ -309,6 +321,19 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 
 A slim container image needs `build-essential` (or another compiler) as well;
 `libdbus-1-dev` is what selects the real status item over the stub.
+
+To install it where your desktop can find it — a menu entry with a name and an
+icon, not a binary you have to remember the path of:
+
+```sh
+sudo cmake --install build-linux            # prefix defaults to /usr/local
+agent-ping                                  # or launch "Agent Ping" from the app menu
+```
+
+That puts `agent-ping` in `<prefix>/bin`, the bundled fonts and tray icon theme
+in `<prefix>/share/agent-ping`, and `agent-ping.desktop` plus the hicolor icons
+in `<prefix>/share`. On a distro where `/usr/local` is not on `XDG_DATA_DIRS`
+(nothing mainstream), pass `--prefix /usr`.
 
 ## Try it without a display
 

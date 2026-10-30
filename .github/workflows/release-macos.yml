@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14
+    # macos-14 已被上游标记 deprecation（actions/runner-images#13518），
+    # macos-26 是当前稳定的 arm64 镜像，也就是 macos-latest 指的那一个。
+    runs-on: macos-26
     env:
       TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
@@ -41,9 +43,14 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent "build/Agent Ping.app" \
             "Agent-Ping-${TAG}-macos-arm64.zip"
+          # 稳定文件名：cask 用 version :latest 指它，这样每次发版都不用改 cask 里的
+          # url 和 sha256。版本化的那份留给想固定版本的人。
+          cp "Agent-Ping-${TAG}-macos-arm64.zip" "Agent-Ping-macos-arm64.zip"
 
       - name: Attach to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "$TAG" "Agent-Ping-${TAG}-macos-arm64.zip" --clobber
+          gh release upload "$TAG" \
+            "Agent-Ping-${TAG}-macos-arm64.zip" \
+            "Agent-Ping-macos-arm64.zip" --clobber

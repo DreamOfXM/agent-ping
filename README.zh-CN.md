@@ -239,6 +239,15 @@ agent-ping
 Homebrew 的构建跑在沙箱里，写不了那里。要开机自启，在面板里打开**登录时启动**；它写的
 LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade` 之后登录项仍然有效。
 
+**装完之后找不到它？** 它没有 Dock 图标、不在 `/Applications`、聚焦也搜不到——这是设计
+使然（`LSUIElement`）。全部 UI 就是菜单栏：`agent-ping` 一跑起来，菜单栏右端、时钟旁边
+会出现那个「椭圆里一颗星」的图标；第一次启动它会把面板自己弹出来，所以你能看到东西，
+关掉之后图标留在那儿。想要一个能双击的 App，Apple 芯片上改用 cask：
+
+```sh
+brew install --cask agent-ping     # 把 Agent Ping.app 放进 /Applications
+```
+
 ```sh
 brew upgrade agent-ping
 brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
@@ -266,6 +275,17 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 
 精简容器镜像还得补 `build-essential`（或别的编译器）；`libdbus-1-dev` 决定的是走真
 状态项还是占位实现。
+
+装到桌面找得到的地方——应用菜单里一个有名有图标的条目，而不是一个得记住路径的裸二进制：
+
+```sh
+sudo cmake --install build-linux            # 前缀默认 /usr/local
+agent-ping                                  # 或者在应用菜单里点「Agent Ping」
+```
+
+它会把 `agent-ping` 放进 `<prefix>/bin`，随包的字体与托盘图标主题放进
+`<prefix>/share/agent-ping`，`agent-ping.desktop` 与 hicolor 图标放进 `<prefix>/share`。
+若你的发行版没把 `/usr/local` 列进 `XDG_DATA_DIRS`（主流发行版都列了），加 `--prefix /usr`。
 
 ## 不开显示器也能试
 
