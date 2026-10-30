@@ -8,8 +8,14 @@ find_package(Threads REQUIRED)
 
 find_library(GLFW_LIB glfw HINTS /opt/homebrew/lib /usr/local/lib REQUIRED)
 find_path(GLFW_INC GLFW/glfw3.h HINTS /opt/homebrew/include /usr/local/include REQUIRED)
-find_library(FREETYPE_LIB freetype HINTS /opt/homebrew/lib /usr/lib REQUIRED)
-find_path(FREETYPE_INC ft2build.h HINTS /opt/homebrew/opt/freetype/include/freetype2 /usr/include/freetype2 REQUIRED)
+find_library(FREETYPE_LIB freetype HINTS /opt/homebrew/lib /usr/local/lib /usr/lib REQUIRED)
+# freetype 2 的头文件不在 include/ 根下，而在 include/freetype2/ 里；两个 brew 前缀都要试
+# （Apple 芯片是 /opt/homebrew，Intel 是 /usr/local），否则 Intel 上找不到 ft2build.h。
+find_path(FREETYPE_INC ft2build.h
+  HINTS /opt/homebrew/opt/freetype/include /usr/local/opt/freetype/include
+        /opt/homebrew/include /usr/local/include /usr/include
+  PATH_SUFFIXES freetype2
+  REQUIRED)
 
 # sqlite3 只服务 ZCode / WorkBuddy 两路；找不到就退化成「只读 JSONL」，
 # 而不是整个编译断掉 —— 采集层用 AP_HAVE_SQLITE 把这两路圈起来了。
