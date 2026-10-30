@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(agent_ping_cpp VERSION 0.1.1 LANGUAGES CXX)
+project(agent_ping_cpp VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -102,7 +102,7 @@ add_executable(pin_imgui_shell
   ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
-target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.1")
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.2")
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})

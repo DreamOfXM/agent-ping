@@ -214,9 +214,10 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 
 ## 用 Homebrew 安装（macOS 13+）
 
-没有预编译包可下：这个 formula 从本仓库
-[v0.1.1](https://github.com/DreamOfXM/agent-ping/tree/v0.1.1) 这个标签的源码现场编译，
-所以第一次安装要装 Xcode 命令行工具，Apple 芯片上大约一分钟。
+这个 formula 没有预编译包，它从本仓库
+[v0.1.2](https://github.com/DreamOfXM/agent-ping/tree/v0.1.2) 这个标签的源码现场编译，
+所以第一次安装要装 Xcode 命令行工具，Apple 芯片上大约一分钟。不想编译的话，直接跳到
+本节末尾的 cask。
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
@@ -242,7 +243,7 @@ LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade` 之后登录项仍
 **装完之后找不到它？** 它没有 Dock 图标、不在 `/Applications`、聚焦也搜不到——这是设计
 使然（`LSUIElement`）。全部 UI 就是菜单栏：`agent-ping` 一跑起来，菜单栏右端、时钟旁边
 会出现那个「椭圆里一颗星」的图标；第一次启动它会把面板自己弹出来，所以你能看到东西，
-关掉之后图标留在那儿。想要一个能双击的 App，Apple 芯片上改用 cask：
+关掉之后图标留在那儿。想要一个能双击的 App，改用 cask —— Apple 芯片和 Intel 都有预编译包：
 
 ```sh
 brew install --cask agent-ping     # 把 Agent Ping.app 放进 /Applications

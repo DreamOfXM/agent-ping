@@ -249,11 +249,11 @@ shims.
 
 ## Install with Homebrew (macOS 13+)
 
-There is no prebuilt binary to download: the formula compiles the panel from the
-source in this repository at the
-[v0.1.1](https://github.com/DreamOfXM/agent-ping/tree/v0.1.1) tag, so the first
+The formula builds from source — it has no bottle — using the code at the
+[v0.1.2](https://github.com/DreamOfXM/agent-ping/tree/v0.1.2) tag, so the first
 install needs the Xcode command line tools and takes about a minute on an
-Apple-silicon Mac.
+Apple-silicon Mac. If you would rather not compile anything, skip to the cask at
+the end of this section.
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
@@ -287,7 +287,8 @@ item keeps working across `brew upgrade`.
 oval icon with a star appears at the right end of the bar, next to the clock.
 The first launch opens the panel itself, so you get a window to look at; close it
 and the icon stays behind. If you would rather have an app in `/Applications`
-that you can double-click, use the cask on Apple silicon:
+that you can double-click, the cask does exactly that — it ships prebuilt for
+both Apple silicon and Intel:
 
 ```sh
 brew install --cask agent-ping     # copies Agent Ping.app into /Applications

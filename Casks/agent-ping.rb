@@ -4,14 +4,18 @@ cask "agent-ping" do
   version :latest
   sha256 :no_check
 
-  url "https://github.com/DreamOfXM/agent-ping/releases/latest/download/Agent-Ping-macos-arm64.zip"
+  # 两个架构各一份预编译产物，都由 release 工作流产在同一批附件里。
+  on_arm do
+    url "https://github.com/DreamOfXM/agent-ping/releases/latest/download/Agent-Ping-macos-arm64.zip"
+  end
+  on_intel do
+    url "https://github.com/DreamOfXM/agent-ping/releases/latest/download/Agent-Ping-macos-x86_64.zip"
+  end
+
   name "Agent Ping"
   desc "Menu-bar panel showing which AI coding agent is running, waiting, or stuck"
   homepage "https://github.com/DreamOfXM/agent-ping"
 
-  # 预编译产物是 Apple 芯片的：Intel 机器装不了这份，走 formula 从源码编译
-  # （brew install agent-ping，就是我们自己那台 macOS 26 的路径）。
-  depends_on arch: :arm64
   depends_on macos: :ventura
 
   app "Agent Ping.app"
@@ -22,5 +26,9 @@ cask "agent-ping" do
 
     Turn on "Launch at login" in its settings if you want it to start with the
     session.
+
+    If you previously installed it with the formula (brew install agent-ping),
+    remove that first — otherwise two copies both put an icon in the menu bar:
+      brew uninstall agent-ping
   EOS
 end

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach the build to (e.g. v0.1.1)"
+        description: "Release tag to attach the build to (e.g. v0.1.2)"
         required: true
 
 permissions:
@@ -14,9 +14,22 @@ permissions:
 
 jobs:
   build-macos:
-    # macos-14 已被上游标记 deprecation（actions/runner-images#13518），
-    # macos-26 是当前稳定的 arm64 镜像，也就是 macos-latest 指的那一个。
-    runs-on: macos-26
+    # 两个架构各出一份，cask 才能对 Apple 芯片和 Intel 都成立。
+    #
+    # macos-26        → arm64，标准 runner，公开仓库免费
+    # macos-26-intel  → x64，也是标准 runner（不是 -large，不需要付费计划）
+    #
+    # 注意 Intel 那台会慢很多：Homebrew 自 2026-09 起不再为 macOS Intel 出
+    # bottle，所以 brew install 那几个依赖是现场编译的。arm64 那边是现成 bottle。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     env:
       TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
@@ -25,6 +38,9 @@ jobs:
           ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
       - name: Install build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
         run: brew install cmake ninja glfw freetype
 
       - name: Build
@@ -42,15 +58,16 @@ jobs:
       - name: Package
         run: |
           ditto -c -k --sequesterRsrc --keepParent "build/Agent Ping.app" \
-            "Agent-Ping-${TAG}-macos-arm64.zip"
+            "Agent-Ping-${TAG}-macos-${{ matrix.arch }}.zip"
           # 稳定文件名：cask 用 version :latest 指它，这样每次发版都不用改 cask 里的
           # url 和 sha256。版本化的那份留给想固定版本的人。
-          cp "Agent-Ping-${TAG}-macos-arm64.zip" "Agent-Ping-macos-arm64.zip"
+          cp "Agent-Ping-${TAG}-macos-${{ matrix.arch }}.zip" \
+             "Agent-Ping-macos-${{ matrix.arch }}.zip"
 
       - name: Attach to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "$TAG" \
-            "Agent-Ping-${TAG}-macos-arm64.zip" \
-            "Agent-Ping-macos-arm64.zip" --clobber
+            "Agent-Ping-${TAG}-macos-${{ matrix.arch }}.zip" \
+            "Agent-Ping-macos-${{ matrix.arch }}.zip" --clobber
