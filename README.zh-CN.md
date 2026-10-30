@@ -234,10 +234,16 @@ Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自�
 > 它用的是 `version :latest`，所以升级必须带 `--greedy`：
 > `brew upgrade --cask --greedy agent-ping`。不带的话普通 `brew upgrade` 会跳过它。
 
-> **如果 macOS 不打开它**：那是 Gatekeeper，不是包坏了 —— 这份 bundle 是 ad-hoc 签名、
-> 没有公证（本项目背后没有付费的开发者证书），而浏览器下载和 cask 安装都会给它打隔离标记，
-> `spctl -a` 两条路都判 `rejected`。只需处理一次：在访达里右键这个 App → 打开 → 再点
-> 「打开」。在终端里也可以：`xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`。
+> **如果 macOS 弹窗说「无法验证开发者」**：那是 Gatekeeper，不是包坏了 —— 这份 bundle
+> 是 ad-hoc 签名、没有公证（本项目背后没有付费的开发者证书），而浏览器下载和 cask 安装
+> 都会给它打隔离标记，`spctl -a` 两条路都判 `rejected`。弹窗上只有「完成」和「移到废纸篓」
+> 两个按钮，新版 macOS 上右键 → 打开已经绕不过去了。能过的两条路，各只需做一次：
+>
+> - 系统设置 → 隐私与安全性，滚到下面写着「Agent Ping 已被阻止」的那一行，按**仍要打开**。
+> - 或者在终端里：`xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
+>
+> 根治要付费的 Developer ID 证书 + 公证（notarization）；在那之前，每个新装的用户都会
+> 撞上这一步。
 
 **备选：formula（从源码编译，不进 `/Applications`）**
 

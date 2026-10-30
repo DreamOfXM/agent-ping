@@ -272,12 +272,19 @@ only needed by the source build.
 > The cask uses `version :latest`, so upgrades must pass `--greedy`:
 > `brew upgrade --cask --greedy agent-ping`. A plain `brew upgrade` skips it.
 
-> **If macOS refuses to open it**, that is Gatekeeper, not a broken download: the
-> bundle is ad-hoc signed and unnotarized (there is no paid developer certificate
-> behind this project), and both a browser download and a cask install mark it
-> quarantined — `spctl -a` reports `rejected` either way. One fix, once:
-> right-click the app → Open → Open. From a shell:
-> `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`.
+> **If macOS says it cannot verify the developer**, that is Gatekeeper, not a
+> broken download: the bundle is ad-hoc signed and unnotarized (there is no paid
+> developer certificate behind this project), and both a browser download and a
+> cask install mark it quarantined — `spctl -a` reports `rejected` either way.
+> The dialog offers only *Done* and *Move to Trash*; right-click → Open no longer
+> gets past it on recent macOS. Two ways that do work, once each:
+>
+> - System Settings → Privacy & Security, scroll down to the line saying *Agent
+>   Ping was blocked*, and press **Open Anyway**.
+> - Or from a shell: `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
+>
+> The real fix is a paid Developer ID plus notarization; until then every first
+> install takes one of those two steps.
 
 **Alternative: the formula (built from source, stays out of `/Applications`)**
 
