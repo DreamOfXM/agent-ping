@@ -240,6 +240,11 @@ only, so questions and options stay empty for them.
 - macOS 13+ **or** Linux with X11; `notify-send` for banners and any of
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` for sound
 
+Which door to use, in one line: **macOS 13+** → Homebrew below, or
+[Build](#build); **Linux with X11** → [Build](#build) only, there is no formula
+for it; **Windows** → not supported, `src/platform/` ships only macOS and POSIX
+shims.
+
 ## Install with Homebrew (macOS 13+)
 
 There is no prebuilt binary to download: the formula compiles the panel from the
@@ -260,8 +265,7 @@ agent-ping
 > the Command Line Tools present before it installs anything from any tap. Run
 > `xcode-select --install` and retry. If you would rather not pull those down,
 > the [Build](#build) section compiles the same source with the clang that ships
-> inside Xcode. Linux never goes through this path either — its apt packages are
-> listed under [Build](#build).
+> inside Xcode.
 
 `brew trust` is needed once: this is a third-party tap, and Homebrew refuses to
 load a formula from one by its short name until you say so. Without it only the

@@ -206,6 +206,10 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 - macOS 13+ **或** 带 X11 的 Linux；横幅要 `notify-send`，出声要
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` 里任意一个
 
+该走哪扇门，一行说完：**macOS 13+** → 下面的 Homebrew，或者「构建」一节；
+**带 X11 的 Linux** → 只有「构建」一条路，没有对应的 formula；
+**Windows** → 暂不支持，`src/platform/` 只带了 macOS 与 POSIX 两套垫片。
+
 ## 用 Homebrew 安装（macOS 13+）
 
 没有预编译包可下：这个 formula 从本仓库
@@ -223,7 +227,6 @@ agent-ping
 > Homebrew 自己在 macOS 26 上的准入检查，不是本项目的要求 —— 它要求系统里存在命令行
 > 工具，才肯装任何 tap 里的任何 formula。跑一次 `xcode-select --install` 再重试；
 > 不想下这一份的话，下面「构建」一节用 Xcode 自带的 clang 就能编出同样的东西。
-> Linux 根本不走这条路，它要的 apt 包也在「构建」一节里。
 
 `brew trust` 只需跑一次：这是第三方 tap，Homebrew 默认不按短名加载它的 formula。
 不跑这一句的话，只有全名的 `brew install dreamofxm/agent-ping/agent-ping` 能用，
