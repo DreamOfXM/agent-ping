@@ -297,7 +297,7 @@ only needed by the source build.
 
 Use this if you would rather not run a prebuilt binary, want to compile it
 yourself, or simply cannot pull 26 MB. It builds from source at the
-[v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) tag, so the first
+[v0.1.4](https://github.com/DreamOfXM/agent-ping/tree/v0.1.4) tag, so the first
 install needs the Xcode command line tools and takes about a minute on an
 Apple-silicon Mac.
 

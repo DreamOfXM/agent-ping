@@ -255,7 +255,7 @@ Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自�
 **备选：formula（从源码编译，不进 `/Applications`）**
 
 不想用预编译二进制、想自己编一份，或者 26 MB 实在下不动的时候用这条。它从本仓库
-[v0.1.3](https://github.com/DreamOfXM/agent-ping/tree/v0.1.3) 标签的源码现场编译，
+[v0.1.4](https://github.com/DreamOfXM/agent-ping/tree/v0.1.4) 标签的源码现场编译，
 第一次装需要 Xcode 命令行工具，Apple 芯片上大约一分钟。
 
 ```sh
