@@ -1050,7 +1050,8 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         tx += tw + 18.0f;
     }
     {
-        // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数。
+        // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数，
+        // 与下面的卡片同一支过滤（切到某一家就只数那一家）。
         const bool on = (g_view == 9);
         const float x0 = tx;
         const std::string t2 = T("r_claim_tab", loc);
@@ -1059,7 +1060,8 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
         tx += tw;
         int ready = 0;
-        for (const ap::Claim& c : g_pd.claims) if (c.ready) ready++;
+        for (const ap::Claim& c : g_pd.claims)
+            if (c.ready && (g_r31_src == "all" || c.vendor == g_r31_src)) ready++;
         if (ready > 0) {
             // 2026-10-30 用户：「这个数字也要醒目点，比如颜色啥的」。原来它和左边 tab 名同灰、
             // 底是 6% 白，一整条读起来没有重点。改走权益卡「现在可领」那颗的同一支蓝：
@@ -1805,33 +1807,47 @@ static float R31QuotaCell(ImDrawList* dl, float x, float y, float w, const ap::Q
 static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
     const float L = x + 16.0f, listW = w - 32.0f;
-    bool anyUsage = g_pd.has_today_tokens && g_pd.today_tokens > 0;
-    for (const Tool& t : g_pd.tools) if (R31HasUsage(t)) anyUsage = true;
+    // 来源导轨在这一屏也画，正文就得跟着它走：选了一家只算那一家，否则导轨是个假开关。
+    const bool one = g_r31_src != "all";
+    const Tool* sel = one ? R31ToolOf(g_r31_src) : nullptr;
+    auto inSrc = [&](const Tool& t) { return !one || t.id == g_r31_src; };
+    bool anyUsage = one ? (sel && sel->present() && (R31HasUsage(*sel) || R31QuotaAny(*sel)))
+                        : (g_pd.has_today_tokens && g_pd.today_tokens > 0);
+    if (!one)
+        for (const Tool& t : g_pd.tools) if (R31HasUsage(t)) anyUsage = true;
     if (!anyUsage)
-        return R31Empty(dl, L, y, listW, 180.0f, T("r_no_usage", loc), T("r_no_usage_hint", loc),
-                        nullptr, 0, loc);
+        return R31Empty(dl, L, y, listW, 180.0f,
+                        one ? T("r_no_usage_src", loc) : T("r_no_usage", loc),
+                        T("r_no_usage_hint", loc), nullptr, 0, loc);
     float cy = y;
     // usage-head：块高 107
     {
         const float hx = L + 7.0f;
         R31Mid(dl, hx, cy + 12.25f, T("r_total_today", loc), loc, k31Muted, T_S11);
-        double sum = g_pd.has_today_tokens ? (double)g_pd.today_tokens : 0.0;
-        if (!g_pd.has_today_tokens)
+        double sum = one ? (sel ? (double)sel->usage.total() : 0.0)
+                         : (g_pd.has_today_tokens ? (double)g_pd.today_tokens : 0.0);
+        if (!one && !g_pd.has_today_tokens)
             for (const Tool& t : g_pd.tools)
                 if (t.present()) sum += (double)t.usage.total();
-        const std::string big = R31Compact(sum);
+        // 单位跟着来源走：只有 Credits 读数的工具（Qoder）把 Credits 亮在大数字上，
+        // 不拿「0 tokens」替它说话。
+        const bool bigCredits = one && sel && sel->usage.total() == 0 && sel->has_credits &&
+                                sel->credits > 0;
+        const std::string big = bigCredits ? R31Num(sel->credits) : R31Compact(sum);
+        const std::string unit = bigCredits ? "Credits" : "tokens";
         const float nw = TextWidth(big, loc, T_N35, -1.2f);
         DrawTextRun(dl, hx, TextTop(cy + 25.0f, 42.0f, T_N35, loc), big, loc, k31Fg, T_N35, -1.2f);
-        DrawTextRun(dl, hx + nw + 3.0f, TextTop(cy + 50.5f, 16.5f, T_CHIP, loc), "tokens", loc,
+        DrawTextRun(dl, hx + nw + 3.0f, TextTop(cy + 50.5f, 16.5f, T_CHIP, loc), unit, loc,
                     k31Muted, T_CHIP);
         int n = 0;
-        for (const Tool& t : g_pd.tools) if (R31HasUsage(t) || R31QuotaAny(t)) n++;
+        for (const Tool& t : g_pd.tools)
+            if (inSrc(t) && (R31HasUsage(t) || R31QuotaAny(t))) n++;
         R31Mid(dl, hx, cy + 81.5f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
         cy += 107.0f;
     }
     // 每个有额度的工具一张卡：head 53 + pair(5+88+14) [+ stale note]
     for (const Tool& t : g_pd.tools) {
-        if (!R31QuotaAny(t)) continue;
+        if (!inSrc(t) || !R31QuotaAny(t)) continue;
         const bool staleF = R31QuotaStale(t.quota.five, now);
         const bool staleW = R31QuotaStale(t.quota.week, now);
         const bool stale = staleF || staleW;
@@ -1880,16 +1896,15 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
         }
         cy = cardY + ch + 10.0f;
     }
-    // section-heading：margin 17 5 10
-    {
+    // 「按工具查看」只在「全部」下有意义：选了一家，那一行就是把上面的大数字再抄一遍。
+    if (!one) {
+        // section-heading：margin 17 5 10
         cy += 17.0f;
         R31Mid(dl, L + 5.0f, cy + 8.0f, T("r_usage_by", loc), loc, k31Sec, T_S11B);
         DrawTextRight(dl, L + listW - 5.0f, TextMid(cy + 8.0f, T_S10, loc), T("r_today", loc), loc,
                       k31Muted, T_S10);
         cy += 26.0f;
-    }
-    // tool-usage-list：每行 59，行间 1pt；没读数的工具数字列整列不画
-    {
+        // tool-usage-list：每行 59，行间 1pt；没读数的工具数字列整列不画
         std::vector<const Tool*> us;
         for (const Tool& t : g_pd.tools)
             if (t.present() && (R31HasUsage(t) || R31QuotaAny(t))) us.push_back(&t);
@@ -2826,7 +2841,10 @@ static float R31Banner(ImDrawList* dl, float x, float y, float w, int loc, doubl
 }
 
 // ── 一屏总装 ─────────────────────────────────────────────────────────────────
-/// 返回面板高（固定 850）。签名与 R20Draw 对齐，body 账本同样回写。
+// 会话屏的最低高＝空态那一屏：162 固定段 + 420 空态块 + 2 队列垫 + 4 + 57 页脚。
+static const float kSessMinH = 645.0f;
+
+/// 返回面板高（各屏按内容自己夹取）。签名与 R20Draw 对齐，body 账本同样回写。
 static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc, int view,
                      double tn) {
     float panelOut = h;      // 本屏内容高（收放目标）；各屏覆写，返回给 drawPanel 驱动窗口
@@ -2838,14 +2856,16 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
     }
     if (view == 0) {
         const float queueTop = R31OverviewFixed(dl, x, y, w, loc, tn);
-        // 面板收放：队列短就收成「固定段＋队列＋页脚」；长了封顶当前窗口高、内部滚动。
+        // 面板收放：高度跟着队列的自然高走，夹在「空态那一屏」与画布 850 之间。
+        // 下限是空态高度：行少时不许比空态还矮（2026-10-31 实测 2 条待处理 528 vs 空态 645）。
+        // 上限不能取「当前窗口高」——窗口跟着它收放，那样只剩收、从高屏缩下来长不回去。
+        // 高度不掺当前窗口，也就没有「每帧收 4pt」那道棘轮。
         const float queueH = R31QueueH(loc);
-        // 底部要留 57（页脚）+ 4（队列下垫）＝61；这里若多减 4，滚动档的
-        // panelOut 就恒等于「当前高 − 4」，窗口每帧收一寸，六语并排一轮能掉 20pt，
-        // 空态那颗按钮就被页脚越压越低（实测 184/180/176/172/168/164）。
-        const float avail = std::fmax(120.0f, (y + h) - queueTop - 57.0f - 4.0f);
-        const float vis = std::fmin(queueH, avail);
-        const float qBot = queueTop + vis + 4.0f;
+        const float natural = queueTop + queueH + 4.0f + 57.0f - y;   // 队列下垫 4 + 页脚 57
+        const float floorH = std::fmin(kSessMinH, kCanvasH);
+        const float target = std::fmin(std::fmax(natural, floorH), kCanvasH);
+        // 页脚永远贴面板底沿：被下限抬起时，多出来的空档留在队列下方，不是在页脚下。
+        const float qBot = y + target - 57.0f;
         g_bodyTop[view] = ImVec2(x + 16.0f, queueTop);
         g_bodyBot[view] = ImVec2(x + w - 16.0f, qBot);
         g_bodyValid[view] = true;
@@ -2859,7 +2879,7 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (qBot - 4.0f - queueTop));
         RCullHits(hits0, x + 16.0f, queueTop, x + w - 16.0f, qBot);
         R31FootRoot(dl, x, qBot, w, loc);
-        panelOut = qBot + 57.0f - y;
+        panelOut = target;
     } else if (view == 6) {
         const float bodyTop = y + 162.0f, bodyBot = y + h - 41.0f;
         g_bodyTop[view] = ImVec2(x + 16.0f, bodyTop);
