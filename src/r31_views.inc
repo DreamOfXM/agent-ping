@@ -998,6 +998,34 @@ static float R31Sources(ImDrawList* dl, float x, float y, float w, int loc) {
     const float maxOff = std::fmax(0.0f, totalW - railW);
     if (g_r31_rail < 0) g_r31_rail = 0;
     if ((float)g_r31_rail > maxOff + 0.5f) g_r31_rail = (int)std::lround(maxOff);
+    // 选中项要留在导轨里：点靠后的来源时选中的那颗要是滑出视野，签上只剩内容变了、
+    // 看不出选的是谁（2026-10-31 拍 WorkBuddy 用量时撞见）。只在「选择变了」那一帧挪，
+    // 箭头的手动滚动不跟它打架。
+    static std::string railSelSeen;
+    static bool railSelInit = false;
+    if (!railSelInit || railSelSeen != g_r31_src) {
+        if (g_r31_src == "all") {
+            railSelSeen = "all";
+            railSelInit = true;
+            g_r31_rail = 0;
+        } else {
+            for (int i = 0; i < n; i++) {
+                if (tools[(size_t)i]->id != g_r31_src) continue;
+                // 数据还没扫完的帧 tools 是空的，这一帧认下选择就会永远不重试：
+                // 「认过了」只在真找到那颗签之后才写。
+                railSelSeen = g_r31_src;
+                railSelInit = true;
+                float itemOff = 0.0f;
+                for (int j = 0; j < i; j++) itemOff += itemW[(size_t)j] + 3.0f;
+                if (itemOff < (float)g_r31_rail ||
+                    itemOff + itemW[(size_t)i] > (float)g_r31_rail + railW) {
+                    const float want = itemOff + itemW[(size_t)i] * 0.5f - railW * 0.5f;
+                    g_r31_rail = (int)std::lround(std::fmax(0.0f, std::fmin(maxOff, want)));
+                }
+                break;
+            }
+        }
+    }
     const float off = (float)g_r31_rail;
 
     const size_t h0 = g_hits.size();
@@ -1006,8 +1034,11 @@ static float R31Sources(ImDrawList* dl, float x, float y, float w, int loc) {
     for (int i = 0; i < n; i++) {
         const Tool& t = *tools[(size_t)i];
         const float iw = itemW[(size_t)i];
-        // 摆不下的整颗不画（稿子不放半颗溢出）
-        if (ix >= railX0 - 0.5f && ix + iw <= railX1 + 0.5f) {
+        // 稿子的导轨是可横滚的 overflow:auto：滑到哪儿都照画，半颗由裁剪切掉。
+        // 只画「完整的」会让右边渐隐压在一片空玻璃上，像一道黑杠——那正是他截图里问的那类怪边。
+        const bool full = ix >= railX0 - 0.5f && ix + iw <= railX1 + 0.5f;
+        const bool any = ix + iw > railX0 + 0.5f && ix < railX1 - 0.5f;
+        if (any) {
             const bool on = (g_r31_src == t.id);
             const float hov = TxPeekNew(Zid(loc, 500 + i, HIT_SRC, 0), 0.0f);
             if (on)
@@ -1023,9 +1054,11 @@ static float R31Sources(ImDrawList* dl, float x, float y, float w, int loc) {
             DrawTextRun(dl, lx, TextMid(iy + ih * 0.5f, T_S105, loc),
                         ClipToWidth(label, ix + iw - 7.0f - lx, loc, T_S105), loc,
                         on ? k31Fg : k31Sec, T_S105);
-            AddHit(g_hits, ix, iy, ix + iw, iy + ih, HIT_SRC, 500 + i, 0, loc, R31Agent(t.id, loc),
-                   on ? 1 : 0);
-            g_hits.back().key = t.id;
+            if (full) {
+                AddHit(g_hits, ix, iy, ix + iw, iy + ih, HIT_SRC, 500 + i, 0, loc,
+                       R31Agent(t.id, loc), on ? 1 : 0);
+                g_hits.back().key = t.id;
+            }
         }
         ix += iw + 3.0f;
     }

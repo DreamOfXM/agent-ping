@@ -44,8 +44,9 @@ struct HeadFacts {
 HeadFacts head_facts(const std::string& path, std::size_t max_bytes = 256 * 1024);
 
 /// 从文件尾按块向前回退，把 needle 命中的行解析出来交给 fn。
-/// 各家 CLI 的用量藏在不同键下（Qoder/Claude 是 message.usage，WorkBuddy 是
-/// providerData.usage），所以这里不预设形状，只负责「窗内 + 便宜」这一段。
+/// 各家 CLI 的用量都藏在 message.usage 下（键名 snake_case）；WorkBuddy 另有一份
+/// providerData.usage 的 camelCase 镜像，别拿 snake_case 的键去读它。这里不预设形状，
+/// 只负责「窗内 + 便宜」这一段。
 /// 时间戳实测会回跳，越过 since 后再多读一截才收手。
 void scan_window(const std::string& path, double since_epoch, const char* needle,
                  const std::function<void(const Json&, double)>& fn,

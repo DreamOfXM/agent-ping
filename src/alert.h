@@ -63,7 +63,21 @@ struct Pending {
     std::string agent_id, agent_name, session_id, title;
     State state = ST_RESTING;
     bool inferred = false;
+    /// 这条会话最后一次动是什么时候。给「刚收尾就别吵」那道去抖用：
+    /// 一轮跑完的瞬间和「球回到你这边」在磁盘上长得一模一样，隔 3 秒再判才能分开。
+    double last_activity = 0;
 };
+
+/// 「等你回复」这一档的去抖窗口。2026-10-31 用户实测：刚在 WorkBuddy 里发出一条消息，
+/// App 还在「深度思考中」，桌面就弹了「WorkBuddy · 已完成」——上一轮 8 秒收尾的记录
+/// 是日志里的最后一条，新一轮的用户消息还没落盘，于是被判成 needs_user 发了出去。
+/// 收尾这件事不紧急，晚 20 秒再吵不影响任何事；而它要是在这 20 秒里又动起来，本轮就作废。
+/// 等待确认（真卡在授权上）与失败中断不套这道窗：它们一出现就是要人。
+constexpr double kNeedsUserQuiet = 20.0;
+
+/// 这一档现在发出去会不会只是转弯时的那半秒。状态越年轻越可能是假的：
+/// 本轮先按住不发、也不记账，下一轮还在才响（记账了就再也不会响）。
+bool alert_too_young(State st, double age_sec);
 
 /// 券到账用的身份键前缀。会话键是「agent/会话 id」，券键是「claim:厂商:期次日」——
 /// 两边共用同一本账本，靠这个前缀各扫各的：会话那轮不许把券键当「不再待处理」摘掉，

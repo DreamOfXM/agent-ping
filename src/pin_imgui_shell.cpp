@@ -1104,6 +1104,16 @@ static const Key kStr[] = {
     {"r_children",     {"%d 条子对话", "%d sub-agents", "%d Unteragenten", "%d sotto-agenti",
                         "%d 件のサブ会話", "%d개 하위 대화"}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
+    // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
+    // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
+    // 卡宽只有 300，六语都压到一行以内（德语最长，实测 21 字符仍塞得下）。
+    // edge_ghost 只有一个 ‹：它必须进表，AddChromeText 才会把这一码点烘进图集。
+    {"edge_ghost",     {"‹", "‹", "‹", "‹", "‹", "‹"}},
+    {"edge_updated",   {"更新于 %s", "Updated %s", "Stand %s", "Aggiornato %s",
+                        "更新 %s", "업데이트 %s"}},
+    {"edge_all",       {"查看全部 %d 条 ›", "%d waiting ›", "Alle %d ›", "Tutti %d ›",
+                        "すべて %d 件 ›", "전체 %d개 ›"}},
+    {"edge_open",      {"打开 ›", "Open ›", "Öffnen ›", "Apri ›", "開く ›", "열기 ›"}},
 };
 static const char* T(const char* key, int loc) {
     for (const auto& s : kStr) if (!strcmp(s.k, key)) return s.t[loc];
@@ -1835,6 +1845,58 @@ static const char* g_shot_to = getenv("AGENTPING_SHOT");
 /// 离屏探针轮：AGENTPING_CLICK 在这一轮是合成的，落点必须走假档（AGENTPING_LAND_SHOT 指定），
 /// 否则「给六语并排图取证」会把他的桌面一家家点开。g_shot_to 在这一轮是空的，所以它拦不住。
 static bool g_probe_round = false;
+
+// ── 右缘唤出手柄（R1 双色签）────────────────────────────────────────────────
+// 同一块窗口换一副形态：面板收着时缩成屏幕右缘的 320×工作区，鼠标推到右缘停 80ms
+// 才长出手柄，再停 120ms 展开成签、320ms 展开成预览卡。手柄期间窗口是「鼠标穿透」的，
+// 只有指针落在可点零件上才停止穿透——否则这条 320pt 宽的透明窗会把右侧桌面的点击全吃掉。
+static const int kEdgeW = 320;          // 预览卡 300 + 右缩进 14 + 左留 6
+static const float kEdgeInset = 14.0f;  // 手柄离屏幕右沿
+static int g_waX = 0, g_waY = 0, g_waW = 0, g_waH = 0;   // 主屏工作区（y 向下）
+static bool g_waKnown = false;
+static bool g_edgeOff = false;          // AGENTPING_EDGE_OFF：整条关掉，退回「收面板就收窗」
+enum WinMode { WIN_PANEL = 0, WIN_BANNER, WIN_EDGE, WIN_HIDDEN };
+static int g_winMode = WIN_PANEL;
+static bool g_modeDirty = true;
+static int g_panelX = 0, g_panelY = 0;
+static bool g_panelPosKnown = false;
+static bool g_focusNext = false;        // 下一次进面板形态要不要抢键盘（从手柄唤出＝要）
+static bool g_edgeShown = false;
+static bool g_edgePass = true;          // 窗口当前是不是鼠标穿透（每次真改才更新）
+#ifdef __APPLE__
+static const bool g_edgeHost = true;
+#else
+static const bool g_edgeHost = false;   // X11 拿不到可靠的全局指针与穿透，整条不出现
+#endif
+
+enum EdgeState { EDGE_IDLE = 0, EDGE_PENDING, EDGE_HOVER, EDGE_PEEK, EDGE_IDLEHOVER };
+static int g_edgeState = EDGE_IDLE;
+static double g_edgeStateAt = 0;        // 这一态进场时刻：只喂 150/190ms 的入场动画
+static double g_edgeStillAt = 0;        // 进热区后那次 80ms 静置的到点（0＝没在计）
+static double g_edgeHoverAt = 0;        // pending → hover 的到点
+static double g_edgePeekAt = 0;         // hover → peek 的到点
+static double g_edgeHideAt = 0;         // 离区后收起的到点（0＝没收）
+static double g_edgeAnimUntil = 0;
+static double g_edgeBeatAt = 0;         // 静置心跳：每 2 秒至少重画一帧（数据变了要跟上）
+static bool g_edgeZonePrev = false;
+static float g_edgeHy = -1.0f;          // 手柄中心（窗口本地 y）
+static bool g_edgeFrozen = false;       // 展开后位置冻住，不跟着指针走
+static int g_edgeRow = -1;              // 预览卡里指针停在哪一行
+static bool g_edgeDownPrev = false;
+static int g_edgeForce = -1;            // AGENTPING_EDGE：取证时钉死一态
+static bool g_edgeEmpty = false;        // AGENTPING_EDGE_EMPTY：只验空态版面
+static bool g_edgeTrace = false;
+static float g_edgeCurX = 0, g_edgeCurY = 0;   // AGENTPING_EDGE_CURSOR：逻辑指针（绝对屏幕坐标）
+static bool g_edgeCurSet = false;
+// AGENTPING_EDGE_CURSOR 的换位写法 "x1,y1>x2,y2@t"：进手柄后 t 秒把逻辑指针挪到第二点。
+// 只用来验「从 9pt 热区横移到签上」这条路径——静态点永远走不出这段位移。
+// t 从第一帧手柄算起，不从进程启动算：烘字形要几百毫秒，按绝对时钟会踩空。
+static float g_edgeCur2X = 0, g_edgeCur2Y = 0;
+static double g_edgeCur2At = 0;
+static bool g_edgeCur2Arm = false;
+static double g_edgeFirstAt = -1;
+static int g_edgeRowForce = -1;         // AGENTPING_EDGE_ROW
+static float g_edgeAtForce = -1;        // AGENTPING_EDGE_AT（绝对屏幕 y）
 
 // ── 设置屏接的三个活口子 ────────────────────────────────────────────────────
 // g_cfg 是「屏幕上那一屏」与 alert.cpp 的持久化之间唯一的桥：启动时 load、每次点击 save。
@@ -2844,10 +2906,15 @@ static const char* LandName(int lv) {
 }
 
 /// 收面板：这块浮层是 topmost，跳过去的窗口会被我们自己盖住（Swift 那边 dismiss() 同一件事）。
+/// macOS 只改意图、标脏，真收窗由 ApplyWindowMode 一处做：同一块窗口还要在「面板 / 横幅 /
+/// 右缘手柄」之间换尺寸与位置，两处各自 hide/show 会互相打架（实测会横一帧竖一帧）。
 static void HidePanel() {
     if (g_panelVisible) {
         g_panelVisible = false;
+        g_modeDirty = true;
+#ifndef __APPLE__
         if (g_win) glfwHideWindow(g_win);
+#endif
     }
 }
 
@@ -2856,8 +2923,11 @@ static void HidePanel() {
 static void ShowPanel() {
     if (!g_panelVisible) {
         g_panelVisible = true;
-        if (g_win) glfwShowWindow(g_win);
+        g_modeDirty = true;
         g_relayout = true;
+#ifndef __APPLE__
+        if (g_win) glfwShowWindow(g_win);
+#endif
     }
 }
 
@@ -3322,7 +3392,8 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             return;
         case HIT_SRC:                           // 来源导轨：key 装 tool id，空＝全部
             g_r31_src = h.key.empty() ? "all" : h.key;
-            g_r31_rail = 0;
+            // 偏移不在这里归零：R31Sources 会在「选择变了」那一帧把选中的那颗挪进视野，
+            // 点一颗已经看得见的签不该让整条导轨突然滑回开头。
             g_scroll[g_view] = 0.0f;
             g_relayout = true;
             return;
@@ -5181,6 +5252,25 @@ static std::set<std::string> g_ledger;
 static long g_alert_seq = -1;
 static bool g_alert_first = true;
 
+// 采集器的 agent id → 那家桌面 App 的 bundle id（返回 nullptr＝没有桌面端）。
+// bundle id 是 2026-10-31 从各自 Info.plist 里读出来的，不是凭名字猜的：
+// WorkBuddy=com.tencent.workbuddy.mac、Qoder=com.qoder.app、ZCode=dev.zcode.app。
+// 用来回答「他此刻是不是正盯着那个 App」——是的话横幅只是噪音。
+static const char* AgentBundle(const std::string& agent_id) {
+    if (agent_id == "workbuddy") return "com.tencent.workbuddy.mac";
+    if (agent_id == "qoder") return "com.qoder.app";
+    if (agent_id == "zcode") return "dev.zcode.app";
+    return nullptr;   // Codex/Claude/OpenCode 本机只有 CLI，没有可被「正在看」的窗口
+}
+
+/// AGENTPING_FRONTMOST=<bundle id> 让探针假装「这台机器正显示那家 App」。
+/// 没有它这条判据没法在不动他桌面的前提下验：真把 WorkBuddy 调到前台就是抢他的焦点。
+static bool AppIsFront(const char* bid) {
+    if (const char* forced = getenv("AGENTPING_FRONTMOST"))
+        return forced[0] && strcmp(forced, bid) == 0;
+    return ap_app_frontmost(bid) != 0;
+}
+
 static void RunAlertRound(const ap::Snapshot& s) {
     // g_cfg 不在这里读盘：设置屏的每次点击都当场 save_alert_cfg 回写 g_cfg，
     // 启动时 main 里 load 一次就够；再在这里 load 会把「刚点的那一下」擦回旧值，
@@ -5203,7 +5293,7 @@ static void RunAlertRound(const ap::Snapshot& s) {
     // 两条都要**从账本里摘掉**，否则恢复时刻一到它就变成「已提醒过」而永远不再响 ——
     // 那等于把「稍后」变成了「永不」。
     std::vector<ap::Pending> keep;
-    int held = 0;
+    int held = 0, too_young = 0;
     const double now = s.scanned_at > 0 ? s.scanned_at : std::time(nullptr);
     for (const auto& p : r.to_post) {
         const std::string pk = p.agent_id + "/" + p.session_id;
@@ -5215,9 +5305,32 @@ static void RunAlertRound(const ap::Snapshot& s) {
             next.erase(ap::alert_key(p.agent_id, p.session_id));
             continue;
         }
+        // 「等你回复」刚出现时可能只是回合交接的那几秒：磁盘上「上一轮无错收尾」与
+        // 「球真的回到你这边」写着同一条记录，而新一轮的用户消息还没落盘。先按住不发、
+        // **也不记账**——记了就再也不会响；下一轮还在才算数。真卡授权/失败中断不套这道窗。
+        if (ap::alert_too_young(p.state, now - p.last_activity)) {
+            too_young++;
+            next.erase(ap::alert_key(p.agent_id, p.session_id));
+            fprintf(stderr, "[提醒] 按住 %s｜%s：这条状态只有 %.0fs，可能是回合交接\n",
+                    p.agent_name.c_str(), p.title.c_str(), now - p.last_activity);
+            fflush(stderr);
+            continue;
+        }
         keep.push_back(p);
     }
+    int watching = 0, posted_n = 0;
     for (const auto& p : keep) {
+        // 他正盯着那家 App 时，结果已经写在他眼前的聊天里，横幅只是噪音。
+        // 只跳过投递、**保留账本**：这也是一种「已经送达」，他切走时不该再补响一次。
+        if (const char* bid = AgentBundle(p.agent_id)) {
+            if (AppIsFront(bid)) {
+                watching++;
+                fprintf(stderr, "[提醒] 跳过 %s｜%s：你正在看这家 App\n",
+                        p.agent_name.c_str(), p.title.c_str());
+                fflush(stderr);
+                continue;
+            }
+        }
         // 标题里的状态词与面板同一份表：横幅说「等你授权」、面板说「等待确认」
         // 这种两处各念一套的分裂，用户只能靠猜来对齐。
         const char* word = p.state == ap::ST_FAILED ? T("failed", g_loc)
@@ -5225,6 +5338,7 @@ static void RunAlertRound(const ap::Snapshot& s) {
                                                  : T("st_done", g_loc);
         const std::string title = p.agent_name + " · " + word;
         char why[512] = {0};
+        posted_n++;
         int rc = ap_notify_post(title.c_str(), p.title.c_str(), p.agent_id.c_str(),
                                 p.session_id.c_str(), g_cfg.sound ? 1 : 0, why, (int)sizeof why);
         // rc==3＝系统没在时限内回执：这条到底发没发出去不知道，所以**从账本里摘掉**，
@@ -5234,6 +5348,11 @@ static void RunAlertRound(const ap::Snapshot& s) {
                 rc == 0 ? "横幅已投" : rc == 1 ? "兜底出声" : rc == 3 ? "没回执，下轮再试"
                                                                      : "两边都不通", why);
         fflush(stderr);
+    }
+    if (too_young || watching) {
+        printf("[提醒] 本轮按住 %d 条（太新）、跳过 %d 条（你正在看那家 App）\n",
+               too_young, watching);
+        fflush(stdout);
     }
     // ── 券到账这一轮：接在同一本账之后，靠 claim: 前缀各扫各的 ────────────────
     // 这里必须自己 scan，不能读 g_pd.claims：那一份是「画那一趟」的产物，
@@ -5328,10 +5447,12 @@ static void RunAlertRound(const ap::Snapshot& s) {
                 err.empty() ? "原因未回" : err.c_str());
         fflush(stderr);
     }
-    if (g_alert_first || r.posted || r.retired || held || claim_posted || claim_retired) {
-        printf("[提醒] 命中 %d｜首次 %d｜发出 %zu｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜"
-               "券 %d/%d/%d｜账本 %zu 条｜免打扰%s｜刚静置 %zu 条\n",
-               r.hits, r.fresh, keep.size(), r.capped, r.retired, held,
+    if (g_alert_first || r.posted || r.retired || held || too_young || watching ||
+        claim_posted || claim_retired) {
+        printf("[提醒] 命中 %d｜首次 %d｜发出 %d｜压掉 %d｜摘账 %d｜已读/稍后按住 %d｜"
+               "太新按住 %d｜正在看不发 %d｜券 %d/%d/%d｜账本 %zu 条｜免打扰%s｜刚静置 %zu 条\n",
+               r.hits, r.fresh, posted_n, r.capped, r.retired, held,
+               too_young, watching,
                claim_hits, claim_fresh, claim_posted, g_ledger.size(),
                g_cfg.dnd ? "开" : "关", just_finished.size());
         fflush(stdout);
@@ -5350,8 +5471,11 @@ static float g_budgetH = 850.0f;
 
 /// 窗口该收到多高：r20 是固定 640 高的浮层，内容超出走屏内滚动；只有屏幕放不下时才压到预算。
 static int WantedWindowH() {
+    // 右缘手柄那一档＝整条工作区高：卡片要能贴着指针停在任意高度，窗口本身不跟着收。
+    if (g_winMode == WIN_EDGE) return g_waKnown ? g_waH : 900;
     // 横幅那一档不套 400 的下限：通知卡就该只有通知卡那么大，撑到 400 会变成一块空玻璃。
-    if (g_bannerActive) return (int)(g_bannerH + 0.5f);
+    // 认档不认 g_bannerActive：面板刚点开的那一帧两个标志都还立着，按标志取会把面板撑成横幅高。
+    if (g_winMode == WIN_BANNER) return (int)(g_bannerH + 0.5f);
     // R31 的面板高跟内容走：几行会话就收成几行高（下不再挂一大截空白），
     // 上限仍是屏预算与 850。r20 三屏画不满 640，由各自 Draw 返回值兜住。
     float h = g_panelH;
@@ -5362,7 +5486,587 @@ static int WantedWindowH() {
 }
 
 /// r20 六屏同宽：都是 340pt 的浮层（设置也是同一张卡，不再单独 420）。
-static int WantedWindowW() { return kPanelW; }
+static int WantedWindowW() {
+    if (g_winMode == WIN_EDGE) return kEdgeW;
+    return kPanelW;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 右缘唤出手柄：几何、状态机、输入、绘制
+// 稿子：evidence/2026-10-31-edge-float/{prototype.html,stage.css}（2026-10-31 用户拍板 R1）。
+// 坐标全部是窗口本地（窗口＝工作区 320×H）；窗口右沿＝屏幕右沿，所以「贴右 14pt」就是卡片右沿。
+// ─────────────────────────────────────────────────────────────────────────────
+static bool EdgeAvailable() {
+    return g_edgeHost && !g_edgeOff && g_waKnown && g_waW > kEdgeW + 40 && g_waH > 360;
+}
+static float EdgeZoneTop() { return 40.0f; }
+static float EdgeZoneBot() { return (float)g_waH - 40.0f; }
+/// 静置时手柄停的位置：稿子 HOME=500 @1080，视觉上比热区中线再抬 40pt（手自然停的高度）。
+static float EdgeHome() { return (EdgeZoneTop() + EdgeZoneBot()) * 0.5f - 40.0f; }
+static float EdgeClampHy(float y) {
+    const float lo = EdgeZoneTop() + 28.0f, hi = EdgeZoneBot() - 28.0f;
+    if (hi < lo) return (EdgeZoneTop() + EdgeZoneBot()) * 0.5f;
+    return y < lo ? lo : (y > hi ? hi : y);
+}
+static int EdgeWinX() { return g_waX + g_waW - kEdgeW; }
+static int EdgeWinY() { return g_waY; }
+
+struct ERect { float x, y, w, h; };
+static bool Inside(const ERect& r, float x, float y) {
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+static ERect EdgeBadgeRect() { return { (float)kEdgeW - kEdgeInset - 32.0f, g_edgeHy - 22.0f, 32.0f, 44.0f }; }
+static ERect EdgeQuietRect() { return { (float)kEdgeW - kEdgeInset - 34.0f, g_edgeHy - 17.0f, 34.0f, 34.0f }; }
+static ERect EdgeTabRect()   { return { (float)kEdgeW - kEdgeInset - 36.0f, g_edgeHy - 57.0f, 36.0f, 114.0f }; }
+static ERect EdgeGhostRect() { return { (float)kEdgeW - kEdgeInset - 32.0f, g_edgeHy - 20.0f, 32.0f, 40.0f }; }
+static float EdgeCardH(int n) { return 38.0f + 44.0f * (float)n + 32.0f; }
+static float EdgeCardY(float cardH) {
+    float y = g_edgeHy - cardH * 0.5f;
+    const float lo = 38.0f, hi = (float)g_waH - cardH - 38.0f;
+    if (hi < lo) return lo;
+    return y < lo ? lo : (y > hi ? hi : y);
+}
+static int g_edgeRowN = 0;   // 预览卡当前摆了几行（EdgePeekRows 每帧回填，卡片高度靠它）
+static ERect EdgeCardRect() {
+    // 预览卡最多三行；行数来自同一份待处理清单（见 EdgePeekRows）。
+    const float h = EdgeCardH(g_edgeRowN);
+    return { 6.0f, EdgeCardY(h), 300.0f, h };
+}
+
+/// 待处理清单（与面板同一判据：GroupOf == G_AWAIT）。面板的行是按 age 升序，
+/// 预览卡要「等最久的在最上面」，所以反过来取；最多三行。
+static std::vector<const UIRow*> EdgePeekRows() {
+    std::vector<const UIRow*> out;
+    if (g_edgeEmpty) { g_edgeRowN = 0; return out; }
+    for (const auto& r : g_pd.rows)
+        if (GroupOf(r.state) == G_AWAIT) out.push_back(&r);
+    std::reverse(out.begin(), out.end());
+    if (out.size() > 3) out.resize(3);
+    g_edgeRowN = (int)out.size();
+    return out;
+}
+/// 展开签上那几颗代理头像：按「等得最久的先」去重，最多三颗（稿子 R1 的三颗是同三行）。
+static std::vector<const UIRow*> EdgeChipRows() {
+    std::vector<const UIRow*> out;
+    if (g_edgeEmpty) return out;
+    std::vector<const UIRow*> all;
+    for (const auto& r : g_pd.rows)
+        if (GroupOf(r.state) == G_AWAIT) all.push_back(&r);
+    std::reverse(all.begin(), all.end());
+    std::set<std::string> seen;
+    for (const auto* r : all) {
+        if (!seen.insert(r->agent_id).second) continue;
+        out.push_back(r);
+        if (out.size() >= 3) break;
+    }
+    return out;
+}
+static int EdgeCount() {
+    if (g_edgeEmpty) return 0;
+    // 数行而不是读 await_n：签上的数字、表头计数、页脚「全部 N 条」必须是同一份清单，
+    // 否则预览卡摆着 3 行、签上却写 2（样例夹具就把 await_n 钉在 2 而与行数分叉过）。
+    int n = 0;
+    for (const auto& r : g_pd.rows) if (GroupOf(r.state) == G_AWAIT) n++;
+    return n;
+}
+static ERect EdgeActiveRect() {
+    switch (g_edgeState) {
+        case EDGE_PENDING:   return EdgeBadgeRect();
+        case EDGE_IDLEHOVER: return EdgeGhostRect();
+        case EDGE_HOVER:     return EdgeTabRect();
+        case EDGE_PEEK:      return EdgeCardRect();
+        default:             return EdgeQuietRect();
+    }
+}
+/// 指针落在这上面时窗口必须接收鼠标；其余地方一律穿透（见文件顶部那段）。
+static bool EdgeWantsMouse(float x, float y) {
+    return Inside(EdgeActiveRect(), x, y);
+}
+/// 稿子的 overHandle：从手柄右侧到热区起点这条带子（pending 22pt／hover 40pt）不算离开，
+/// 只管「别把刚长出来的手柄收掉」，不接点击。少了它，从 9pt 热区横移到签上会穿过
+/// 5pt 空白，停在那儿看字的人 160ms 后就看着手柄自己消失（稿子里反而活着）。
+static bool EdgeHandleBand(float x, float y) {
+    if (x < (float)kEdgeW - kEdgeInset - 40.0f || x > (float)kEdgeW - 8.0f) return false;
+    const float halfW = (g_edgeState == EDGE_HOVER || g_edgeState == EDGE_PEEK) ? 40.0f : 22.0f;
+    const float halfH = g_edgeState == EDGE_HOVER ? 62.0f
+                      : (g_edgeState == EDGE_PEEK ? 0.0f : 28.0f);
+    return x >= (float)kEdgeW - 14.0f - halfW && std::fabs(y - g_edgeHy) <= halfH;
+}
+
+static void EdgeSetState(int st, double now, const char* why) {
+    if (g_edgeState == st) return;
+    if (g_edgeTrace)
+        fprintf(stderr, "[边缘] %.3f %d → %d（%s）hy=%.0f\n", now, g_edgeState, st, why, g_edgeHy);
+    g_edgeState = st;
+    g_edgeStateAt = now;
+    g_edgeAnimUntil = now + (st == EDGE_PEEK ? 0.19 : 0.15);
+    g_edgeRow = -1;
+}
+static void EdgeClose(double now, const char* why) {
+    EdgeSetState(EDGE_IDLE, now, why);
+    g_edgeHy = EdgeHome();
+    g_edgeFrozen = false;
+    g_edgeStillAt = g_edgeHoverAt = g_edgePeekAt = g_edgeHideAt = 0;
+    g_edgeRow = -1;
+}
+static void EdgeLeave() {
+    g_edgeStillAt = g_edgeHoverAt = g_edgePeekAt = g_edgeHideAt = 0;
+    g_edgeFrozen = false;
+    g_edgeRow = -1;
+    g_edgeState = EDGE_IDLE;
+    g_edgeHy = EdgeHome();
+    g_edgeZonePrev = false;
+}
+static void EdgeOpenPanel() {
+    ShowPanel();
+    g_focusNext = true;
+    g_modeDirty = true;
+    printf("[边缘] 唤出面板\n");
+    fflush(stdout);
+}
+/// 点预览卡的一行：先展面板再跳——落到会话级时 JumpTo 会把它收回去，
+/// 落不到时面板留在屏上，LandingToast 那句回执才有地方显示（回执只画在 drawPanel 里）。
+static void EdgeClickRow(const UIRow& r, int idx) {
+    Hit h;
+    h.act = HIT_JUMP;
+    h.row = 300 + idx;
+    h.zid = Zid(g_loc, 300 + idx, HIT_JUMP, 0);
+    h.key = r.key;
+    h.agent_id = r.agent_id;
+    h.native_id = r.native_id;
+    h.title = r.title;
+    h.cwd = r.cwd;
+    h.created = r.created;
+    h.label = r.title;
+    ShowPanel();
+    JumpAndReport(h);
+}
+/// 一次点击落在谁身上。返回 true＝已处理（用于日志）。
+static bool EdgeClick(float lx, float ly, double now) {
+    const ERect card = EdgeCardRect();
+    if (g_edgeState == EDGE_PEEK) {
+        if (!Inside(card, lx, ly)) {   // 点卡外：收起（稿子的全局 click）
+            EdgeClose(now, "卡外一击");
+            return true;
+        }
+        const float yIn = ly - card.y;
+        if (yIn >= 38.0f && yIn < 38.0f + 44.0f * (float)g_edgeRowN) {
+            const int idx = (int)((yIn - 38.0f) / 44.0f);
+            const std::vector<const UIRow*> rows = EdgePeekRows();
+            if (idx >= 0 && idx < (int)rows.size()) {
+                printf("[边缘] 点预览卡第 %d 行：%s\n", idx + 1, rows[(size_t)idx]->title.c_str());
+                fflush(stdout);
+                EdgeClickRow(*rows[(size_t)idx], idx);
+                return true;
+            }
+        }
+        EdgeOpenPanel();   // 表头 / 页脚：进面板
+        return true;
+    }
+    if (Inside(EdgeActiveRect(), lx, ly)) {
+        EdgeOpenPanel();
+        return true;
+    }
+    return false;
+}
+
+static void EdgeInput(double now, float gx, float gy, bool have) {
+    if (!have) return;
+    const float lx = gx - (float)EdgeWinX();
+    const float ly = gy - (float)EdgeWinY();
+    const bool inZone = lx >= (float)kEdgeW - 9.0f &&
+                        ly >= EdgeZoneTop() && ly <= EdgeZoneBot();
+    const bool entered = inZone && !g_edgeZonePrev;
+    g_edgeZonePrev = inZone;
+
+    // 取证：状态由环境变量钉死，不跑计时器；只按逻辑指针更新行悬停与点击。
+    if (g_edgeForce >= 0) {
+        if (g_edgeForce == EDGE_PEEK) EdgePeekRows();   // 先量行数，卡片高度才对
+        const ERect card = EdgeCardRect();
+        if (g_edgeRowForce >= 0) g_edgeRow = g_edgeRowForce;
+        else g_edgeRow = (g_edgeState == EDGE_PEEK && Inside(card, lx, ly))
+                             ? (int)((ly - card.y - 38.0f) / 44.0f) : -1;
+        if (g_edgeRow < 0 || g_edgeRow >= g_edgeRowN) g_edgeRow = g_edgeRowForce;
+        const bool down = ap_mouse_down();
+        const bool clicked = down && !g_edgeDownPrev;
+        g_edgeDownPrev = down;
+        if (clicked && !g_shot_to) EdgeClick(lx, ly, now);
+        return;
+    }
+
+    const bool overAct = EdgeWantsMouse(lx, ly);
+    const bool alive = inZone || overAct || EdgeHandleBand(lx, ly);
+    if (alive) {
+        g_edgeHideAt = 0;
+        if (g_edgeState == EDGE_IDLE) {
+            if (entered) g_edgeStillAt = now + 0.08;
+        } else if (g_edgeState == EDGE_PENDING || g_edgeState == EDGE_IDLEHOVER) {
+            if (inZone && !g_edgeFrozen) {
+                const float hy = EdgeClampHy(ly);
+                if (std::fabs(hy - g_edgeHy) > 0.25f) g_edgeHy = hy;
+            }
+        } else if (g_edgeState == EDGE_PEEK) {
+            const ERect card = EdgeCardRect();
+            g_edgeRow = Inside(card, lx, ly) ? (int)((ly - card.y - 38.0f) / 44.0f) : -1;
+            if (g_edgeRow < 0 || g_edgeRow >= g_edgeRowN) g_edgeRow = -1;
+        }
+    } else {
+        if (g_edgeStillAt > 0) g_edgeStillAt = 0;
+        if (g_edgeHideAt == 0) {
+            const double d = g_edgeState == EDGE_PEEK ? 0.42
+                           : g_edgeState == EDGE_HOVER ? 0.28
+                           : (g_edgeState == EDGE_PENDING || g_edgeState == EDGE_IDLEHOVER) ? 0.16 : 0.0;
+            if (d > 0) g_edgeHideAt = now + d;
+        }
+    }
+
+    if (g_edgeState == EDGE_IDLE && g_edgeStillAt > 0 && now >= g_edgeStillAt) {
+        g_edgeStillAt = 0;
+        g_edgeHy = EdgeClampHy(ly);
+        g_edgeFrozen = false;
+        if (EdgeCount() > 0) {
+            EdgeSetState(EDGE_PENDING, now, "停 80ms");
+            g_edgeHoverAt = now + 0.12;
+        } else {
+            EdgeSetState(EDGE_IDLEHOVER, now, "停 80ms（0 条）");
+        }
+    }
+    if (g_edgeState == EDGE_PENDING && g_edgeHoverAt > 0 && now >= g_edgeHoverAt) {
+        g_edgeHoverAt = 0;
+        g_edgeFrozen = true;
+        EdgeSetState(EDGE_HOVER, now, "停 120ms");
+        g_edgePeekAt = now + 0.32;
+    }
+    if (g_edgeState == EDGE_HOVER && g_edgePeekAt > 0 && now >= g_edgePeekAt) {
+        // 稿子的展开只看「还停在边上」：指针留在右缘那条 9pt 热区里也算，不要求已经压到签上。
+        if (alive) {
+            g_edgePeekAt = 0;
+            g_edgeFrozen = true;
+            EdgeSetState(EDGE_PEEK, now, "停 320ms");
+        } else {
+            g_edgePeekAt = 0;   // 已经离开手柄：让它按 hover 的 280ms 自己收
+        }
+    }
+    if (g_edgeHideAt > 0 && now >= g_edgeHideAt) EdgeClose(now, "离区超时");
+
+    if (inZone || overAct) {
+        const bool down = ap_mouse_down();
+        const bool clicked = down && !g_edgeDownPrev;
+        g_edgeDownPrev = down;
+        if (clicked && !g_shot_to) EdgeClick(lx, ly, now);
+    } else {
+        g_edgeDownPrev = ap_mouse_down();
+    }
+}
+
+// ── 绘制原子 ────────────────────────────────────────────────────────────────
+static const ImU32 kEdgeSteel   = IM_COL32(144, 174, 212, 255);   // #90AED4
+static const ImU32 kEdgeSteelHi = IM_COL32(195, 212, 238, 255);   // #C3D4EE
+static const ImU32 kEdgeSteelLo = IM_COL32(143, 169, 206, 255);   // #8FA9CE
+static const ImU32 kEdgeInk     = IM_COL32(237, 238, 242, 255);   // #EDEEF2
+static const ImU32 kEdgeInk2    = IM_COL32(154, 156, 165, 255);   // #9A9CA5
+static const ImU32 kEdgeInk3    = IM_COL32(107, 109, 118, 255);   // #6B6D76
+static const ImU32 kEdgeRowInk  = IM_COL32(230, 232, 238, 255);   // #E6E8EE
+static const ImU32 kEdgeAgeInk  = IM_COL32(139, 142, 152, 255);   // #8B8E98
+static const ImU32 kEdgeAllInk  = IM_COL32(169, 196, 232, 255);   // #A9C4E8
+static const ImU32 kEdgeOpenInk = IM_COL32(195, 212, 238, 255);   // #C3D4EE
+static const ImU32 kEdgeGlass   = IM_COL32(12, 14, 18, 230);      // rgba(12,14,18,.90)
+static const ImU32 kEdgeGlassB  = IM_COL32(14, 16, 20, 235);      // rgba(14,16,20,.92)
+static const ImU32 kEdgeHair    = IM_COL32(255, 255, 255, 31);    // rgba(255,255,255,.12)
+static const ImU32 kEdgeHairB   = IM_COL32(255, 255, 255, 26);    // rgba(255,255,255,.10)
+static const ImU32 kEdgeHairS   = IM_COL32(255, 255, 255, 15);    // rgba(255,255,255,.06)
+
+/// CSS 的 1px 描边落在半像素上；圆角用 AddRect 的 rounding 就够（半径都 < 半高）。
+static void EdgeStroke(ImDrawList* dl, const ERect& r, ImU32 col, float rad, float th = 1.0f) {
+    dl->AddRect(ImVec2(r.x + th * 0.5f, r.y + th * 0.5f),
+                ImVec2(r.x + r.w - th * 0.5f, r.y + r.h - th * 0.5f), col, rad, 0, th);
+}
+/// 左侧渐变轨：按 0.5pt 横带切，每带左端从圆角轮廓起步（溢出的部分被卡片形状裁掉）。
+static void EdgeRail(ImDrawList* dl, const ERect& r, float rad, float railW, ImU32 top, ImU32 bot,
+                     int alpha = 255) {
+    const float step = 0.5f;
+    for (float yy = r.y; yy < r.y + r.h; yy += step) {
+        const float y0 = yy, y1 = std::fmin(yy + step, r.y + r.h);
+        const float ins = std::fmax(R31InsetAt(y0, r.y, r.h, rad), R31InsetAt(y1, r.y, r.h, rad));
+        const float x0 = r.x + ins, x1 = r.x + railW;
+        if (x1 <= x0) continue;
+        const float t = (y0 + y1) * 0.5f;
+        ImU32 c = MixA(top, bot, (t - r.y) / r.h);
+        if (alpha < 255) c = WithA(c, alpha);
+        dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1 + 0.01f), c);
+    }
+}
+/// 玻璃卡：外投影 → 底 → 描边 → 顶沿内侧高光。尺寸小，投影用 GlowRect 的软边就够。
+static void EdgeGlassBody(ImDrawList* dl, const ERect& r, float rad, ImU32 fill,
+                          float blur1, float dy1, int a1, float blur2, float dy2, int a2, ImU32 hair) {
+    if (a1 > 0)
+        GlowRect(dl, ImVec2(r.x, r.y + dy1), ImVec2(r.x + r.w, r.y + r.h + dy1), rad, blur1, 0.0f,
+                 IM_COL32(0, 0, 0, a1));
+    if (a2 > 0)
+        GlowRect(dl, ImVec2(r.x, r.y + dy2), ImVec2(r.x + r.w, r.y + r.h + dy2), rad, blur2, 0.0f,
+                 IM_COL32(0, 0, 0, a2));
+    GradRound(dl, r.x, r.y, r.w, r.h, rad, fill, fill, 0);
+    // inset 0 1px 0 white/8：只在内侧那半像素，画在描边之前
+    EdgeStroke(dl, r, WithA(IM_COL32_WHITE, 20), rad, 1.0f);
+    EdgeStroke(dl, r, hair, rad, 1.0f);
+}
+static void EdgeShadowText(ImDrawList* dl, float x, float y, const std::string& s, ImU32 col,
+                           int tier, int alpha) {
+    DrawTextRun(dl, x, y + 1.0f, s, g_loc, IM_COL32(0, 0, 0, (int)(alpha * 0.35f)), tier);
+    DrawTextRun(dl, x, y, s, g_loc, col, tier);
+}
+
+static void EdgeDrawQuiet(ImDrawList* dl, double now, float a) {
+    (void)now; (void)a;
+    const ERect r = EdgeQuietRect();
+    const float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+    const bool lit = EdgeCount() > 0;
+    if (lit) GlowDisc(dl, ImVec2(cx, cy), 3.5f, 10.0f, 0.0f, IM_COL32(144, 174, 212, 71));
+    GlowDisc(dl, ImVec2(cx, cy + 1.0f), 3.5f, 4.0f, 0.0f, IM_COL32(0, 0, 0, lit ? 76 : 71));
+    dl->AddCircle(ImVec2(cx, cy), 4.0f, IM_COL32(0, 0, 0, lit ? 87 : 76), 24, 1.0f);
+    if (lit) GradCircle(dl, ImVec2(cx, cy), 3.5f, kEdgeSteelHi, kEdgeSteelLo, 0);
+    else dl->AddCircleFilled(ImVec2(cx, cy), 3.5f, IM_COL32(255, 255, 255, 66), 24);
+}
+
+static void EdgeDrawBadge(ImDrawList* dl, double now, float a) {
+    const ERect r = EdgeBadgeRect();
+    EdgeGlassBody(dl, r, 10.0f, kEdgeGlass, 28.0f, 10.0f, 107, 3.0f, 1.0f, 89, kEdgeHair);
+    EdgeRail(dl, r, 10.0f, 3.5f, kEdgeSteelHi, kEdgeSteelLo);
+    // .body:after：从轨右边开始的一条 1px 白 10%，右端被圆角裁掉
+    const float x0 = r.x + 3.5f;
+    const float x1 = r.x + r.w - R31InsetAt(r.y + 0.5f, r.y, r.h, 10.0f);
+    if (x1 > x0)
+        dl->AddLine(ImVec2(x0, r.y + 0.5f), ImVec2(x1, r.y + 0.5f), IM_COL32(255, 255, 255, 26), 1.0f);
+    const std::string num = std::to_string(EdgeCount());
+    const float cx = r.x + 3.5f + (r.w - 3.5f) * 0.5f;
+    const float cy = r.y + r.h * 0.5f;
+    EdgeShadowText(dl, cx - TextWidth(num, g_loc, T_S16B) * 0.5f, TextMid(cy, T_S16B, g_loc),
+                   num, IM_COL32(244, 246, 250, 255), T_S16B, 90);
+}
+
+static void EdgeDrawTab(ImDrawList* dl, double now, float a) {
+    const ERect r = EdgeTabRect();
+    EdgeGlassBody(dl, r, 12.0f, kEdgeGlass, 26.0f, 10.0f, 107, 2.0f, 0.0f, 51, kEdgeHair);
+    EdgeRail(dl, r, 12.0f, 2.5f, kEdgeSteelHi, kEdgeSteelLo);
+    const float cx = r.x + 2.5f + (r.w - 2.5f) * 0.5f;
+    const std::string num = std::to_string(EdgeCount());
+    const float ny = r.y + 10.0f + 7.5f;
+    EdgeShadowText(dl, cx - TextWidth(num, g_loc, T_S15B) * 0.5f, TextMid(ny, T_S15B, g_loc),
+                   num, IM_COL32(244, 246, 250, 255), T_S15B, 90);
+    const std::vector<const UIRow*> chips = EdgeChipRows();
+    const int aA = (int)(255.0f * a + 0.5f);
+    float y = r.y + 33.0f;
+    for (const auto* row : chips) {
+        const float x = cx - 10.0f;
+        RAgentTile(dl, x, y, 20.0f, 5.0f, row->hue, row->initial, g_loc, row->agent_id, aA);
+        dl->AddRect(ImVec2(x + 0.25f, y + 0.25f), ImVec2(x + 19.75f, y + 19.75f),
+                    IM_COL32(255, 255, 255, 41 * aA / 255), 5.0f, 0, 0.5f);
+        y += 26.0f;
+    }
+}
+
+static void EdgeDrawGhost(ImDrawList* dl, double now, float a) {
+    const ERect r = EdgeGhostRect();
+    EdgeGlassBody(dl, r, 11.0f, kEdgeGlass, 28.0f, 10.0f, 107, 3.0f, 1.0f, 89, kEdgeHair);
+    EdgeRail(dl, r, 11.0f, 2.5f, kEdgeSteelHi, kEdgeSteelLo, 158);   // rgba(90,174,212,.62)
+    const std::string g = T("edge_ghost", g_loc);
+    const float cx = r.x + 2.5f + (r.w - 2.5f) * 0.5f;
+    const float cy = r.y + r.h * 0.5f - 0.5f;   // padding-bottom:1px
+    DrawTextRun(dl, cx - TextWidth(g, g_loc, T_S17) * 0.5f, TextMid(cy, T_S17, g_loc),
+                g, g_loc, IM_COL32(255, 255, 255, 184), T_S17);
+}
+
+static void EdgeDrawPeek(ImDrawList* dl, double now, float a) {
+    const std::vector<const UIRow*> rows = EdgePeekRows();
+    const ERect r = EdgeCardRect();
+    // 入场：translateX(12) + 淡入 190ms
+    float p = (float)((now - g_edgeStateAt) / 0.19);
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    const float ease = 1.0f - (1.0f - p) * (1.0f - p);
+    const float dx = 12.0f * (1.0f - ease);
+    const int A = (int)(255.0f * ease + 0.5f);
+    auto C = [&](ImU32 c) { return WithA(c, (int)(((c >> 24) & 0xFF) * A / 255)); };
+    (void)a;
+
+    dl->PushClipRect(ImVec2(0, 0), ImVec2((float)kEdgeW, (float)g_waH), false);
+    // 这里不用 translate 整块重画：卡本身是绝对布局，直接把起点右移 dx 即可。
+    ERect q = r; q.x += dx;
+    GlowRect(dl, ImVec2(q.x, q.y + 26.0f), ImVec2(q.x + q.w, q.y + q.h + 26.0f), 18.0f, 70.0f, 0.0f,
+             C(IM_COL32(0, 0, 0, 140)));
+    GlowRect(dl, ImVec2(q.x, q.y + 2.0f), ImVec2(q.x + q.w, q.y + q.h + 2.0f), 18.0f, 8.0f, 0.0f,
+             C(IM_COL32(0, 0, 0, 102)));
+    GradRound(dl, q.x, q.y, q.w, q.h, 18.0f, C(kEdgeGlassB), C(kEdgeGlassB), 0);
+    EdgeStroke(dl, q, C(kEdgeHairB), 18.0f);
+    // inset 0 1px 0 white/7
+    dl->AddLine(ImVec2(q.x + 18.0f, q.y + 0.5f), ImVec2(q.x + q.w - 18.0f, q.y + 0.5f),
+                C(IM_COL32(255, 255, 255, 18)), 1.0f);
+    // ::before 左轨：top/bottom 各缩 14，宽 2，opacity .85
+    GradRound(dl, q.x, q.y + 14.0f, 2.0f, q.h - 28.0f, 1.0f,
+              C(WithA(kEdgeSteelHi, 217)), C(WithA(kEdgeSteelLo, 217)), 0);
+
+    const float hx = q.x + 16.0f, hr = q.x + q.w - 16.0f;
+    // 表头
+    {
+        const std::string lead = T("r_needs_you", g_loc);
+        const float ty = TextMid(q.y + 19.0f, T_S12, g_loc);
+        const float ex = DrawTextRun(dl, hx, ty, lead, g_loc, C(kEdgeInk2), T_S12);
+        const std::string cnt = std::to_string(EdgeCount());
+        DrawTextRun(dl, ex + 7.0f, TextMid(q.y + 19.0f, T_S12B, g_loc), cnt, g_loc,
+                    C(kEdgeInk), T_S12B);
+        const std::string sort = T("r_longest_first", g_loc);
+        DrawTextRight(dl, hr, TextMid(q.y + 19.0f, T_S10, g_loc), sort, g_loc, C(kEdgeInk3), T_S10);
+        dl->AddLine(ImVec2(q.x + 1.0f, q.y + 37.5f), ImVec2(q.x + q.w - 1.0f, q.y + 37.5f),
+                    C(kEdgeHairS), 1.0f);
+    }
+    // 行
+    const float rowX0 = q.x + 16.0f, rowX1 = q.x + q.w - 14.0f;
+    for (int i = 0; i < (int)rows.size(); i++) {
+        const UIRow& row = *rows[(size_t)i];
+        const float y0 = q.y + 38.0f + 44.0f * (float)i;
+        const bool hot = g_edgeRow == i;
+        if (hot) dl->AddRectFilled(ImVec2(q.x + 1.0f, y0), ImVec2(q.x + q.w - 1.0f, y0 + 44.0f),
+                                   C(IM_COL32(255, 255, 255, 14)));
+        RAgentTile(dl, rowX0, y0 + 13.0f, 18.0f, 5.0f, row.hue, row.initial, g_loc, row.agent_id, A);
+        const std::string age = Dur(row.age, g_loc);
+        const std::string open = T("edge_open", g_loc);
+        const float rightW = hot ? TextWidth(open, g_loc, T_S105) : TextWidth(age, g_loc, T_S105);
+        const float tmax = rowX1 - rightW - 10.0f - (rowX0 + 18.0f + 10.0f);
+        const std::string title = ClipToWidth(row.title.empty() ? row.project : row.title,
+                                              tmax > 8.0f ? tmax : 8.0f, g_loc, T_QT);
+        DrawTextRun(dl, rowX0 + 28.0f, TextMid(y0 + 22.0f, T_QT, g_loc), title, g_loc,
+                    C(kEdgeRowInk), T_QT);
+        if (hot)
+            DrawTextRight(dl, rowX1, TextMid(y0 + 22.0f, T_S105, g_loc), open, g_loc,
+                          C(kEdgeOpenInk), T_S105);
+        else
+            DrawTextRight(dl, rowX1, TextMid(y0 + 22.0f, T_S105, g_loc), age, g_loc,
+                          C(kEdgeAgeInk), T_S105);
+    }
+    // 页脚
+    {
+        const float fy = q.y + 38.0f + 44.0f * (float)rows.size();
+        dl->AddLine(ImVec2(q.x + 1.0f, fy + 0.5f), ImVec2(q.x + q.w - 1.0f, fy + 0.5f),
+                    C(kEdgeHairS), 1.0f);
+        char fresh[64];
+        snprintf(fresh, sizeof fresh, T("edge_updated", g_loc), ClockOf(g_pd.now).c_str());
+        DrawTextRun(dl, q.x + 16.0f, TextMid(fy + 16.0f, T_S10, g_loc), fresh, g_loc,
+                    C(kEdgeInk3), T_S10);
+        char all[64];
+        snprintf(all, sizeof all, T("edge_all", g_loc), EdgeCount());
+        DrawTextRight(dl, q.x + q.w - 14.0f, TextMid(fy + 16.0f, T_S11, g_loc), all, g_loc,
+                      C(kEdgeAllInk), T_S11);
+    }
+    dl->PopClipRect();
+}
+
+static void DrawEdge(ImDrawList* dl, double now) {
+    float a = 1.0f;
+    const double span = g_edgeState == EDGE_PEEK ? 0.19 : 0.15;
+    const double p = (now - g_edgeStateAt) / span;
+    if (p < 1.0) a = (float)(p < 0 ? 0 : (1.0 - (1.0 - p) * (1.0 - p)));
+    switch (g_edgeState) {
+        case EDGE_PENDING:   EdgeDrawBadge(dl, now, a); break;
+        case EDGE_HOVER:     EdgeDrawTab(dl, now, a); break;
+        case EDGE_PEEK:      EdgeDrawPeek(dl, now, a); break;
+        case EDGE_IDLEHOVER: EdgeDrawGhost(dl, now, a); break;
+        default:             EdgeDrawQuiet(dl, now, a); break;
+    }
+}
+
+static const char* WinModeName(int m) {
+    switch (m) {
+        case WIN_PANEL:  return "面板";
+        case WIN_BANNER: return "横幅";
+        case WIN_EDGE:   return "手柄";
+        default:         return "收着";
+    }
+}
+/// 同一块窗口换形态只走这一处：show/hide、尺寸、位置、焦点、鼠标穿透全在这里落地。
+/// 别处只改意图（g_panelVisible / g_bannerActive）并置 g_modeDirty——两处各自 show/hide
+/// 会在同一帧里把窗口横竖各摆一次，实测闪成一条线。
+/// 目标优先级：横幅 > 面板 > 右缘手柄 > 收着（横幅只在面板没占着窗口时才露脸）。
+static int ApplyWindowMode() {
+    if (!g_win) return 0;
+    int target;
+    if (g_bannerActive && !g_panelVisible) target = WIN_BANNER;
+    else if (g_panelVisible) target = WIN_PANEL;
+    else if (EdgeAvailable()) target = WIN_EDGE;
+    else target = WIN_HIDDEN;
+    if (!g_modeDirty && target == g_winMode) return 0;
+
+    const int prev = g_winMode;
+    // 离开面板前把真位置记下来：手柄/横幅把窗口挪走之后，回来还得落在拖到的地方。
+    if (prev == WIN_PANEL && target != WIN_PANEL) {
+        int px = 0, py = 0;
+        glfwGetWindowPos(g_win, &px, &py);
+        if (px > -100000 && py > -100000) {
+            g_panelX = px;
+            g_panelY = py;
+            g_panelPosKnown = true;
+        }
+    }
+    if (prev == WIN_EDGE && target != WIN_EDGE) EdgeLeave();
+
+    const bool wasEdge = prev == WIN_EDGE;
+    g_winMode = target;   // 先落档：WantedWindowW/H 按档给尺寸
+    const int wantW = WantedWindowW();
+    int wantH = WantedWindowH();
+    if (target == WIN_BANNER && wantH < 1) wantH = 1;
+    int wx = 0, wy = 0;
+    switch (target) {
+        case WIN_EDGE:
+            wx = EdgeWinX();
+            wy = EdgeWinY();
+            // 手柄窗口整条工作区高，默认穿透：只有指针落在零件上时才由主循环放开。
+            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_TRUE);
+            glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+            g_edgePass = true;
+            // AT 与指针一样是绝对屏幕 y，手柄几何却是窗口局部坐标：不折算会整条低一个菜单栏。
+            g_edgeHy = g_edgeAtForce >= 0 ? EdgeClampHy(g_edgeAtForce - (float)EdgeWinY())
+                                          : EdgeHome();
+            g_edgeState = g_edgeForce >= 0 ? g_edgeForce : EDGE_IDLE;
+            g_edgeStateAt = glfwGetTime() - 1.0;   // 钉死态直接给满不透明度，不等入场动画
+            g_edgeAnimUntil = glfwGetTime();
+            g_edgeZonePrev = false;
+            glfwSetWindowSize(g_win, wantW, wantH);
+            glfwSetWindowPos(g_win, wx, wy);
+            glfwShowWindow(g_win);
+            break;
+        case WIN_PANEL:
+            wx = g_panelPosKnown ? g_panelX : (g_waKnown ? g_waX + g_waW - kPanelW - 14 : 40);
+            wy = g_panelPosKnown ? g_panelY : (g_waKnown ? g_waY + 34 : 40);
+            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+            g_edgePass = false;
+            glfwSetWindowSize(g_win, wantW, wantH);
+            glfwSetWindowPos(g_win, wx, wy);
+            glfwShowWindow(g_win);
+            if (!g_shot_to && (g_focusNext || prev != WIN_PANEL)) glfwFocusWindow(g_win);
+            break;
+        case WIN_BANNER:
+            wx = g_panelPosKnown ? g_panelX : (g_waKnown ? g_waX + g_waW - kPanelW - 14 : 40);
+            wy = g_panelPosKnown ? g_panelY : (g_waKnown ? g_waY + 34 : 40);
+            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+            g_edgePass = false;
+            glfwSetWindowSize(g_win, wantW, wantH);
+            glfwSetWindowPos(g_win, wx, wy);
+            glfwShowWindow(g_win);   // 不抢焦点：他可能正在别的 App 里打字
+            break;
+        default:
+            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            glfwHideWindow(g_win);
+            break;
+    }
+    g_focusNext = false;
+    g_modeDirty = false;
+    g_relayout = true;
+    printf("[窗口形态] %s → %s（%dx%d @ %d,%d）%s\n", WinModeName(prev), WinModeName(target),
+           wantW, wantH, wx, wy, wasEdge ? "｜手柄态已归位" : "");
+    fflush(stdout);
+    return 1;
+}
 
 static double g_focus_hide_at = -10;    // 上一次「失焦自动收」的时刻：托盘那一击要认它
 
@@ -5399,8 +6103,14 @@ static void TogglePanel(void*) {
     // 证明不了面板真的动了。取证轮比对 app.log 里这行的出现次数与点击次数。
     printf("[面板] %s\n", g_panelVisible ? "展开" : "收起");
     fflush(stdout);
+    // 真 show/hide 只走 ApplyWindowMode 一处：同一块窗口还要换到手柄/横幅那两副形态。
+    // 这里只落意图；展开时记一笔「要焦点」，由下一帧的形态切换去激活（手柄点开也走这个口）。
+    g_modeDirty = true;
+    if (g_panelVisible) { g_focusNext = true; g_relayout = true; }
+#ifndef __APPLE__
     if (g_panelVisible) { glfwShowWindow(g_win); glfwFocusWindow(g_win); g_relayout = true; }
     else glfwHideWindow(g_win);
+#endif
 }
 
 /// 离屏探针专用的样例快照（AGENTPING_FIXTURE=1）。
@@ -5813,6 +6523,8 @@ int main(int argc, char** argv) {
         // R31 的根屏标签是 会话(0)/用量(6)/权益(9)，历史(5) 与设置(1) 也各认各的。
         g_tab = (g_view == 1) ? 1 : (g_view == 5) ? 5 : (g_view == 6 || g_view == 9) ? g_view : 0;
     }
+    // 取证：把来源导轨钉在某一家的屏上（"all" 仍是不给这个变量的默认）。
+    if (const char* src = getenv("AGENTPING_SRC"); src && *src) g_r31_src = src;
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
     // 出图轮不许抢键盘：取证实例出现在他正在打字的桌面上，一 show 就会成 key 窗口，
@@ -6036,6 +6748,65 @@ int main(int argc, char** argv) {
         printf("[窗口] %d 个显示器，可视 %dx%d@(%d,%d) → 面板落在 (%d,%d)\n",
                mn, mw, mh, mx, my, px, py);
         fflush(stdout);
+        // 面板位置记下来：窗口之后还要换成右缘手柄/横幅，回来时按这个位置落。
+        g_panelX = px;
+        g_panelY = py;
+        g_panelPosKnown = true;
+        // 右缘手柄贴的是工作区（去掉菜单栏与 Dock），不是整屏：用整屏会在 Dock 底下
+        // 露出半截，卡片顶也会被菜单栏压住。拿不到才退回整屏，并在日志里写明走的哪条。
+        {
+            double wax = mx, way = my, waw = mw, wah = mh;
+            const bool real = ap_work_area(&wax, &way, &waw, &wah);
+            if (!real) { wax = mx; way = my; waw = mw; wah = mh; }
+            g_waX = (int)std::lround(wax);
+            g_waY = (int)std::lround(way);
+            g_waW = (int)std::lround(waw);
+            g_waH = (int)std::lround(wah);
+            g_waKnown = g_waW > 0 && g_waH > 0;
+            printf("[窗口] 工作区 %dx%d@(%d,%d)（%s）\n", g_waW, g_waH, g_waX, g_waY,
+                   real ? "去掉菜单栏/Dock" : "取不到，退回整屏");
+            fflush(stdout);
+        }
+        g_edgeHy = EdgeHome();
+        // 右缘手柄的取证开关。状态用 AGENTPING_EDGE=home|badge|tab|peek|ghost 钉死，
+        // 指针用 AGENTPING_EDGE_CURSOR=x,y 喂逻辑点（真指针可能不在屏上，出图轮不许动它）。
+        {
+            const char* eo = getenv("AGENTPING_EDGE_OFF");
+            if (eo && *eo && strcmp(eo, "0") != 0) g_edgeOff = true;
+            const char* ee = getenv("AGENTPING_EDGE_EMPTY");
+            if (ee && *ee && strcmp(ee, "0") != 0) g_edgeEmpty = true;
+            const char* et = getenv("AGENTPING_EDGE_TRACE");
+            if (et && *et && strcmp(et, "0") != 0) g_edgeTrace = true;
+            const char* ea = getenv("AGENTPING_EDGE_AT");
+            if (ea && *ea) g_edgeAtForce = (float)atof(ea);
+            const char* er = getenv("AGENTPING_EDGE_ROW");
+            if (er && *er) g_edgeRowForce = atoi(er);
+            const char* ec = getenv("AGENTPING_EDGE_CURSOR");
+            if (ec && *ec) {
+                float cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+                double ct1 = 0;
+                if (sscanf(ec, "%f,%f>%f,%f@%lf", &cx0, &cy0, &cx1, &cy1, &ct1) == 5) {
+                    g_edgeCurX = cx0; g_edgeCurY = cy0; g_edgeCurSet = true;
+                    g_edgeCur2X = cx1; g_edgeCur2Y = cy1; g_edgeCur2At = ct1;
+                    g_edgeCur2Arm = true;
+                } else if (sscanf(ec, "%f,%f", &cx0, &cy0) == 2) {
+                    g_edgeCurX = cx0; g_edgeCurY = cy0; g_edgeCurSet = true;
+                }
+            }
+            const char* es = getenv("AGENTPING_EDGE");
+            if (es && *es) {
+                if (!strcmp(es, "home")) g_edgeForce = EDGE_IDLE;
+                else if (!strcmp(es, "badge")) g_edgeForce = EDGE_PENDING;
+                else if (!strcmp(es, "tab")) g_edgeForce = EDGE_HOVER;
+                else if (!strcmp(es, "peek")) g_edgeForce = EDGE_PEEK;
+                else if (!strcmp(es, "ghost")) g_edgeForce = EDGE_IDLEHOVER;
+            }
+            // 出图轮默认不插手柄：老脚本的 AGENTPING_PANEL=0 要的是「窗口收起来」。
+            // 要拍手柄就显式给 AGENTPING_EDGE=…；命中探针那档也要让手柄真的在。
+            if (g_shot_to && !getenv("AGENTPING_EDGE") && !getenv("AGENTPING_EDGE_HITPROBE"))
+                g_edgeOff = true;
+            if (g_edgeForce >= 0) g_edgeOff = false;
+        }
 
         std::string icon = BundleResources() + "/menubar-icon@2x.png";
         if (sb_show(icon.c_str(), T("sb_hint", g_loc), T("sb_show_hide", g_loc),
@@ -6084,6 +6855,7 @@ int main(int argc, char** argv) {
                     g_banners.push_back(bi);
                 }
                 g_panelVisible = false;
+                g_modeDirty = true;
                 printf("[横幅] 摆样 %d 条（AGENTPING_BANNER，只读磁盘上的真读数）\n",
                        (int)g_banners.size());
                 fflush(stdout);
@@ -6103,7 +6875,10 @@ int main(int argc, char** argv) {
         if (const char* pv = getenv("AGENTPING_PANEL")) {
             if (!strcmp(pv, "0")) {
                 g_panelVisible = false;
+                g_modeDirty = true;
+#ifndef __APPLE__
                 glfwHideWindow(win);
+#endif
                 printf("[面板] 按 AGENTPING_PANEL=0 起跑在收起态\n");
                 fflush(stdout);
             }
@@ -6182,27 +6957,170 @@ int main(int argc, char** argv) {
                     if (!g_bannerShown) {
                         g_bannerShown = true;
                         // 不许抢焦点：他正在别的 App 里打字，一块提示不该把输入法带出来。
+                        // macOS 的 show 与「不抢焦点」由 ApplyWindowMode 一次做全；
+                        // X11 没有那一层，仍在这里直接露脸。
+                        g_modeDirty = true;
+                        g_relayout = true;
+#ifndef __APPLE__
                         glfwSetWindowAttrib(win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
                         glfwShowWindow(win);
                         glfwSetWindowAttrib(win, GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
-                        g_relayout = true;
+#endif
                         printf("[横幅] 弹出 %d 条，不点不收\n", (int)g_banners.size());
                         fflush(stdout);
                     }
                 } else if (!want && g_bannerActive) {
                     g_bannerActive = false;
                     g_relayout = true;
+                    g_modeDirty = true;
                     if (g_panelVisible)
                         g_bannerShown = false;   // 窗口交给面板拿着了，收它归 TogglePanel 那条路
                     else if (g_bannerShown) {
                         g_bannerShown = false;
+#ifndef __APPLE__
                         glfwHideWindow(win);
+#endif
                         printf("[横幅] 画面撤了，窗口睡回去（不留在屏上占地方）\n");
                         fflush(stdout);
                     }
                 }
             }
-            if (!g_panelVisible && !g_bannerActive) {   // 收起时不空转 GPU，但扫描线程照跑，数字仍是活的
+            // AGENTPING_EDGE_CYCLE：取证钩子——0.8s 从手柄唤出面板，2.2s 再按「再点一次/失焦」
+            // 收回去。走的是真实入口 EdgeOpenPanel/HidePanel，不合成鼠标；出图轮不抢焦点。
+            static int cyclePhase = getenv("AGENTPING_EDGE_CYCLE") ? 0 : -1;
+            if (cyclePhase >= 0) {
+                const double ct = glfwGetTime();
+                if (cyclePhase == 0 && ct > 0.8 && g_winMode == WIN_EDGE) {
+                    EdgeOpenPanel();
+                    cyclePhase = 1;
+                } else if (cyclePhase == 1 && ct > 2.2 && g_winMode == WIN_PANEL) {
+                    HidePanel();
+                    cyclePhase = 2;
+                    printf("[边缘] 自检：按「收」把面板放回去\n");
+                    fflush(stdout);
+                }
+            }
+            // 同一块窗口换形态（面板/横幅/右缘手柄/收着）只在这里落地：show/hide、尺寸、
+            // 位置、焦点、鼠标穿透。排在画面之前，下面的绘制才知道自己该画哪一副。
+            if (ApplyWindowMode()) {
+                lastResize = glfwGetTime();
+                g_edgeBeatAt = 0;   // 换形态后立刻画一帧，别停在上一副的残影上
+            }
+            // ── 右缘手柄 ─────────────────────────────────────────────────────
+            // 这块窗是「320×整条工作区的透明传感器带」：输入与穿透每帧都要跑，
+            // 连跳帧时也不能停——否则指针推到边上，永远长不出手柄。
+            if (g_winMode == WIN_EDGE) {
+                double gx0 = 0, gy0 = 0;
+                bool haveCur = false;
+                const double enow = glfwGetTime();
+                if (g_edgeFirstAt < 0) g_edgeFirstAt = enow;
+                if (g_edgeCur2Arm && enow >= g_edgeFirstAt + g_edgeCur2At) {
+                    g_edgeCurX = g_edgeCur2X; g_edgeCurY = g_edgeCur2Y;
+                    g_edgeCur2Arm = false;
+                    if (g_edgeTrace)
+                        fprintf(stderr, "[边缘] %.3f 逻辑指针 → (%.0f,%.0f)（换位）\n",
+                                enow, g_edgeCurX, g_edgeCurY);
+                }
+                if (g_edgeCurSet) { gx0 = g_edgeCurX; gy0 = g_edgeCurY; haveCur = true; }
+                else haveCur = ap_global_cursor(&gx0, &gy0);
+                if (haveCur) {
+                    EdgeInput(enow, (float)gx0, (float)gy0, true);
+                    const bool wantMouse = EdgeWantsMouse((float)(gx0 - EdgeWinX()),
+                                                          (float)(gy0 - EdgeWinY()));
+                    const bool flipped = wantMouse == g_edgePass;
+                    if (flipped) {   // 要收点击却还穿透着（或反过来）
+                        g_edgePass = !wantMouse;
+                        glfwSetWindowAttrib(win, GLFW_MOUSE_PASSTHROUGH,
+                                            g_edgePass ? GLFW_TRUE : GLFW_FALSE);
+                    }
+                    // 探针每秒报一次，不只报切换那一帧：静置时「系统命中是谁」才是穿透的证据，
+                    // 只报切换等于永远看不见「没挡桌面」的那一半。
+                    static double probeAt = 0;
+                    if (getenv("AGENTPING_EDGE_HITPROBE") && (flipped || enow - probeAt > 1.0)) {
+                        probeAt = enow;
+                        const int who = sb_hit_test(gx0, gy0);
+                        printf("[命中探针] (%.0f,%.0f) 穿透=%d → 系统命中=%s（%d）%s\n",
+                               gx0, gy0, (int)g_edgePass,
+                               who == 1 ? "我们的窗口" : who == 2 ? "别的窗口"
+                               : who == 0 ? "桌面" : "问不到", who,
+                               flipped ? "· 刚切换" : "");
+                        fflush(stdout);
+                    }
+                }
+                // 空闲且没有动画/数据变化就不空转 GPU；重扫有新数时借这一帧把 g_pd 重建，
+                // 预览卡的行与计数才不是上一轮的快照。
+                const long seqE = g_seq.load();
+                const bool dirty = g_edgeForce >= 0 || g_edgeState != EDGE_IDLE ||
+                                   enow < g_edgeAnimUntil || seqE != g_pd_seq ||
+                                   enow - g_edgeBeatAt > 2.0;
+                if (!dirty) { usleep(16000); continue; }
+                int fw, fh;
+                glfwGetFramebufferSize(win, &fw, &fh);
+                glViewport(0, 0, fw, fh);
+                glClearColor(0, 0, 0, 0);
+                glClear(GL_COLOR_BUFFER_BIT);
+                ImGui_ImplOpenGL3_NewFrame();
+                ImGui_ImplGlfw_NewFrame();
+                ImGui::NewFrame();
+                if (seqE != g_pd_seq && !use_fixture) {
+                    g_pd_seq = seqE;
+                    std::lock_guard<std::mutex> lk(g_mtx);
+                    RebuildPanel(g_snap);
+                }
+                ImGui::SetNextWindowPos(ImVec2(0, 0));
+                ImGui::SetNextWindowSize(ImVec2((float)kEdgeW, (float)WantedWindowH()));
+                ImGui::Begin("edge##root", nullptr,
+                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                             ImGuiWindowFlags_NoScrollWithMouse |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus |
+                             ImGuiWindowFlags_NoBackground |
+                             ImGuiWindowFlags_NoSavedSettings);
+                DrawEdge(ImGui::GetWindowDrawList(), enow);
+                ImGui::End();
+                ImGui::Render();
+                ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+                glfwSwapBuffers(win);
+                g_edgeBeatAt = enow;
+                // 出图轮：窗口稳定满 2 秒再回读帧缓冲（与面板那一档同一套判据）。
+                int cw_now, ch_now; glfwGetWindowSize(win, &cw_now, &ch_now);
+                if (g_shot_to && seqE >= 2 && enow - lastResize > 2.0 &&
+                    ch_now == WantedWindowH() && cw_now == WantedWindowW()) {
+                    int sw, sh; glfwGetFramebufferSize(win, &sw, &sh);
+                    std::vector<unsigned char> pix((size_t)sw * sh * 4);
+                    glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, pix.data());
+                    std::ofstream of(g_shot_to, std::ios::binary);
+                    const bool opened = of.is_open();
+                    if (opened) of << "P6\n" << sw << "\n" << sh << "\n255\n";
+                    for (int y = sh - 1; opened && y >= 0; y--)
+                        for (int x = 0; x < sw; x++) {
+                            unsigned char* p = &pix[((size_t)y * sw + x) * 4];
+                            of << p[0] << p[1] << p[2];
+                        }
+                    of.close();
+                    struct stat sb_st;
+                    const bool wrote = opened && ::stat(g_shot_to, &sb_st) == 0 && sb_st.st_size > 0;
+                    // PPM 不带 alpha，透明与否只能在回读的 RGBA 里当场取两针：
+                    // 传感器带空白处必须 0（否则整条 320pt 宽的柱子在桌面上是块实心黑），
+                    // 手柄/卡自己的中心必须是 255（否则该看见的反而透了）。
+                    const float scl = cw_now > 0 ? (float)sw / (float)cw_now : 1.0f;
+                    auto alphaAt = [&](float xpt, float ypt) {
+                        const int px = (int)(xpt * scl), py = sh - 1 - (int)(ypt * scl);
+                        if (px < 0 || px >= sw || py < 0 || py >= sh) return -1;
+                        return (int)pix[((size_t)py * sw + (size_t)px) * 4 + 3];
+                    };
+                    const ERect act = EdgeActiveRect();
+                    printf("[实拍] %s（%dx%d，手柄态）｜状态=%d 行=%d 计数=%d"
+                           "｜alpha 空白带=%d 手柄内=%d（前者 0 才说明整条传感器带不挡桌面）\n",
+                           wrote ? g_shot_to : "（未落盘）", sw, sh, g_edgeState, g_edgeRowN,
+                           EdgeCount(), alphaAt(160.0f, 20.0f),
+                           alphaAt(act.x + act.w * 0.5f, act.y + act.h * 0.5f));
+                    fflush(stdout);
+                    glfwSetWindowShouldClose(win, GLFW_TRUE);
+                }
+                continue;
+            }
+            if (g_winMode == WIN_HIDDEN) {   // 收起时不空转 GPU，但扫描线程照跑，数字仍是活的
                 g_hits.clear();             // 命中区跟着画面一起作废，放回来时不许点在旧几何上
                 usleep(16000);
                 continue;

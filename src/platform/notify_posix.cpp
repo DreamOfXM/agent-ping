@@ -249,3 +249,11 @@ extern "C" int ap_sound_test(char* reason, int out_len) {
     copyReason(reason, out_len, "已出声：" + player + " " + file);
     return 0;
 }
+
+// Linux 侧还没有「哪家 App 在前台」这条判据：X11 得按窗口的 WM_CLASS 反查，
+// Wayland 下多数合成器根本不给。取不到就返回 0——宁可多响一次，也不许因为查不到
+// 就默认「他在看」而把真正该叫的那一条吞掉。
+extern "C" int ap_app_frontmost(const char* bundle_id) {
+    (void)bundle_id;
+    return 0;
+}

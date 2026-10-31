@@ -39,6 +39,11 @@ int ap_notify_post(const char* title, const char* body,
 typedef void (*ap_notify_click_fn)(const char* agent_id, const char* session_id, void* ud);
 void ap_notify_on_click(ap_notify_click_fn fn, void* ud);
 
+/* 这家厂商的桌面 App 现在是不是在前台（1＝是，0＝不是/查不到/没有桌面端）。
+   判据：会话提醒要叫回「不在屏幕前」的人；他正盯着那家 App 时横幅只是噪音，
+   而且那个 App 自己会把结果写在聊天里。只认前台 App 的 bundle id，不看窗口标题。 */
+int ap_app_frontmost(const char* bundle_id);
+
 #ifdef __cplusplus
 }
 #endif

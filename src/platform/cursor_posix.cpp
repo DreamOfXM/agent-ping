@@ -7,3 +7,15 @@ bool ap_global_cursor(double* x, double* y) {
     (void)y;
     return false;
 }
+
+// 没有 Xlib 就量不到工作区；主循环退回整屏坐标（手柄仍贴右缘，只是不避 Dock）。
+bool ap_work_area(double* x, double* y, double* w, double* h) {
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    return false;
+}
+
+// 这条只给「窗口穿透时认点击」用，X11 这一档手柄不走穿透（主循环退回窗口内鼠标）。
+bool ap_mouse_down() { return false; }

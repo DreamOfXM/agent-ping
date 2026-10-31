@@ -1171,9 +1171,12 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
             if (!archived) workbuddy_judge(tail, now, s);
             if (s.last_activity >= since) {
                 scan_window(it->second, since, "\"usage\"", [&](const Json& rec, double ts) {
-                    const Json* pd = rec.at("providerData");
-                    const Json* u = pd ? pd->at("usage") : nullptr;
+                    // 读数在 message.usage（snake_case）。providerData.usage 是同一份数的
+                    // camelCase 镜像（inputTokens…），拿 snake_case 的键去读它只会全零。
+                    const Json* msg = rec.at("message");
+                    const Json* u = msg ? msg->at("usage") : nullptr;
                     if (!u) return;
+                    const Json* pd = rec.at("providerData");
                     auto num = [&](const Json* o, const char* k) -> long {
                         const Json* v = o ? o->at(k) : nullptr;
                         return (v && v->kind == Json::NUM) ? (long)v->num : 0;

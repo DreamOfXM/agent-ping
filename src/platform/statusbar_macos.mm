@@ -243,3 +243,30 @@ int sb_float_window(void) {
         return n;
     }
 }
+
+// 右缘手柄的「真穿透」裁判。core 报上来的点是 glfw 那套（y 向下、主屏左上为原点），
+// AppKit 的屏幕坐标是 y 向上、主屏左下为原点，先翻一次。然后从最前面那块往下问：
+// 落在我们窗口上、而它此刻正 ignoresMouseEvents，就往下一层继续问——穿透态下
+// 系统本来就会把点击交给底下那家，问到的第一个「会收点击的窗口」才是真落点。
+int sb_hit_test(double x, double y) {
+    @autoreleasepool {
+        NSScreen* primary = NSScreen.screens.firstObject;
+        if (!primary) return -1;
+        const NSRect pf = primary.frame;
+        const NSPoint p = NSMakePoint(x, pf.origin.y + pf.size.height - y);
+        NSInteger below = 0;
+        for (int step = 0; step < 64; step++) {
+            const NSInteger num = [NSWindow windowNumberAtPoint:p belowWindowWithWindowNumber:below];
+            if (num <= 0) return 0;   // 底下没有窗口了（桌面）
+            NSWindow* mine = nil;
+            for (NSWindow* w in [NSApp windows])
+                if (w.windowNumber == num) { mine = w; break; }
+            if (mine && mine.ignoresMouseEvents) {   // 自己的穿透窗口：跳过它继续往下
+                below = num;
+                continue;
+            }
+            return mine ? 1 : 2;
+        }
+        return -1;
+    }
+}

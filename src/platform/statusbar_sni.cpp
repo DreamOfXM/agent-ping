@@ -867,3 +867,5 @@ extern "C" void sb_pump(void) {
         TryRegister();
     }
 }
+
+extern "C" int sb_hit_test(double, double) { return -1; }   // X11 这一档没有可问的窗口命中表

@@ -338,8 +338,10 @@ static void BrandMark(ImDrawList* dl, float x, float y, float s) {
 // ── 代理头像：稿子 `.ag img` / `.m1 img` 贴的是各家 logo ──────────────────────
 // Qoder 的白底圆角方块与 Claude 的珊瑚色星芒都是官方像素（agent_icons.h，64px
 // RGBA 上传成纹理）；没有位图的代理退回「同尺寸圆角块 + 首字母 + 该代理的色相」。
+// tintA：入场淡入用（右缘预览卡要跟着整卡一起 0→255）。不传＝原样，老调用点不受影响。
 static void RAgentTile(ImDrawList* dl, float x, float y, float s, float r, ImU32 hue,
-                       const std::string& initial, int loc, const std::string& agent = std::string()) {
+                       const std::string& initial, int loc, const std::string& agent = std::string(),
+                       int tintA = 255) {
     const ImU64 tex = (agent == "qoder") ? g_agentTexQoder
                     : (agent == "claude") ? g_agentTexClaude
                     : (agent == "zcode") ? g_agent31TexZCode
@@ -347,12 +349,13 @@ static void RAgentTile(ImDrawList* dl, float x, float y, float s, float r, ImU32
                     : (agent == "opencode") ? g_agent31TexOpenCode : 0;
     if (tex) {
         dl->AddImageRounded((ImTextureID)tex, ImVec2(x, y), ImVec2(x + s, y + s),
-                            ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, r);
+                            ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, tintA), r);
         return;
     }
-    GradRound(dl, x, y, s, s, r, WithA(hue, 60), WithA(hue, 16), WithA(hue, 120));
+    GradRound(dl, x, y, s, s, r, WithA(hue, 60 * tintA / 255), WithA(hue, 16 * tintA / 255),
+              WithA(hue, 120 * tintA / 255));
     DrawTextRun(dl, x + (s - TextWidth(initial, loc, T_GLYPH9)) * 0.5f, TextMid(y + s * 0.5f, T_GLYPH9, loc),
-                initial, loc, hue, T_GLYPH9);
+                initial, loc, WithA(hue, tintA), T_GLYPH9);
 }
 
 // ── 状态点：.dot + .pulse（1.6s 的 box-shadow 扩散）───────────────────────────

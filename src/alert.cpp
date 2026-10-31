@@ -35,6 +35,10 @@ bool alertable(const AlertCfg& cfg, State st, bool inferred, bool just_finished)
     }
 }
 
+bool alert_too_young(State st, double age_sec) {
+    return st == ST_NEEDS_USER && age_sec < kNeedsUserQuiet;
+}
+
 std::string alert_key(const std::string& agent_id, const std::string& session_id) {
     return agent_id + "\x1f" + session_id;   // 0x1f：分隔符不可能出现在路径或 uuid 里
 }
@@ -59,7 +63,8 @@ AlertRound select_alerts(const Snapshot& snap, const std::set<std::string>& ledg
             r.hits++;
             if (ledger.count(k)) continue;
             r.fresh++;
-            r.to_post.push_back({ag.id, ag.name, se.id, se.title, se.state, se.inferred_wait});
+            r.to_post.push_back({ag.id, ag.name, se.id, se.title, se.state,
+                                 se.inferred_wait, se.last_activity});
         }
     }
     // 已经不再待处理的会话要从账本里摘掉，否则它下次回到该状态不会再响

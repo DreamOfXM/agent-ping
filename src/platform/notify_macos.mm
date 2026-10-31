@@ -237,6 +237,14 @@ extern "C" void ap_notify_on_click(ap_notify_click_fn fn, void* ud) {
     fflush(stderr);
 }
 
+extern "C" int ap_app_frontmost(const char* bundle_id) {
+    if (!bundle_id || !*bundle_id) return 0;
+    NSString* want = [NSString stringWithUTF8String:bundle_id];
+    NSRunningApplication* front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+    NSString* bid = front.bundleIdentifier;
+    return (bid && [bid isEqualToString:want]) ? 1 : 0;
+}
+
 extern "C" int ap_notify_channel(char* reason, int out_len) {
     std::string why;
     NSInteger st = channelReady(&why);

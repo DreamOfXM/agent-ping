@@ -312,6 +312,31 @@ int selftest() {
         expect("分界：会话键活过券轮", (long)m2.count(sk), 1);
     }
 
+    {
+        // ⑪ 「刚发出去就弹已完成」的去抖窗（2026-10-31 用户实测）。
+        // 只有「等你回复」这一档要按住：它在磁盘上与「上一轮刚无错收尾」写着同一条记录，
+        // 新一轮的消息还没落盘的那几秒会被误判。真卡授权与失败中断不套窗。
+        expect_true("去抖：等你回复 3 秒＝太新",
+                    ap::alert_too_young(ap::ST_NEEDS_USER, 3));
+        expect_true("去抖：等你回复 21 秒＝够静",
+                    !ap::alert_too_young(ap::ST_NEEDS_USER, 21));
+        expect_true("去抖：等待确认 3 秒也照发",
+                    !ap::alert_too_young(ap::ST_AWAIT, 3));
+        expect_true("去抖：失败中断 3 秒也照发",
+                    !ap::alert_too_young(ap::ST_FAILED, 3));
+        expect_true("去抖：窗口边界 20 秒整不算太新",
+                    !ap::alert_too_young(ap::ST_NEEDS_USER, ap::kNeedsUserQuiet));
+        // 判据要拿得到「多新」：select_alerts 必须把 last_activity 带进 Pending，
+        // 否则界面层只能拿扫描时刻当年龄，永远是 0 秒，这道窗就把所有提醒都吞了。
+        ap::Session fresh_ = ses("n1", "刚收尾的那条", ap::ST_NEEDS_USER);
+        fresh_.last_activity = 1234.0;
+        auto sn = snap_with({ fresh_ });
+        std::set<std::string> nl, no;
+        ap::AlertRound rn = ap::select_alerts(sn, nl, def, &no);
+        expect("去抖：Pending 带上会话的最后动静时刻",
+               rn.to_post.size() == 1 && rn.to_post[0].last_activity == 1234.0 ? 1 : 0, 1);
+    }
+
     printf("[自检] 断言 %d 条，通过 %d，不符 %d\n", g_pass + g_fail, g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
@@ -374,14 +399,23 @@ int live_round(bool do_post) {
 
 int main(int argc, char** argv) {
     bool selftest_ = false, post_ = false, channel_ = false;
+    const char* front_ = nullptr;
     int burst_n = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) selftest_ = true;
         else if (!strcmp(argv[i], "--post")) post_ = true;
         else if (!strcmp(argv[i], "--check")) post_ = false;
         else if (!strcmp(argv[i], "--channel")) channel_ = true;
+        else if (!strcmp(argv[i], "--front") && i + 1 < argc) front_ = argv[++i];
         else if (!strncmp(argv[i], "--burst=", 8)) burst_n = atoi(argv[i] + 8);
-        else { fprintf(stderr, "未知参数 %s\n用法：alert_probe [--selftest|--check|--post|--channel|--burst=N]\n", argv[i]); return 2; }
+        else { fprintf(stderr, "未知参数 %s\n用法：alert_probe [--selftest|--check|--post|--channel|--front <bundle-id>|--burst=N]\n", argv[i]); return 2; }
+    }
+    if (front_) {
+        // 「哪家 App 在前台」这条判据的机械验证。外面用 lsappinfo 读出真前台的 bundle id
+        // 传进来：期望它回 1，拿一个此刻不在前台的 id 期望回 0。正例只能这样验——
+        // 把 WorkBuddy 调到前台就是抢他的焦点，那是动他的桌面。
+        printf("[前台] %s → %d（期望 1）\n", front_, ap_app_frontmost(front_));
+        return ap_app_frontmost(front_) == 1 ? 0 : 1;
     }
     if (burst_n > 0) {
         // 合成身份连发：不读真会话、不碰账本，只验平台那一层送不送得出去。
