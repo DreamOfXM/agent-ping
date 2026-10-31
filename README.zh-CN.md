@@ -39,7 +39,7 @@
 | 屏 | 回答什么 |
 |---|---|
 | **总览** | 一处在跑的卡（轮次、子对话、会话 Credits）、账户额度速览、「待处理」队列按等待最久优先，页脚是今日完成的时间轴 |
-| **用量与额度** | 今日 token 总量，外加每个工具一张卡：5 小时／周余额、各自何时重置、这条读数多久没更新了 |
+| **用量与额度** | 今日 token 总量，外加每个工具一张卡：5 小时／周余额、这家写了账户余额时的本期余额、各自何时到期、这条读数多久没更新了 |
 | **权益** | 三家的权益卡：现在可领的排最前，面值、连续签到、作废倒计时都在卡上；拿不到的字段整格不画 |
 | **账户** | 单个工具：总用量、按小时分布、输入／输出／缓存读取／缓存写入、按模型拆分 |
 | **详情** | 待回答的原文与选项，或者失败的那条命令——点任意一行的 `ⓘ` 进来 |
@@ -84,7 +84,7 @@ CJK 不是后贴的补丁。
 - **面板多高由内容定**（400–850 pt），滚轮是朝目标缓动，不是一格瞬移 40 pt。
 - **开关会回话。** 把「提示音」翻到开，当场播一声测试音并弹文字回执，不用等下一次提醒
   才知道它到底生效没有。
-- **陈旧读数会退场。** 总览只预览 ≤10 分钟的额度读数，更旧的退到用量屏、带上
+- **陈旧读数会退场。** 总览只预览 ≤10 分钟的窗口读数与 ≤30 分钟的账户余额读数，更旧的退到用量屏、带上
   「上次读数」的时间戳，而不是在首页常驻一颗红色「待更新」。
 - **权益只读，不代领。** 卡上只画各家写在自己库里的字段。点卡只会把那家 App 带到前台，
   回执直说「领取仍要你自己在那家 App 里点 — 这一层不代领」；整张卡都是落点，但落点只到 App。
@@ -106,6 +106,7 @@ CJK 不是后贴的补丁。
 | WorkBuddy | `~/.workbuddy/workbuddy.db`、`~/.workbuddy/projects` | 会话行、`providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db`（认 `$XDG_DATA_HOME`） | `session` 的标题/cwd/`time_updated`、`part` 的 `step-finish` token 之和与 `tool.state.status`（只读） |
 | 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/v2/logs/<日期>.log` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 的 `billing/balance` 响应——本期计划、`grant_units` 面值与作废时刻，由 ZCode 自己的 App 落盘，CLI 侧没有 |
+| 账户余额 | `~/.codex/sessions/**`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/v2/logs/<日期>.log` | 各家自己记的「剩多少／一共多少」和这条读数的写下时刻：Codex 的 `rate_limits.credits`、Qoder 的 `[AccountUsage]` 响应摘要、ZCode 的 `billing/balance` 响应 |
 | Hook 收件箱 | `~/Library/Application Support/AgentPing/hooks/*.json` | 待回答原文与选项——由 Agent Ping 应你要求装进去的那个 `hook.sh` 写；面板自身从不往这个目录写 |
 
 Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…`（收件箱，取不到
@@ -143,6 +144,7 @@ Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…
 | `⌄ 3 条子对话` | ZCode 里 `task_type='subagent_child'` 且按 `parent_id` 挂回这条会话的记录 | ZCode 不给子对话起名；标签是从派单原文推出来的，而 ⌘K 检索用的仍是原文 |
 | `今日总用量` | 今天每条会话的 `输入 + 输出 + 缓存读取 + 缓存写入` 求和（各工具自报的四项） | 这四项在不同工具之间**不是同一个意思**，见下面那段 |
 | `66%` / `2h 16m 后重置` | 从那个工具自己的日志里读出来的一档额度窗口（比如 Codex 运行时会写 `rate_limits` 事件） | 本地读取，绝不走账单接口；工具闲置时这条读数就是旧的，界面会说是旧的 |
+| `剩余额度 78%` / `392.48M / 500M tokens` | 各家最后一次写盘的账户计数，带它自己的分母与计划名（ZCode 本期配额、Qoder 的 Credits；Codex 的 credits 没有分母，直接显示余量而不编百分比） | 卡上永远写明这条读数是什么时候写的；来源超过 30 分钟没再写盘就换成「上次读数 HH:MM」——Qoder 只在桌面 App 运行时才写，所以它的余额可能比 CLI 用量旧几小时。我们不会替它刷新 |
 | 权益卡 `100 Credits`／`6 连续签到`／`5h 20m 后作废` | 各家自己写盘的面值、连续天数与本期失效时刻 | 哪家不写就整格不画；`现在可领`／`本期已领` 是它自己的状态位，不是我们推算的；只报「何时出现」的那家，时间轨画虚线 |
 | `按小时` 柱 | 该工具的 token 累加进本地 0–23 点共 24 格 | 没有 token 的那一格留空，不画成 0 |
 

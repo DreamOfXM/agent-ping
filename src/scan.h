@@ -31,6 +31,21 @@ struct QuotaWindow {
     double seen_at = 0;
 };
 
+/// 账户余额：不是滚动窗口，而是「这一期还剩多少」。ZCode 在 v2/logs 写
+/// billing/balance，Qoder 在 App 的 main.log 写 account.getQuotaUsage，两家都只给这一形态。
+/// 分母、单位、到期时刻都可能没给 —— 各自带 known，界面缺哪格不画哪格。
+struct Balance {
+    bool known = false;
+    double remaining = 0;
+    double total = 0;           // 0 ＝ 只给了余量，没有分母 → 不编百分比
+    std::string unit;           // 归一后的单位：tokens / Credits；空 ＝ 这一路没说
+    std::string label;          // 它自己给的名字（ZCode 的 show_name）；空 ＝ 没有
+    double period_end = 0;      // 这一期到期的时刻；0 ＝ 没给（Qoder 的 9999 年按没给）
+    double seen_at = 0;         // 这条读数写下的时刻（不是我们读它的时刻）
+    bool exceeded = false;      // 它自己报「配额已用尽」
+    std::string source;         // 读的是哪个文件，对账用
+};
+
 /// 账户级额度：只放本机日志真给出的东西。重置卡是另一回事（资源，不是周期重置），
 /// 当前没有任何一路本地日志带它，所以这里不建字段，界面也不画那一块。
 struct Quota {
@@ -39,6 +54,7 @@ struct Quota {
     QuotaWindow five, week;
     double credits_balance = 0;
     bool credits_known = false;
+    Balance balance;
 };
 
 struct Session {

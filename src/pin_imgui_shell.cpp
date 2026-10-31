@@ -866,6 +866,19 @@ static const Key kStr[] = {
                         "更新に失敗しました。前回の読み値は現在の残量とは限りません。",
                         "업데이트 실패. 마지막 판독값이 현재 잔량과 다를 수 있습니다."}},
     {"r_stale",        {"待更新", "Stale", "Veraltet", "Da aggiornare", "未更新", "이전 값"}},
+    {"r_remaining",    {"剩余额度", "Remaining balance", "Restguthaben", "Saldo residuo",
+                        "残り枠", "남은 한도"}},
+    {"r_ends_at",      {"%s 到期", "ends %s", "endet %s", "scade %s", "%s で終了", "%s 만료"}},
+    {"r_used_up",      {"已用尽", "Used up", "Aufgebraucht", "Esaurito", "使い切り", "소진됨"}},
+    {"r_last_read_at", {"上次读数 %s", "last read %s", "Letzter Stand %s", "ultima lettura %s",
+                        "前回の読み値 %s", "마지막 판독 %s"}},
+    {"r_balance_stale_note",
+                       {"日志里最后一次账户读数，此后源没有再写新的余额。",
+                        "Last account reading in the log; the source has not written a newer balance since.",
+                        "Letzter Kontostand im Log; die Quelle hat seither keinen neueren Stand geschrieben.",
+                        "Ultima lettura dell’account nel log; la fonte non ha scritto un saldo più recente.",
+                        "ログ内の最後のアカウント読み値です。以降、新しい残高は書かれていません。",
+                        "로그에 기록된 마지막 계정 판독값입니다. 이후 새로운 잔액은 기록되지 않았습니다."}},
     {"r_beyond",       {"已超过今日最长已完成会话", "Beyond today’s longest completed session",
                         "Länger als die längste heutige Sitzung", "Oltre la sessione più lunga di oggi",
                         "本日最長の完了セッションを超過", "오늘 가장 긴 완료 세션 초과"}},
@@ -5496,7 +5509,7 @@ static void LoadProbeFixture() {
     // 六路采集器全摆出来（导轨横向滚动、全部工具列表才摆得满），并按第 7 节的
     // 「缺数据」规矩故意留缺口：
     //   qoder     只有 Credits，没有 token 明细 → 拆解/按模型/peek tokens 整列不画
-    //   zcode     只有 5 小时额度，没有周额度 → 额度卡单列占满
+    //   zcode     只有一期余额、没有滚动窗口 → 余额格单列占满
     //   workbuddy 额度读数是一小时前拍的 → 整卡走「待更新」红字 + r_stale_note
     //   codex     有 token 但缓存两档为 0 → 拆解照画、0 值显示 0（稿子 js 的行为）
     //   opencode  只有缓存写入一档非零
@@ -5517,6 +5530,15 @@ static void LoadProbeFixture() {
         Tool* t = tool("qoder", "Qoder CLI", true, false, 8);
         t->has_credits = true;
         t->credits = 469.72;
+        // 账户余额：与真机同形状 —— 有分母（100 Credits）但已被这期用尽，且读数停在四小时前
+        // （App 关了就不再写盘）→ 走「已用尽 + 上次读数」那一格。
+        t->quota.known = true;
+        t->quota.balance.known = true;
+        t->quota.balance.total = 100;
+        t->quota.balance.remaining = 0;
+        t->quota.balance.unit = "Credits";
+        t->quota.balance.exceeded = true;
+        t->quota.balance.seen_at = now - 4 * 3600.0 - 30 * 60.0;
     }
     {
         Tool* t = tool("claude", "Claude Code", true, false, 5);
@@ -5554,13 +5576,17 @@ static void LoadProbeFixture() {
     }
     {
         Tool* t = tool("zcode", "ZCode", true, false, 0);
+        // ZCode 没有滚动窗口，采集层给的是这一期的账户余额（billing/balance 行）：
+        // 有分母 500M tokens、带它自己的计划名和一个到期时刻。
         t->quota.known = true;
         t->quota.plan = "Pro";
-        t->quota.five.known = true;
-        t->quota.five.used = 0.05;
-        t->quota.five.resets_at = now + 3600.0 + 5 * 60.0;
-        t->quota.five.window_min = 300;
-        t->quota.five.seen_at = now - 45.0;
+        t->quota.balance.known = true;
+        t->quota.balance.total = 500000000;
+        t->quota.balance.remaining = 392476403;
+        t->quota.balance.unit = "tokens";
+        t->quota.balance.label = "GLM-5.3-Flash";
+        t->quota.balance.period_end = now + 2 * 86400.0 - 6 * 3600.0;
+        t->quota.balance.seen_at = now - 45.0;
     }
     {
         Tool* t = tool("workbuddy", "WorkBuddy", true, false, 0);

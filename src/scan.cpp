@@ -3,10 +3,12 @@
 #include "jsonl.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -115,6 +117,113 @@ std::size_t cp_count(const std::string& s) {
 std::string first_line(const std::string& s) {
     std::size_t nl = s.find('\n');
     return trim(nl == std::string::npos ? s : s.substr(0, nl));
+}
+
+// ── 余额日志的公共读取件 ─────────────────────────────────────────────────────
+// 这一层只读两家自己写盘的账户读数。两份日志的行首时间戳不是一支：ZCode 是不带 Z 的
+// 本地时刻，Qoder 是带 Z 的 UTC —— 各用各的解析器，不混着用。
+double parse_bracket_local(const std::string& line) {
+    int y = 0, mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    if (line.size() < 20 || line[0] != '[') return 0;
+    if (std::sscanf(line.c_str(), "[%4d-%2d-%2d %2d:%2d:%2d", &y, &mo, &d, &hh, &mi, &ss) != 6)
+        return 0;
+    struct tm t{};
+    t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d;
+    t.tm_hour = hh; t.tm_min = mi; t.tm_sec = ss; t.tm_isdst = -1;
+    const double r = (double)::mktime(&t);
+    return r > 0 ? r : 0;
+}
+double parse_bracket_iso(const std::string& line) {
+    int y = 0, mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    if (line.size() < 20 || line[0] != '[') return 0;
+    if (std::sscanf(line.c_str(), "[%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &hh, &mi, &ss) != 6)
+        return 0;
+    struct tm t{};
+    t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d;
+    t.tm_hour = hh; t.tm_min = mi; t.tm_sec = ss;
+    return (double)::timegm(&t);
+}
+
+/// 从文件尾往前按 512 KB 一块扫，返回命中 needle 的整行，新的在前。
+/// 面板每 3 秒扫一轮，cap 限住这一轮最多读多少。
+std::vector<std::string> tail_lines(const std::string& path, const char* needle,
+                                   std::size_t max_hits, std::size_t cap_bytes) {
+    std::vector<std::string> out;
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) return out;
+    struct stat st{};
+    if (::fstat(fd, &st) != 0 || st.st_size <= 0) { ::close(fd); return out; }
+    const std::size_t CH = 512 * 1024;
+    off_t pos = st.st_size;
+    std::size_t budget = cap_bytes ? cap_bytes : (std::size_t)st.st_size;
+    std::string carry;
+    while (pos > 0 && out.size() < max_hits && budget > 0) {
+        std::size_t n = std::min<std::size_t>((std::size_t)pos, CH);
+        if (n > budget) n = budget;
+        budget -= n;
+        const off_t off = pos - (off_t)n;
+        std::string buf;
+        buf.resize(n);
+        const ssize_t got = ::pread(fd, &buf[0], n, off);
+        if (got <= 0) break;
+        buf.resize((std::size_t)got);
+        pos = off;
+        buf += carry;
+        std::vector<std::string> parts;
+        std::size_t s = 0;
+        while (true) {
+            const std::size_t nl = buf.find('\n', s);
+            if (nl == std::string::npos) { parts.push_back(buf.substr(s)); break; }
+            parts.push_back(buf.substr(s, nl - s));
+            s = nl + 1;
+        }
+        if (pos > 0 && !parts.empty()) {
+            carry = parts.front();
+            parts.erase(parts.begin());
+        } else {
+            carry.clear();
+        }
+        for (auto it = parts.rbegin(); it != parts.rend() && out.size() < max_hits; ++it) {
+            if (it->find(needle) != std::string::npos) out.push_back(std::move(*it));
+        }
+        if (got < (ssize_t)n) break;
+    }
+    ::close(fd);
+    if (out.size() > max_hits) out.resize(max_hits);
+    return out;
+}
+
+/// 数字字段既可能是 JSON 数，也可能是字符串（Codex 的 credits.balance 就是 "0"）。
+long num_at(const Json* o, const char* k, bool* got) {
+    const Json* v = o ? o->at(k) : nullptr;
+    if (got) *got = false;
+    if (!v) return 0;
+    if (v->kind == Json::NUM) { if (got) *got = true; return (long)v->num; }
+    if (v->kind == Json::STR && !v->str.empty()) {
+        char* end = nullptr;
+        const double n = std::strtod(v->str.c_str(), &end);
+        if (end && end != v->str.c_str()) { if (got) *got = true; return (long)n; }
+    }
+    return 0;
+}
+
+/// 单位归一：token/tokens 一支、credit/credits 一支，其它原样。界面按归一号念。
+std::string balance_unit(const std::string& raw) {
+    std::string u;
+    for (char ch : raw) u += (char)std::tolower((unsigned char)ch);
+    if (u == "token" || u == "tokens") return "tokens";
+    if (u == "credit" || u == "credits") return "Credits";
+    return raw;
+}
+
+/// 余额读数按 (mtime, size) 缓存：日志没变就不重读。两份日志都很大，面板每 3 秒一轮。
+struct BalanceCache {
+    double mtime = -1, size = -1;
+    Balance bal;
+};
+std::map<std::string, BalanceCache>& balance_cache() {
+    static std::map<std::string, BalanceCache> m;
+    return m;
 }
 
 // ── transcript（Qoder CLI 与 Claude Code 同构） ───────────────────────────────
@@ -583,9 +692,16 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
                     if (const std::string* pl = rl->str_at("plan_type")) if (!pl->empty()) quota.plan = *pl;
                     const Json* cr = rl->at("credits");
                     if (cr) {
-                        const Json* bal = cr->at("balance");
-                        if (bal && bal->kind == Json::NUM) {
-                            quota.credits_balance = bal->num;
+                        // 2026-10-19 的 rollout 实测：balance 是字符串 "0"，且同一条带着
+                        // has_credits:false / unlimited:false —— 没有积分这一档时它也给 0。
+                        // 只有它说「有积分」或余额真大于 0 才摆这一格，避免把「不适用」念成「用光了」。
+                        bool hc = false;
+                        const Json* h = cr->at("has_credits");
+                        if (h && h->kind == Json::BOOL && h->boolean) hc = true;
+                        bool gb = false;
+                        const long bal = num_at(cr, "balance", &gb);
+                        if (gb && (hc || bal > 0)) {
+                            quota.credits_balance = (double)bal;
                             quota.credits_known = true;
                         }
                     }
@@ -1465,6 +1581,154 @@ void apply_hook_signals(Snapshot& snap, double now) {
     if (dropped) fprintf(stderr, "hook 收件箱有 %d 个文件解析不了，已跳过\n", dropped);
 }
 
+/// ZCode 的计划余额：~/.zcode/v2/logs/<YYYY-MM-DD>.log 里
+/// `billing/balance 请求完成 {…}` 这一行带整个响应体（balances[].total_units /
+/// remaining_units / unit_type，payload.data.plans[].ends_at）。今天那份没有就退到昨天：
+/// 本期常跨零点，过期那一刻也要读得到 ends_at，界面才说得出「已到期」。
+Balance read_zcode_balance() {
+    Balance b;
+    const std::string dir = home() + "/.zcode/v2/logs";
+    std::vector<std::string> names = list_dir(dir);
+    std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& c) { return a > c; });
+    for (std::size_t i = 0; i < names.size() && i < 2; i++) {
+        const std::string p = dir + "/" + names[i];
+        const FStat st = fst(p);
+        if (!st.ok) continue;
+        BalanceCache& c = balance_cache()[p];
+        if (c.mtime == st.mtime && c.size == st.size) {
+            if (c.bal.known) return c.bal;
+            continue;
+        }
+        Balance got;
+        for (const std::string& ln : tail_lines(p, "billing/balance 请求完成", 4, 4ull << 20)) {
+            const std::size_t brace = ln.find('{');
+            if (brace == std::string::npos) continue;
+            Json rec;
+            if (!json_parse(ln.c_str() + brace, ln.size() - brace, rec)) continue;
+            const Json* pay = rec.at("payload");
+            const Json* data = pay ? pay->at("data") : nullptr;
+            // 顶层的 balances[] 只有数字，没有 unit_type；带单位的完整清单在
+            // payload.data.balances[]。两份数一样，优先读带单位的那一份。
+            const Json* bals = data ? data->at("balances") : nullptr;
+            if (!bals || bals->kind != Json::ARR || bals->arr.empty()) bals = rec.at("balances");
+            if (!bals || bals->kind != Json::ARR || bals->arr.empty()) continue;
+            std::string unit, label;
+            long total = 0, remaining = 0;
+            bool any = false;
+            for (const Json& e : bals->arr) {
+                const std::string* ut = e.str_at("unit_type");
+                const std::string u = balance_unit(ut ? *ut : std::string());
+                if (unit.empty()) unit = u;
+                else if (!u.empty() && u != unit) continue;    // 不同单位不相加
+                bool gt = false, gr = false;
+                const long t = num_at(&e, "total_units", &gt);
+                const long r = num_at(&e, "remaining_units", &gr);
+                if (!gr || r < 0) continue;
+                if (gt && t > 0) total += t;
+                remaining += r;
+                any = true;
+                if (label.empty())
+                    if (const std::string* sn = e.str_at("show_name")) label = *sn;
+            }
+            if (!any) continue;
+            got.known = true;
+            got.total = (double)total;
+            got.remaining = (double)remaining;
+            got.unit = unit;
+            got.label = label;
+            got.seen_at = parse_bracket_local(ln);
+            got.exceeded = total > 0 && remaining <= 0;
+            got.source = p;
+            const Json* plans = data ? data->at("plans") : nullptr;
+            if (plans && plans->kind == Json::ARR && !plans->arr.empty()) {
+                bool ge = false;
+                const long e = num_at(&plans->arr.front(), "ends_at", &ge);
+                if (ge && e > 0) got.period_end = (double)e;
+            }
+            break;    // tail_lines 新的在前：第一条能给余额的就是当前读数
+        }
+        c.mtime = st.mtime;
+        c.size = st.size;
+        c.bal = got;
+        if (got.known) return got;
+    }
+    return b;
+}
+
+/// Qoder 的账户余额：App 自己的 main.log 里
+/// `[Auth] [AccountUsage] 用量响应摘要 {…}` —— 它调 account.getQuotaUsage 之后把
+/// 响应体原样写盘。userQuota 与 addOnQuota 是同一单位的两个池子，相加才是账户全貌。
+/// expiresAt 是毫秒；实测 253402214400000（9999 年）＝它根本没给到期时刻，按 0 处理。
+Balance read_qoder_balance() {
+    Balance b;
+    const std::string root = home() + "/Library/Application Support/com.qoder.app.stable/logs";
+    std::vector<std::pair<double, std::string>> dirs;
+    for (const std::string& n : list_dir(root)) {
+        const std::string p = root + "/" + n;
+        const FStat st = fst(p);
+        if (st.ok && st.dir) dirs.emplace_back(st.mtime, n);
+    }
+    std::sort(dirs.begin(), dirs.end(),
+              [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& c) {
+                  return a.first > c.first;
+              });
+    for (const auto& d : dirs) {
+        const std::string p = root + "/" + d.second + "/main.log";
+        const FStat st = fst(p);
+        if (!st.ok) continue;
+        BalanceCache& c = balance_cache()[p];
+        if (c.mtime == st.mtime && c.size == st.size) {
+            if (c.bal.known) return c.bal;
+            continue;
+        }
+        Balance got;
+        for (const std::string& ln : tail_lines(p, "用量响应摘要", 1, 8ull << 20)) {
+            const std::size_t brace = ln.find('{');
+            if (brace == std::string::npos) continue;
+            Json rec;
+            if (!json_parse(ln.c_str() + brace, ln.size() - brace, rec)) continue;
+            const Json* qu = rec.at("qoderUsage");
+            if (!qu || qu->kind != Json::OBJ) continue;
+            long total = 0, remaining = 0;
+            std::string unit;
+            auto pool = [&](const char* k) {
+                const Json* q = qu->at(k);
+                if (!q || q->kind != Json::OBJ) return;
+                bool gt = false, gr = false;
+                const long t = num_at(q, "total", &gt);
+                const long r = num_at(q, "remaining", &gr);
+                if (gt && t > 0) total += t;
+                if (gr && r > 0) remaining += r;
+                if (unit.empty())
+                    if (const std::string* u = q->str_at("unit")) unit = balance_unit(*u);
+            };
+            pool("userQuota");
+            pool("addOnQuota");
+            if (total <= 0 && remaining <= 0) continue;
+            got.known = true;
+            got.total = (double)total;
+            got.remaining = (double)(remaining > 0 ? remaining : 0);
+            got.unit = unit.empty() ? std::string("Credits") : unit;
+            got.seen_at = parse_bracket_iso(ln);
+            bool gx = false;
+            const Json* ex = qu->at("isQuotaExceeded");
+            if (ex && ex->kind == Json::BOOL && ex->boolean) gx = true;
+            got.exceeded = gx || (total > 0 && remaining <= 0);
+            bool ge = false;
+            const long ms = num_at(qu, "expiresAt", &ge);
+            // 9999 年那种「没有到期日」不当地址用：只认 2100 年以前的
+            if (ge && ms > 0 && ms < 4102444800000LL) got.period_end = (double)ms / 1000.0;
+            got.source = p;
+            break;
+        }
+        c.mtime = st.mtime;
+        c.size = st.size;
+        c.bal = got;
+        if (got.known) return got;
+    }
+    return b;
+}
+
 Snapshot scan_all(double now_epoch) {
     double now = now_epoch > 0 ? now_epoch : (double)time(nullptr);
     double since = window_start(now);
@@ -1483,14 +1747,24 @@ Snapshot scan_all(double now_epoch) {
     std::map<std::string, std::string> titled;
     std::set<std::string> qids;
 #endif
-    snap.agents.push_back(scan_transcript("qoder", "Qoder CLI", join(h, ".qoder/projects"), now, since, titled,
-                                          qids, &snap.yesterday_tokens, &snap.yesterday_credits));
+    {
+        AgentSnap qoder = scan_transcript("qoder", "Qoder CLI", join(h, ".qoder/projects"), now, since,
+                                          titled, qids, &snap.yesterday_tokens, &snap.yesterday_credits);
+        qoder.quota.balance = read_qoder_balance();
+        if (qoder.quota.balance.known) qoder.quota.known = true;
+        snap.agents.push_back(std::move(qoder));
+    }
     // Claude 的标题写在日志里（customTitle/agentName），不借 Qoder 侧栏那张表。
     snap.agents.push_back(scan_transcript("claude", "Claude Code", join(h, ".claude/projects"), now, since, {},
                                           {}, &snap.yesterday_tokens, &snap.yesterday_credits));
     snap.agents.push_back(scan_codex("Codex", join(h, ".codex/sessions"), now, since));
 #ifdef AP_HAVE_SQLITE
-    snap.agents.push_back(scan_zcode("ZCode", join(h, ".zcode/cli/db/db.sqlite"), now, since));
+    {
+        AgentSnap zc = scan_zcode("ZCode", join(h, ".zcode/cli/db/db.sqlite"), now, since);
+        zc.quota.balance = read_zcode_balance();
+        if (zc.quota.balance.known) zc.quota.known = true;
+        snap.agents.push_back(std::move(zc));
+    }
     snap.agents.push_back(scan_workbuddy("WorkBuddy", join(h, ".workbuddy/workbuddy.db"),
                                          join(h, ".workbuddy/projects"), now, since));
     // OpenCode 走 XDG 数据目录（macOS 上它自己也落在这条路径），没设环境变量就按默认。
@@ -1532,6 +1806,15 @@ std::string snapshot_dump(const Snapshot& s) {
                 snprintf(buf, sizeof buf, " | 5h=%.1f%%(reset %.0f, %dmin) wk=%.1f%%(reset %.0f) plan=%s",
                          a.quota.five.used * 100, a.quota.five.resets_at, a.quota.five.window_min,
                          a.quota.week.used * 100, a.quota.week.resets_at, a.quota.plan.c_str());
+                out += buf;
+            }
+            if (a.quota.balance.known) {
+                const Balance& b = a.quota.balance;
+                snprintf(buf, sizeof buf,
+                         " | bal=%.0f/%.0f %s(ends %.0f, seen %.0f)%s%s%s",
+                         b.remaining, b.total, b.unit.c_str(), b.period_end, b.seen_at,
+                         b.exceeded ? " used-up" : "", b.label.empty() ? "" : " label=",
+                         b.label.c_str());
                 out += buf;
             }
             out += "\n";

@@ -50,7 +50,7 @@ into one row.
 | View | What answers |
 |---|---|
 | **Overview** | one running card (turn, sub-agents, session credits), account quota preview, the `Needs you` queue longest-waiting first, and a footer of today's completions |
-| **Usage & limits** | today's token total plus one card per tool: 5h / weekly remaining, when each resets, and how stale the reading is |
+| **Usage & limits** | today's token total plus one card per tool: 5h / weekly remaining, this period's account balance where the vendor writes one, when each ends, and how stale the reading is |
 | **Rewards** | the three vendors' reward cards: whatever is claimable now sorts first, with face value, streak and an expiry countdown on the card; a field the source cannot give stays undrawn |
 | **Account** | one tool: total, hourly distribution, input / output / cache read / cache write, per-model split |
 | **Detail** | the verbatim question and its options, or the failed command — opened with `ⓘ` on any row |
@@ -101,9 +101,9 @@ These are deliberate choices, each of which cost a bug report to learn:
   its target instead of teleporting 40 pt per notch.
 - **Toggles answer back.** Flipping *Sound* plays one test chime immediately and
   shows a toast, so you learn whether it works now rather than at the next alert.
-- **Stale quota retreats.** The overview only previews readings ≤ 10 min old; older
-  ones move to the Usage screen with their `updated HH:MM` stamp instead of pinning a
-  permanent red "needs refresh" to the first screen.
+- **Stale quota retreats.** The overview only previews window readings ≤ 10 min old and
+  balance readings ≤ 30 min old; older ones move to the Usage screen with their
+  `updated HH:MM` stamp instead of pinning a permanent red "needs refresh" to the first screen.
 - **Rewards are read-only.** The card draws only what each vendor writes into its own
   store. Clicking it brings that app to the front and says so — *Claim it inside that
   app yourself — this layer never claims for you*. The whole card is the hit area,
@@ -127,6 +127,7 @@ files are touched only when **you** install a hook (the Connect button or
 | WorkBuddy | `~/.workbuddy/workbuddy.db`, `~/.workbuddy/projects` | session rows, `providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (honours `$XDG_DATA_HOME`) | `session` title/cwd/`time_updated`, `part` `step-finish` token sums and `tool.state.status` (read-only) |
 | Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/v2/logs/<date>.log` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; ZCode's `billing/balance` response — this period's plan, its `grant_units` face value and expiry, written by ZCode's own app, not by its CLI |
+| Account balance | `~/.codex/sessions/**`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/v2/logs/<date>.log` | the vendor's own remaining/total counter and the timestamp of the record it came from: Codex's `rate_limits.credits`, Qoder's `[AccountUsage]` response summary, ZCode's `billing/balance` response |
 | Hook inbox | `~/Library/Application Support/AgentPing/hooks/*.json` | the verbatim question and its options — written by the small `hook.sh` that Agent Ping installs on request; the panel itself never writes into this directory |
 
 On Linux the two Agent Ping paths move to `$XDG_CONFIG_HOME/AgentPing/…`
@@ -167,6 +168,7 @@ panel the way you treat your own terminal scrollback.
 | `⌄ 3 sub-agents` | ZCode rows with `task_type='subagent_child'` attached to that parent by `parent_id` | ZCode names none of them; the label is derived from the dispatch text and the raw title is what the ⌘K search uses |
 | `Total tokens today` | Σ over today's sessions of `input + output + cache_read + cache_write` as each tool reports them | the four parts do **not** mean the same thing across tools — see below |
 | `66%` / `2h 16m to reset` | a quota window read out of that tool's own log (e.g. Codex writes `rate_limits` events while it runs) | read locally, never from a billing API; if the tool has been idle, the reading is stale and says so |
+| `Remaining balance 78%` / `392.48M / 500M tokens` | the account counter each vendor last wrote to disk for this billing period, with its own denominator and label where it has one (ZCode's plan allowance, Qoder's credits; Codex credits carry no denominator and are shown as a raw balance) | the card always says when that reading was written, and turns to `last read HH:MM` once the source has not written for 30 min — Qoder writes only while its desktop app runs, so its balance can trail the CLI by hours. Nothing is refreshed by us |
 | Reward card `100 Credits` / `6` day streak / `Expires in 5h 20m` | face value, streak and this period's expiry, as each vendor writes them to disk | a vendor that does not write a field gets the cell left undrawn; `Claimable` / `Claimed` is its own state bit, not our inference; for the vendor that only reports when a reward appeared, the track is drawn dashed |
 | `Hourly` bars | that tool's tokens summed into 24 local-hour buckets | hours with no tokens are left empty, not drawn as zero |
 

@@ -780,7 +780,48 @@ static std::vector<const Tool*> R31PresentTools() {
     return v;
 }
 static bool R31QuotaAny(const Tool& t) {
-    return t.quota.known && (t.quota.five.known || t.quota.week.known);
+    return t.quota.known && (t.quota.five.known || t.quota.week.known ||
+                             t.quota.balance.known || t.quota.credits_known);
+}
+/// 余额读数的统一视图：ZCode / Qoder 由采集层给 balance；Codex 的 credits.balance
+/// 只有余量没有分母，也是同一个渲染形状。三路不各写一套。
+static ap::Balance R31BalanceOf(const Tool& t) {
+    if (t.quota.balance.known) return t.quota.balance;
+    ap::Balance b;
+    if (t.quota.credits_known) {
+        b.known = true;
+        b.remaining = t.quota.credits_balance;
+        b.unit = "Credits";
+        b.seen_at = std::fmax(t.quota.five.seen_at, t.quota.week.seen_at);
+    }
+    return b;
+}
+/// 还剩百分之几；-1 ＝ 这一路没给分母，不编百分比。
+static int R31BalancePct(const ap::Balance& b) {
+    if (!b.known || b.total <= 0) return -1;
+    double rem = b.remaining / b.total * 100.0;
+    if (rem < 0) rem = 0;
+    if (rem > 100) rem = 100;
+    return (int)std::lround(rem);
+}
+/// 余额读数过期：超过 30 分钟没再写新的，或这一期已经到期。
+/// 这比窗口那条 10 分钟宽，是因为余额来源是日志：ZCode 2026-10-31 白天实测两次写盘
+/// 间隔 p95 17.7 分钟（p90 14.6），拿 10 分钟判会在正常节奏下常亮红。半小时间隔
+/// 仍够抓「App 关了/源没再写」——Qoder 10:26 的读数是四小时后被这条抓到的。
+static bool R31BalanceStale(const ap::Balance& b, double now) {
+    if (!b.known) return false;
+    if (b.seen_at > 0 && now - b.seen_at > 1800.0) return true;
+    if (b.period_end > 0 && b.period_end < now) return true;
+    return false;
+}
+/// 到期时刻到「月-日 时:分」：本期余额是跨天/跨周的东西，只给时分会被读成今天。
+static std::string R31LimitStamp(double t) {
+    std::tm a{};
+    const std::time_t ta = (std::time_t)t;
+    localtime_r(&ta, &a);
+    char sb[24];
+    snprintf(sb, sizeof sb, "%02d-%02d %02d:%02d", a.tm_mon + 1, a.tm_mday, a.tm_hour, a.tm_min);
+    return sb;
 }
 static bool R31HasUsage(const Tool& t) { return t.usage.total() > 0 || t.has_credits; }
 static int R31RemainPct(const ap::QuotaWindow& w) {
@@ -1453,12 +1494,16 @@ static float R31PeekSingle(ImDrawList* dl, float x, float y, float w, const Tool
 /// 全部：标题条 32 + 两列 33 高的格（pad 0 10 10，列间 1pt 竖线）。
 static float R31PeekAll(ImDrawList* dl, float x, float y, float w, int loc, double now) {
     std::vector<const Tool*> qs;
-    for (const Tool& t : g_pd.tools)
+    for (const Tool& t : g_pd.tools) {
+        if (!t.present() || !R31QuotaAny(t)) continue;
         // 只摆读数新鲜的：额度是 Codex 这类工具「跑的时候」才写的，闲置几小时后必陈旧，
         // 常驻一颗红「待更新」在首页只是噪音。陈旧的退到用量屏，那里有上次读数的完整口径。
-        if (t.present() && R31QuotaAny(t) &&
-            !(R31QuotaStale(t.quota.five, now) || R31QuotaStale(t.quota.week, now)))
-            qs.push_back(&t);
+        const bool winFresh = (t.quota.five.known || t.quota.week.known) &&
+                              !(R31QuotaStale(t.quota.five, now) || R31QuotaStale(t.quota.week, now));
+        const ap::Balance b = R31BalanceOf(t);
+        const bool balFresh = b.known && R31BalancePct(b) >= 0 && !R31BalanceStale(b, now);
+        if (winFresh || balFresh) qs.push_back(&t);
+    }
     if (qs.empty()) return 0.0f;
     const float headH = 32.0f;    // geom 实测 32（CSS 声明 30，冲突以实测为准）
     const int rows = (int)((qs.size() + 1) / 2);
@@ -1494,14 +1539,18 @@ static float R31PeekAll(ImDrawList* dl, float x, float y, float w, int loc, doub
         Brand31(dl, cxx, cyy + 5.5f, 22.0f, t.id, loc);
         const float tx = cxx + 22.0f + 6.0f;
         R31Mid(dl, tx, cyy + 11.0f, R31Short(t.id), loc, k31Fg, T_S11B);
-        R31Mid(dl, tx, cyy + 24.0f, T("r_5h", loc), loc, k31Muted, T_S9);
-        const ap::QuotaWindow& q = t.quota.five.known ? t.quota.five : t.quota.week;
-        const bool stale = R31QuotaStale(q, now);
-        const std::string val = stale ? T("r_stale", loc) : std::to_string(R31RemainPct(q)) + "%";
-        const int vtier = stale ? T_S10 : T_N23;
+        // 有新鲜窗口就念窗口；只有余额（ZCode / Qoder）就念这一期还剩多少。
+        const bool winFresh = (t.quota.five.known || t.quota.week.known) &&
+                              !(R31QuotaStale(t.quota.five, now) || R31QuotaStale(t.quota.week, now));
+        const char* labKey = winFresh ? (t.quota.five.known ? "r_5h" : "r_week") : "r_remaining";
+        const int pct = winFresh ? R31RemainPct(t.quota.five.known ? t.quota.five : t.quota.week)
+                                 : R31BalancePct(R31BalanceOf(t));
+        R31Mid(dl, tx, cyy + 24.0f, T(labKey, loc), loc, k31Muted, T_S9);
+        const std::string val = std::to_string(pct) + "%";
+        const int vtier = T_N23;
         const float vw = TextWidth(val, loc, vtier);
         DrawTextRun(dl, cxx + half - 2.0f - vw, TextMid(cyy + 16.5f, vtier, loc), val, loc,
-                    stale ? k31Red : k31Fg, vtier, -1.0f);
+                    k31Fg, vtier, -1.0f);
         AddHit(g_hits, cxx - 2.0f, cyy, cxx + half + 2.0f, cyy + 33.0f, HIT_ACCOUNT31,
                1103 + (int)i, 0, loc, t.name, 0);
         g_hits.back().key = t.id;
@@ -1803,6 +1852,68 @@ static float R31QuotaCell(ImDrawList* dl, float x, float y, float w, const ap::Q
     return y + 88.0f;
 }
 
+/// 余额格：与 R31QuotaCell 同高（88），但说的是「这一期还剩多少」而不是滚动窗口。
+/// 有分母就画百分比 + 余/总；没分母（Codex 的 credits.balance）大数字直接是余量。
+/// 底行只留一条真信息：旧读数 / 已用尽 / 到期时刻。
+static float R31BalanceCell(ImDrawList* dl, float x, float y, float w, const ap::Balance& b,
+                            int loc, double now) {
+    const bool stale = R31BalanceStale(b, now);
+    const int pct = R31BalancePct(b);
+    std::string lab = T("r_remaining", loc);
+    if (!b.label.empty()) lab += " · " + b.label;
+    R31Mid(dl, x, y + 9.0f, ClipToWidth(lab, w * 0.5f, loc, T_S10), loc, k31Sec, T_S10);
+    if (pct >= 0) {
+        std::string abs = R31Compact(b.remaining) + " / " + R31Compact(b.total);
+        if (!b.unit.empty()) abs += " " + b.unit;
+        DrawTextRight(dl, x + w, TextMid(y + 9.0f, T_S9, loc),
+                      ClipToWidth(abs, w * 0.48f, loc, T_S9), loc, k31Muted, T_S9);
+    }
+    if (pct >= 0) {
+        char vb[16];
+        snprintf(vb, sizeof vb, "%d", pct);
+        const float nw = TextWidth(vb, loc, T_N28, -0.6f);
+        DrawTextRun(dl, x, TextMid(y + 40.1f, T_N28, loc), vb, loc, stale ? k31Muted : k31Fg,
+                    T_N28, -0.6f);
+        DrawTextRun(dl, x + nw + 2.0f, TextTop(y + 36.7f, 19.5f, T_S13B, loc), "%", loc, k31Muted,
+                    T_S13B);
+    } else {
+        const std::string big = R31Compact(b.remaining);
+        DrawTextRun(dl, x, TextMid(y + 40.1f, T_N28, loc), big, loc, stale ? k31Muted : k31Fg,
+                    T_N28, -0.6f);
+        if (!b.unit.empty())
+            DrawTextRun(dl, x + TextWidth(big, loc, T_N28, -0.6f) + 5.0f,
+                        TextTop(y + 36.7f, 19.5f, T_S13B, loc), b.unit, loc, k31Muted, T_S13B);
+    }
+    dl->AddRectFilled(ImVec2(x, y + 64.2f), ImVec2(x + w, y + 67.2f), k31Line, 3.0f);
+    if (pct > 0) {
+        const float p = (float)pct / 100.0f;
+        dl->AddRectFilled(ImVec2(x, y + 64.2f), ImVec2(x + w * p, y + 67.2f),
+                          stale ? WithA(k31Faint, 115)
+                                : (b.exceeded ? WithA(k31Red, 200) : WithA(k31Blue, 230)),
+                          3.0f);
+    }
+    std::string left, right;
+    bool leftRed = false;
+    if (stale) {
+        left = RFmt(T("r_last_read_at", loc), R31LimitStamp(b.seen_at).c_str());
+        if (b.period_end > now)
+            right = RFmt(T("r_ends_at", loc), R31LimitStamp(b.period_end).c_str());
+        if (b.exceeded) right = T("r_used_up", loc);
+    } else {
+        if (b.exceeded) { left = T("r_used_up", loc); leftRed = true; }
+        if (b.period_end > now) {
+            const std::string e = RFmt(T("r_ends_at", loc), R31LimitStamp(b.period_end).c_str());
+            if (left.empty()) left = e;
+            else right = e;
+        }
+    }
+    if (!left.empty())
+        R31Mid(dl, x, y + 80.9f, left, loc, leftRed ? k31Red : k31Muted, T_S9);
+    if (!right.empty())
+        DrawTextRight(dl, x + w, TextMid(y + 80.9f, T_S9, loc), right, loc, k31Muted, T_S9);
+    return y + 88.0f;
+}
+
 // ── 用量与额度（view 6）：整块正文滚动（162..809），页脚 41 ───────────────────
 static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
@@ -1845,15 +1956,20 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
         R31Mid(dl, hx, cy + 81.5f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
         cy += 107.0f;
     }
-    // 每个有额度的工具一张卡：head 53 + pair(5+88+14) [+ stale note]
+    // 每个有额度的工具一张卡：head 53 + 窗口格 + 余额格（两路都有时上下排）[+ stale note]
     for (const Tool& t : g_pd.tools) {
         if (!inSrc(t) || !R31QuotaAny(t)) continue;
         const bool staleF = R31QuotaStale(t.quota.five, now);
         const bool staleW = R31QuotaStale(t.quota.week, now);
-        const bool stale = staleF || staleW;
         const bool f5 = t.quota.five.known, wk = t.quota.week.known;
-        float ch = 53.0f + 5.0f + 88.0f + 14.0f;
-        if (stale) ch += 4.0f + 13.5f;
+        const bool hasWin = f5 || wk;
+        const bool staleWin = (f5 && staleF) || (wk && staleW);
+        const ap::Balance bal = R31BalanceOf(t);
+        const bool staleBal = bal.known && R31BalanceStale(bal, now);
+        float ch = 53.0f + 14.0f;
+        if (hasWin) ch += 5.0f + 88.0f;
+        if (bal.known) ch += (hasWin ? 12.0f : 5.0f) + 88.0f;
+        if (staleWin || staleBal) ch += 4.0f + 13.5f;
         const float cardY = cy;
         R31Glass(dl, L, cardY, listW, ch, 13.0f);
         {
@@ -1864,7 +1980,10 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                                          ? std::string(T("r_personal", loc))
                                          : t.quota.plan + " · " + T("r_personal", loc);
             R31Mid(dl, nx, cardY + 37.75f, plan, loc, k31Muted, T_S9);
-            const double seen = std::fmax(t.quota.five.seen_at, t.quota.week.seen_at);
+            // 「HH:MM 更新」跟着变旧的那一格走：窗口旧就报窗口时刻，余额旧就报余额时刻。
+            const double seenWin = hasWin ? std::fmax(t.quota.five.seen_at, t.quota.week.seen_at) : 0;
+            const double seenBal = bal.known ? bal.seen_at : 0;
+            const double seen = staleWin ? seenWin : (staleBal ? seenBal : std::fmax(seenWin, seenBal));
             int hh = 0, mm = 0;
             RTimeOfDay(seen, &hh, &mm);
             char sb[8];
@@ -1873,13 +1992,13 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             const float fw2 = TextWidth(fresh, loc, T_S9);
             const float iconX = L + listW - 13.0f - 12.0f;
             DrawTextRun(dl, iconX - 9.0f - fw2, TextMid(cardY + 26.5f, T_S9, loc), fresh, loc,
-                        stale ? k31Red : k31Muted, T_S9);
+                        (staleWin || staleBal) ? k31Red : k31Muted, T_S9);
             I31(dl, I31_RIGHT, iconX, cardY + 20.5f, 12.0f, k31Faint);
             AddHit(g_hits, L, cardY, L + listW, cardY + 53.0f, HIT_ACCOUNT31, 1110, 0, loc, t.name, 0);
             g_hits.back().key = t.id;
         }
         {
-            const float py = cardY + 58.0f;
+            float py = cardY + 58.0f;
             const float fullW = listW - 28.0f;
             const float cellW = (fullW - 20.0f) / 2.0f;
             if (f5 && wk) {
@@ -1887,12 +2006,19 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 R31QuotaCell(dl, L + 14.0f + cellW + 20.0f, py, cellW, t.quota.week, "r_week", loc, now);
             } else if (f5) {
                 R31QuotaCell(dl, L + 14.0f, py, fullW, t.quota.five, "r_5h", loc, now);
-            } else {
+            } else if (wk) {
                 R31QuotaCell(dl, L + 14.0f, py, fullW, t.quota.week, "r_week", loc, now);
             }
-            if (stale)
+            if (bal.known) {
+                py += (hasWin ? 88.0f + 12.0f : 0.0f);
+                R31BalanceCell(dl, L + 14.0f, py, fullW, bal, loc, now);
+            }
+            if (staleWin)
                 R31DrawWrap(dl, T("r_stale_note", loc), L + 14.0f, py + 92.0f, fullW, loc, T_S9,
                             13.5f, k31Muted, 2);
+            else if (staleBal)
+                R31DrawWrap(dl, T("r_balance_stale_note", loc), L + 14.0f, py + 92.0f, fullW, loc,
+                            T_S9, 13.5f, k31Muted, 2);
         }
         cy = cardY + ch + 10.0f;
     }
@@ -2297,11 +2423,11 @@ static float R31Account(ImDrawList* dl, float x, float y, float w, int loc) {
         cy += 17.0f;
     }
     // 额度卡（整块仅当 quota 有已知窗）
-    if (t->quota.known && (t->quota.five.known || t->quota.week.known)) {
+    const bool f5 = t->quota.five.known, wk = t->quota.week.known;
+    if (t->quota.known && (f5 || wk)) {
         const bool staleF = R31QuotaStale(t->quota.five, now);
         const bool staleW = R31QuotaStale(t->quota.week, now);
         const bool stale = staleF || staleW;
-        const bool f5 = t->quota.five.known, wk = t->quota.week.known;
         float qh = 13.0f + 88.0f + 14.0f;
         if (stale) qh += 4.0f + 13.5f;
         const float qy = cy;
@@ -2321,6 +2447,24 @@ static float R31Account(ImDrawList* dl, float x, float y, float w, int loc) {
             R31DrawWrap(dl, T("r_stale_note", loc), L + 14.0f, py + 92.0f, fullW, loc, T_S9, 13.5f,
                         k31Muted, 2);
         cy = qy + qh;
+    }
+    // 余额卡：ZCode / Qoder 的「这一期还剩多少」，与滚动窗口不是一回事，单独一块。
+    {
+        const ap::Balance bal = R31BalanceOf(*t);
+        if (bal.known) {
+            const bool staleB = R31BalanceStale(bal, now);
+            if (f5 || wk) cy += 10.0f;
+            float bh = 13.0f + 88.0f + 14.0f;
+            if (staleB) bh += 4.0f + 13.5f;
+            const float by = cy;
+            R31Glass(dl, L, by, cw2, bh, 12.0f);
+            const float fullW = cw2 - 28.0f;
+            R31BalanceCell(dl, L + 14.0f, by + 13.0f, fullW, bal, loc, now);
+            if (staleB)
+                R31DrawWrap(dl, T("r_balance_stale_note", loc), L + 14.0f, by + 13.0f + 92.0f,
+                            fullW, loc, T_S9, 13.5f, k31Muted, 2);
+            cy = by + bh;
+        }
     }
     // 小时柱图：margin 19 3 20；块内 heading + 370×89 图 + 刻度
     bool activityDrawn = false;
