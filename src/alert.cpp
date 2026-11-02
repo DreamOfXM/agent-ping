@@ -256,6 +256,7 @@ AlertCfg load_alert_cfg() {
         else if (k == "alert_done") { if (b >= 0) c.done = b; }
         else if (k == "alert_claims") { if (b >= 0) c.claims = b; }
         else if (k == "on_top") { if (b >= 0) c.on_top = b; }
+        else if (k == "edge_dock") { if (b >= 0) c.edge_dock = b; }
         else if (k == "max_rows") {
             int n = atoi(v.c_str());
             if (n >= 1 && n <= 40) c.max_rows = n;      // 0 或负数＝整组摆不出来，那是失效不是设置
@@ -292,6 +293,7 @@ bool save_alert_cfg(const AlertCfg& cfg, std::string* err) {
       << "alert_done=" << (cfg.done ? 1 : 0) << "\n"
       << "alert_claims=" << (cfg.claims ? 1 : 0) << "\n"
       << "on_top=" << (cfg.on_top ? 1 : 0) << "\n"
+      << "edge_dock=" << (cfg.edge_dock ? 1 : 0) << "\n"
       << "max_rows=" << cfg.max_rows << "\n"
       << "lang=" << cfg.lang << "\n"
       << "seen_until=" << cfg.seen_until << "\n"

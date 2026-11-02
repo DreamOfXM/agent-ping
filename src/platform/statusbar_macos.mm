@@ -188,14 +188,14 @@ int sb_capture(const char* png_path) {
     @autoreleasepool { return [g_ctl capture:[NSString stringWithUTF8String:png_path]]; }
 }
 
-int sb_float_window(void) {
+int sb_float_window(int shadow) {
     @autoreleasepool {
         int n = 0;
         for (NSWindow* w in [NSApp windows]) {
             // 实测面板那块是 GLFWWindow、styleMask=0x4（GLFW 的"无边框"是留着位再藏标题栏，
             // 不是 NSWindowStyleMaskBorderless=0），所以按类名认，不按 styleMask。
             if (![NSStringFromClass([w class]) hasPrefix:@"GLFW"]) continue;
-            [w setHasShadow:YES];
+            [w setHasShadow:shadow ? YES : NO];
             [w setOpaque:NO];
             [w setBackgroundColor:[NSColor clearColor]];
             NSRect f = w.frame;

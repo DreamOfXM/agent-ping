@@ -1739,9 +1739,15 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
         return cy + 420.0f;
     }
     // 运行卡（今日最长对照取全部完成行的最大轮次，与稿子 d.done 同口径）
-    int maxTurns = 0;
-    for (const auto& row : g_pd.rows)
+    // 今天一条都没完成过时，完成行的最大值＝0，整排进度条连同「今日最长」一起消失，
+    // 卡片中间就剩一条空带（11-02 实拍：两个在跑卡都这样）。这时退回「在场最长的那条」
+    // 当刻度——条子照样能读，「今日最长」也照样是真话，只是最长的那条自己顶格。
+    int maxTurns = 0, liveMax = 0;
+    for (const auto& row : g_pd.rows) {
+        if (row.turns > liveMax) liveMax = row.turns;
         if (GroupOf(row.state) == G_DONE && row.turns > maxTurns) maxTurns = row.turns;
+    }
+    if (maxTurns <= 0) maxTurns = liveMax;
     for (size_t i = 0; i < runs.size(); i++) {
         const UIRow& row = *runs[i];
         cy = R31RunCard(dl, x + 16.0f, cy, w - 32.0f, row, (int)i, maxTurns, loc, tn);

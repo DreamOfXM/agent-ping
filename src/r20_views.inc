@@ -805,6 +805,10 @@ static float RSettings(ImDrawList* dl, float L, float R, float y, int loc) {
         T("manage", loc));
 
     y += RSLabel(dl, lx, rx, y, loc, "set_ui", -1, false, "", false, 14.0f, 7.0f);
+    // 右缘侧边栏（灯舱）开不开：11-02 用户要求进设置。关掉后右缘什么都不留——
+    // 常驻的舱、静止的细线、推近长出的胶囊一起没有；系统横幅与提示音不受这条影响。
+    row(RI_PANEL, "edge_dock", T("note_edge", loc), SC_EDGE, g_cfg.edge_dock, false,
+        Zid(loc, SC_EDGE, HIT_SET, 0), T("edge_dock", loc));
     // 语言：稿子是一颗原生 <select>（appearance:auto），截出来是 87×28pt、10.5 mono、
     // 粗下折箭头。ImGui 没有下拉，外形照截出来的那颗抄，点一下轮换到下一语。
     {

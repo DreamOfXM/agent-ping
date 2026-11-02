@@ -150,6 +150,14 @@ static const Key kStr[] = {
                         "常に手前に表示", "항상 최상단"}},
     {"max_rows",       {"每组最多显示", "Rows per group", "Zeilen pro Gruppe", "Righe per gruppo",
                         "グループ別最大件数", "그룹당 최대 표시"}},
+    {"edge_dock",      {"右缘侧边栏", "Edge sidebar", "Seitenleiste am Rand",
+                        "Barra laterale sul bordo", "右端のサイドバー", "가장자리 사이드바"}},
+    {"note_edge",      {"关闭后右缘不再常驻，提醒仍走系统通知与提示音",
+                        "Off clears the edge; alerts still come",
+                        "Aus = Rand leer; Banner und Ton bleiben",
+                        "Spento = bordo vuoto; avvisi restano",
+                        "オフで右端は空、通知はバナーと音で届く",
+                        "끄면 가장자리는 비고 알림은 배너·소리로"}},
     {"src_scan",       {"本地日志扫描", "Local log scan", "Lokaler Log-Scan", "Scansione log locale",
                         "ローカルログ走査", "로컬 로그 스캔"}},
     {"src_hook",       {"Hook 收件箱", "Hook inbox", "Hook-Postfach", "Casella hook",
@@ -1846,12 +1854,18 @@ static const char* g_shot_to = getenv("AGENTPING_SHOT");
 /// 否则「给六语并排图取证」会把他的桌面一家家点开。g_shot_to 在这一轮是空的，所以它拦不住。
 static bool g_probe_round = false;
 
-// ── 右缘唤出手柄（R1 双色签）────────────────────────────────────────────────
-// 同一块窗口换一副形态：面板收着时缩成屏幕右缘的 320×工作区，鼠标推到右缘停 80ms
-// 才长出手柄，再停 120ms 展开成签、320ms 展开成预览卡。手柄期间窗口是「鼠标穿透」的，
-// 只有指针落在可点零件上才停止穿透——否则这条 320pt 宽的透明窗会把右侧桌面的点击全吃掉。
-static const int kEdgeW = 320;          // 预览卡 300 + 右缩进 14 + 左留 6
-static const float kEdgeInset = 14.0f;  // 手柄离屏幕右沿
+// ── 右缘灯舱（v5 定稿：44pt 烟灰玻璃舱 + 300pt 预览卡）──────────────────────────
+// 稿子＝evidence/2026-11-01-edge-dock2/{dock.html,dock.css}（2026-11-01 用户指着那张深色舱
+// 说「先照这个实现一版」）。同一块窗口换一副形态：面板收着时缩成屏幕右缘的 410×工作区，
+// 灯舱常驻在舱位上（不像旧手柄那样跟着指针上下跑），停在舱上 120ms 才往左展开预览卡。
+// 灯舱期间窗口默认「鼠标穿透」，只有指针落在舱或卡上才收回穿透——否则这条 410pt 宽的
+// 透明窗会把桌面右侧的点击全吃掉。
+static const int kEdgeW = 484;          // 卡 300 + 缝 12 + 舱 44 + 右缩进 14 + 左留 114
+                                        // 左留的那 114 不是富余：卡的落影 σ=32，3.5σ=112 才淡到底，
+                                        // 少一格就在屏幕左沿上切出一道直边（见 cmp/cut_left_peek_3x.png）
+static const float kEdgeInset = 14.0f;  // 灯舱离屏幕右沿（稿子 .dock{right:14px}）
+static const float kEdgeRevealX = 34.0f;   // 逻辑指针离屏幕右沿多远就长出胶囊
+static const float kEdgeRevealY = 80.0f;   // 上下各让这么多 pt：在右缘别处来回走不算要唤出
 static int g_waX = 0, g_waY = 0, g_waW = 0, g_waH = 0;   // 主屏工作区（y 向下）
 static bool g_waKnown = false;
 static bool g_edgeOff = false;          // AGENTPING_EDGE_OFF：整条关掉，退回「收面板就收窗」
@@ -1869,23 +1883,26 @@ static const bool g_edgeHost = true;
 static const bool g_edgeHost = false;   // X11 拿不到可靠的全局指针与穿透，整条不出现
 #endif
 
-enum EdgeState { EDGE_IDLE = 0, EDGE_PENDING, EDGE_HOVER, EDGE_PEEK, EDGE_IDLEHOVER };
+enum EdgeState { EDGE_IDLE = 0, EDGE_PEEK = 1 };
 static int g_edgeState = EDGE_IDLE;
-static double g_edgeStateAt = 0;        // 这一态进场时刻：只喂 150/190ms 的入场动画
-static double g_edgeStillAt = 0;        // 进热区后那次 80ms 静置的到点（0＝没在计）
-static double g_edgeHoverAt = 0;        // pending → hover 的到点
-static double g_edgePeekAt = 0;         // hover → peek 的到点
-static double g_edgeHideAt = 0;         // 离区后收起的到点（0＝没收）
+static double g_edgeStateAt = 0;        // 这一态进场时刻：只喂 190ms 的入场动画
+static double g_edgeHideAt = 0;         // 离开后收起预览卡的到点（0＝没收）
 static double g_edgeAnimUntil = 0;
 static double g_edgeBeatAt = 0;         // 静置心跳：每 2 秒至少重画一帧（数据变了要跟上）
-static bool g_edgeZonePrev = false;
-static float g_edgeHy = -1.0f;          // 手柄中心（窗口本地 y）
-static bool g_edgeFrozen = false;       // 展开后位置冻住，不跟着指针走
+static float g_edgeHy = -1.0f;          // 舱位中心（窗口本地 y）
 static int g_edgeRow = -1;              // 预览卡里指针停在哪一行
 static bool g_edgeDownPrev = false;
 static int g_edgeForce = -1;            // AGENTPING_EDGE：取证时钉死一态
 static bool g_edgeEmpty = false;        // AGENTPING_EDGE_EMPTY：只验空态版面
 static bool g_edgeTrace = false;
+// 「没有待介入」那一档不再常驻一块灰：静止时只是贴屏幕右沿的一道细线，指针推到跟前才长成胶囊。
+// 11-01 用户实拍：浅色桌面上那颗常驻小条被压成 #787a7e 的死灰块，外面还糊一圈投影。
+static float g_edgeReveal = 0.0f;         // 0＝细线，1＝胶囊
+static float g_edgeRevealTo = 0.0f;       // 上一帧算出的目标：主循环拿它判「动画是否已收口」
+static bool g_edgeNear = false;           // 逻辑指针在右缘唤出带里
+static double g_edgeRevealAt = -1;        // 上一次推进动画的时刻（用它算帧间隔，循环会跳帧）
+static double g_edgeRevealUntil = 0;      // 动画还在跑：这一时刻前每帧都得重画
+static int g_edgeRevealForce = -1;        // AGENTPING_EDGE=nub|sliver：取证时钉死这一档
 static float g_edgeCurX = 0, g_edgeCurY = 0;   // AGENTPING_EDGE_CURSOR：逻辑指针（绝对屏幕坐标）
 static bool g_edgeCurSet = false;
 // AGENTPING_EDGE_CURSOR 的换位写法 "x1,y1>x2,y2@t"：进手柄后 t 秒把逻辑指针挪到第二点。
@@ -1896,7 +1913,6 @@ static double g_edgeCur2At = 0;
 static bool g_edgeCur2Arm = false;
 static double g_edgeFirstAt = -1;
 static int g_edgeRowForce = -1;         // AGENTPING_EDGE_ROW
-static float g_edgeAtForce = -1;        // AGENTPING_EDGE_AT（绝对屏幕 y）
 
 // ── 设置屏接的三个活口子 ────────────────────────────────────────────────────
 // g_cfg 是「屏幕上那一屏」与 alert.cpp 的持久化之间唯一的桥：启动时 load、每次点击 save。
@@ -1926,6 +1942,11 @@ static ImU64 g_brandTex36 = 0, g_brandTex68 = 0;
 static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
 /// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
 static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
+/// 右缘灯舱那三枚剪影（edge_marks.h，白底＋形状覆盖度当 alpha）：稿子的
+/// `.ag{background-color:currentColor;mask:url(...)}` 只有贴纹理才认，画的时候乘墨色。
+static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0;
+/// 灯舱里那一列图标占多高（EdgeChipRows 每帧回填）：`.dock` 的总高由它决定。
+static float g_edgeAgentsH = 0.0f;
 // ── 自绘横幅：券到账时在桌面弹一块小卡（2026-10-30 用户拍板「我们自己画一块横幅窗」）──
 // 为什么不走系统横幅：那条通道先要过「系统设置→通知→Agent Ping」这道闸，本机实测档位是
 // 「被关着」，ap_notify_post 于是只返回 1（兜底出声）——人眼前什么都没有。自己画不欠授权。
@@ -2038,13 +2059,21 @@ static void GradRound(ImDrawList* dl, float x, float y, float w, float h, float 
         auto arc = [&](float cx, float cy, float a0, float a1) {
             for (int i = 0; i <= seg && n < kMaxPts; i++) {
                 const float a = a0 + (a1 - a0) * (float)i / (float)seg;
-                pts[n++] = ImVec2(cx + std::cos(a) * rr, cy + std::sin(a) * rr);
+                const ImVec2 p(cx + std::cos(a) * rr, cy + std::sin(a) * rr);
+                // 舱与小条都是 w＝2r 的跑道形：相邻两段弧在顶/底正中交接出**同一个点**。
+                // 零长度边的法线互相抵消，那一格的内外圈顶点重合、抗锯齿带翻折回形体内部，
+                // 实测在胶囊里留下一个叠了三层底色的暗点（11-01 实拍 1px @dev 911,1007）。
+                if (n > 0 && std::fabs(p.x - pts[n - 1].x) < 1e-4f &&
+                    std::fabs(p.y - pts[n - 1].y) < 1e-4f) continue;
+                pts[n++] = p;
             }
         };
         arc(x + rr, y + rr, kPi, kPi * 1.5f);             // 左上 → 上沿起点
         arc(x + w - rr, y + rr, kPi * 1.5f, kPi * 2.0f);  // 右上 → 右沿起点
         arc(x + w - rr, y + h - rr, 0.0f, kPi * 0.5f);    // 右下 → 下沿起点
         arc(x + rr, y + h - rr, kPi * 0.5f, kPi);         // 左下 → 回到起点
+        if (n > 1 && std::fabs(pts[n - 1].x - pts[0].x) < 1e-4f &&
+            std::fabs(pts[n - 1].y - pts[0].y) < 1e-4f) n--;   // 正圆：首尾也重合
         const float aa = dl->_FringeScale * 0.5f;
         dl->PrimReserve((n - 2) * 3 + n * 6, n * 2);
         const unsigned int base = dl->_VtxCurrentIdx;
@@ -2308,7 +2337,9 @@ static const Tool* AgentTool(const char* id);   // 定义在绘制段；落点�
 /// 走 AgentTool 就退回采集器 id，屏幕上成了「只把 workbuddy 带到了前台」。
 static std::string R31Agent(const std::string& id, int loc);
 enum SetCtl { SC_NEEDS = 0, SC_AWAIT, SC_FAIL, SC_DONE, SC_SOUND, SC_NOTIFY,
-              SC_TOP, SC_ROWS, SC_DND, SC_CLAIMS, SC_LAUNCH, SC_QUIT };
+              SC_TOP, SC_ROWS, SC_DND, SC_CLAIMS, SC_LAUNCH, SC_QUIT,
+              SC_EDGE };   // 右缘侧边栏开／关（11-02 用户要求进设置）。追加在末尾：
+                           // 前面这些序号被 Zid() 编进命中区，插中间会让旧命中区错位。
 struct Hit {
     float x0, y0, x1, y1;
     int act = 0, row = 0, opt = 0;
@@ -2510,6 +2541,7 @@ static void FlipSet(int ctl, int opt) {
         // 「权益到账」不看会话，只看各家磁盘上的领取读数；关掉期间不记账（见 select_claim_alerts）。
         case SC_CLAIMS: g_cfg.claims     = !g_cfg.claims;     b = g_cfg.claims;     key = "set_claim"; break;
         case SC_TOP:    g_cfg.on_top     = !g_cfg.on_top;      b = g_cfg.on_top;    key = "on_top"; break;
+        case SC_EDGE:   g_cfg.edge_dock  = !g_cfg.edge_dock;   b = g_cfg.edge_dock; key = "edge_dock"; break;
         case SC_ROWS:   g_cfg.max_rows   = opt;               b = true;             key = "max_rows"; break;
         case SC_QUIT:   // 设置屏底部「退出」：走窗口正常关闭（扫描线程在 join 里收）
             if (g_win) glfwSetWindowShouldClose(g_win, GLFW_TRUE);
@@ -2539,9 +2571,15 @@ static void FlipSet(int ctl, int opt) {
         // 在 X11 落到 _NET_WM_STATE_ABOVE。生效与否由 sb_float_window() 直接向系统要窗口层级——
         // 那是可反驳的读数，不是我们在日志里自己说「我置顶了」。
         glfwSetWindowAttrib(g_win, GLFW_FLOATING, g_cfg.on_top ? GLFW_TRUE : GLFW_FALSE);
-        sb_float_window();
+        sb_float_window(g_winMode != WIN_EDGE);
     }
     if (ctl == SC_ROWS) g_relayout = true;      // 每组条数变了，卡高跟着变
+    if (ctl == SC_EDGE) {
+        // 关掉的当场就要从右缘消失，不许等下一次收面板才生效：那条舱是常驻物，
+        // 还留在屏幕上就等于设置没落地。置 dirty，主循环下一帧重挑形态（→ 收着）。
+        g_edgeOff = !g_cfg.edge_dock;
+        g_modeDirty = true;
+    }
 }
 
 /// 画设置屏，返回内容底部 y。每一节先按同一套算法量一遍高度（measure-then-draw，
@@ -5493,21 +5531,18 @@ static int WantedWindowW() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 右缘唤出手柄：几何、状态机、输入、绘制
-// 稿子：evidence/2026-10-31-edge-float/{prototype.html,stage.css}（2026-10-31 用户拍板 R1）。
-// 坐标全部是窗口本地（窗口＝工作区 320×H）；窗口右沿＝屏幕右沿，所以「贴右 14pt」就是卡片右沿。
+// 稿子＝evidence/2026-11-01-edge-dock2/{dock.html,dock.css}（v5，2026-11-01 用户拍板那张深色舱）。
+// 坐标全是窗口本地（窗口＝工作区 kEdgeW×H，右沿＝屏幕右沿），所以稿子的 right:14px 就是这里的
+// kEdgeInset。每个盒子的尺寸都注了它抄自哪一条声明，几何以 measure_geom.py 量出的真渲染框为准
+// （flex／line-height／mask contain 会让渲染框和声明值差 0.5pt，量出来才算抄对）。
 // ─────────────────────────────────────────────────────────────────────────────
 static bool EdgeAvailable() {
     return g_edgeHost && !g_edgeOff && g_waKnown && g_waW > kEdgeW + 40 && g_waH > 360;
 }
 static float EdgeZoneTop() { return 40.0f; }
 static float EdgeZoneBot() { return (float)g_waH - 40.0f; }
-/// 静置时手柄停的位置：稿子 HOME=500 @1080，视觉上比热区中线再抬 40pt（手自然停的高度）。
-static float EdgeHome() { return (EdgeZoneTop() + EdgeZoneBot()) * 0.5f - 40.0f; }
-static float EdgeClampHy(float y) {
-    const float lo = EdgeZoneTop() + 28.0f, hi = EdgeZoneBot() - 28.0f;
-    if (hi < lo) return (EdgeZoneTop() + EdgeZoneBot()) * 0.5f;
-    return y < lo ? lo : (y > hi ? hi : y);
-}
+/// 舱位：稿子 top:520px @1080 ≈ 工作区竖直中线。v5 的舱是常驻的，不跟指针上下走。
+static float EdgeHome() { return (EdgeZoneTop() + EdgeZoneBot()) * 0.5f; }
 static int EdgeWinX() { return g_waX + g_waW - kEdgeW; }
 static int EdgeWinY() { return g_waY; }
 
@@ -5515,10 +5550,26 @@ struct ERect { float x, y, w, h; };
 static bool Inside(const ERect& r, float x, float y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
-static ERect EdgeBadgeRect() { return { (float)kEdgeW - kEdgeInset - 32.0f, g_edgeHy - 22.0f, 32.0f, 44.0f }; }
-static ERect EdgeQuietRect() { return { (float)kEdgeW - kEdgeInset - 34.0f, g_edgeHy - 17.0f, 34.0f, 34.0f }; }
-static ERect EdgeTabRect()   { return { (float)kEdgeW - kEdgeInset - 36.0f, g_edgeHy - 57.0f, 36.0f, 114.0f }; }
-static ERect EdgeGhostRect() { return { (float)kEdgeW - kEdgeInset - 32.0f, g_edgeHy - 20.0f, 32.0f, 40.0f }; }
+static int EdgeCount();      // 定义在下面：舱的几何要先知道「画了几枚格子」
+static int EdgeUnseenCount();
+static float EdgeCapsColH();
+/// .dock{width:44px;padding:9px 0;border-radius:22px}：总高是量出来的——
+/// 9 ＋ 格子列 ＋ 9 ＋ 一列图标 ＋ 9 ＋ .chev 20 ＋ 9
+/// （lab10 E1；图标段由 EdgeChipRows 每帧回填，格子列由 EdgeCapsColH 按「0 的不画」给）。
+static ERect EdgeDockRect() {
+    const float h = 9.0f + EdgeCapsColH() + 9.0f + g_edgeAgentsH + 9.0f + 20.0f + 9.0f;
+    return { (float)kEdgeW - kEdgeInset - 44.0f, g_edgeHy - h * 0.5f, 44.0f, h };
+}
+/// 0 条静止：贴屏幕右沿的一道 3×56pt 细线（右头方、左头圆，不投影）。
+/// 指针进右缘 kEdgeRevealX 带内，才长成稿子那颗 .sliver{width:22px;height:46px;border-radius:12px}。
+/// a 是这段生长的进度：几何从细线插值到胶囊，所以 a＝1 时 x 仍是 484−14−22＝448，与稿子量出来的一致。
+static ERect EdgeNubRect() { return { (float)kEdgeW - 3.0f, g_edgeHy - 28.0f, 3.0f, 56.0f }; }
+static ERect EdgeSliverRect(float a = 1.0f) {
+    const float w = 3.0f + 19.0f * a;
+    const float h = 56.0f - 10.0f * a;
+    const float inset = kEdgeInset * a;   // a＝0 时右沿贴屏幕，与 EdgeNubRect 接得上
+    return { (float)kEdgeW - inset - w, g_edgeHy - h * 0.5f, w, h };
+}
 static float EdgeCardH(int n) { return 38.0f + 44.0f * (float)n + 32.0f; }
 static float EdgeCardY(float cardH) {
     float y = g_edgeHy - cardH * 0.5f;
@@ -5529,68 +5580,136 @@ static float EdgeCardY(float cardH) {
 static int g_edgeRowN = 0;   // 预览卡当前摆了几行（EdgePeekRows 每帧回填，卡片高度靠它）
 static ERect EdgeCardRect() {
     // 预览卡最多三行；行数来自同一份待处理清单（见 EdgePeekRows）。
+    // 稿子 .peek{right:70px;width:300px}：右缩进 14 + 舱 44 + 缝 12 ＝ 卡的右沿离屏幕 70pt。
     const float h = EdgeCardH(g_edgeRowN);
-    return { 6.0f, EdgeCardY(h), 300.0f, h };
+    return { (float)kEdgeW - 70.0f - 300.0f, EdgeCardY(h), 300.0f, h };
 }
 
-/// 待处理清单（与面板同一判据：GroupOf == G_AWAIT）。面板的行是按 age 升序，
-/// 预览卡要「等最久的在最上面」，所以反过来取；最多三行。
-static std::vector<const UIRow*> EdgePeekRows() {
+/// 待处理清单：判据与段序都抄面板的 R31Waits——① 要你动手的（介入／失败）在前，
+/// ② 今天跑完但还没看过的在后。段内是 age 升序，翻过来就是「等最久的在最上面」。
+/// 舱摆不摆、卡上列哪几行、舱上那列剪影、表头与页脚那个数，全从这一份来。
+/// 11-02 用户实拍「面板里待处理 3、右缘却缩成一根箭头」＝这几处各自只认 G_AWAIT。
+static std::vector<const UIRow*> EdgePendingRows() {
+    std::vector<const UIRow*> seg[3];   // 0=介入 1=失败 2=跑完没看
+    if (!g_edgeEmpty) {
+        for (const auto& r : g_pd.rows) {
+            const int g = GroupOf(r.state);
+            if (g == G_AWAIT) seg[0].push_back(&r);
+            else if (g == G_FAIL) seg[1].push_back(&r);
+            else if (g == G_DONE && r.unseen) seg[2].push_back(&r);
+        }
+    }
     std::vector<const UIRow*> out;
-    if (g_edgeEmpty) { g_edgeRowN = 0; return out; }
-    for (const auto& r : g_pd.rows)
-        if (GroupOf(r.state) == G_AWAIT) out.push_back(&r);
-    std::reverse(out.begin(), out.end());
+    for (int i = 0; i < 3; i++) {
+        std::reverse(seg[i].begin(), seg[i].end());
+        out.insert(out.end(), seg[i].begin(), seg[i].end());
+    }
+    return out;
+}
+/// 上面那份清单有几条。不 alloc，热路径（每帧判穿透）也用它。
+static int EdgePendingN() {
+    if (g_edgeEmpty) return 0;
+    int n = 0;
+    for (const auto& r : g_pd.rows) {
+        const int g = GroupOf(r.state);
+        if (g == G_AWAIT || g == G_FAIL || (g == G_DONE && r.unseen)) n++;
+    }
+    return n;
+}
+/// 预览卡最多三行（稿子 .peek 就摆三行）；行数回填给卡片高度，先量后画。
+static std::vector<const UIRow*> EdgePeekRows() {
+    std::vector<const UIRow*> out = EdgePendingRows();
     if (out.size() > 3) out.resize(3);
     g_edgeRowN = (int)out.size();
     return out;
 }
-/// 展开签上那几颗代理头像：按「等得最久的先」去重，最多三颗（稿子 R1 的三颗是同三行）。
+/// 舱里那一列剪影：按「等得最久的先」去重，最多三枚（稿子 AGENTS 表就摆三枚）。
+/// 顺手回填 .agents 那一段的高度：各家墨形边长之和 + 9pt 间距（.agents{gap:9px}），
+/// 舱的总高由它决定——所以任何用到 EdgeDockRect 的地方都要先调过这个函数。
 static std::vector<const UIRow*> EdgeChipRows() {
     std::vector<const UIRow*> out;
-    if (g_edgeEmpty) return out;
-    std::vector<const UIRow*> all;
-    for (const auto& r : g_pd.rows)
-        if (GroupOf(r.state) == G_AWAIT) all.push_back(&r);
-    std::reverse(all.begin(), all.end());
     std::set<std::string> seen;
-    for (const auto* r : all) {
-        if (!seen.insert(r->agent_id).second) continue;
-        out.push_back(r);
-        if (out.size() >= 3) break;
+    {
+        const std::vector<const UIRow*> all = EdgePendingRows();   // 与预览卡同一份、同一序
+        for (const auto* r : all) {
+            if (!seen.insert(r->agent_id).second) continue;
+            out.push_back(r);
+            if (out.size() >= 3) break;
+        }
     }
+    float h = 0.0f;
+    for (size_t i = 0; i < out.size(); i++) {
+        h += MarkPx(out[i]->agent_id);
+        if (i + 1 < out.size()) h += 9.0f;
+    }
+    g_edgeAgentsH = h;
     return out;
 }
+/// 琥珀那枚＝「要你动手」的条数＝待授权＋失败中断，与面板 R31Waits 第一段同一判据。
+/// 数行而不是读 await_n：舱上的数字、表头计数、页脚「全部 N 条」必须是同一份清单，
+/// 否则预览卡摆着 3 行、舱上却写 2（样例夹具就把 await_n 钉在 2 而与行数分叉过）。
+/// 舱上只有锁／眼两枚格子，失败没有第三种墨形：把它并进「动手」这一枚，两枚之和
+/// 才等于卡片报的那个数（11-02 拍板「0 的不展示」时一并钉的口径）。
 static int EdgeCount() {
     if (g_edgeEmpty) return 0;
-    // 数行而不是读 await_n：签上的数字、表头计数、页脚「全部 N 条」必须是同一份清单，
-    // 否则预览卡摆着 3 行、签上却写 2（样例夹具就把 await_n 钉在 2 而与行数分叉过）。
     int n = 0;
-    for (const auto& r : g_pd.rows) if (GroupOf(r.state) == G_AWAIT) n++;
+    for (const auto& r : g_pd.rows) {
+        const int g = GroupOf(r.state);
+        if (g == G_AWAIT || g == G_FAIL) n++;
+    }
     return n;
 }
-static ERect EdgeActiveRect() {
-    switch (g_edgeState) {
-        case EDGE_PENDING:   return EdgeBadgeRect();
-        case EDGE_IDLEHOVER: return EdgeGhostRect();
-        case EDGE_HOVER:     return EdgeTabRect();
-        case EDGE_PEEK:      return EdgeCardRect();
-        default:             return EdgeQuietRect();
+/// 待查看＝跑完了但没人看过的条数。与面板 G_DONE＋unseen 同一判据，同样数行不读
+/// g_pd.unseen_n：舱上那颗「眼」和预览卡、面板表头必须指向同一份清单。
+static int EdgeUnseenCount() {
+    if (g_edgeEmpty) return 0;
+    int n = 0;
+    for (const auto& r : g_pd.rows)
+        if (GroupOf(r.state) == G_DONE && r.unseen) n++;
+    return n;
+}
+/// 稿子 .cap2{padding:0 6px}＋svg 11px＋gap 3.5px：格子自然宽度由数字位数决定，
+/// 舱宽 44pt 钉死，所以两位数起就会顶出舱边（measure_fit.py：33.6／40.7／47.8）。
+/// 这里不夹宽度——夹了就改成 I2/I5 那个形状了。
+static float EdgeCapW(const std::string& num) {
+    return 6.0f + 11.0f + 3.5f + TextWidth(num, g_loc, T_S12B) + 6.0f;
+}
+/// 0 的那枚不画（11-02 用户拍板：只展示有数字的，任何一个有数字都要出舱）。
+/// 于是舱高、格子列宽、命中框都得跟着「实际画了几枚」走，不能再按两枚写死。
+static int EdgeCapsDrawn() {
+    return (EdgeCount() > 0 ? 1 : 0) + (EdgeUnseenCount() > 0 ? 1 : 0);
+}
+/// 格子列的高：画出的每枚 20，其间 .g6 一道。一枚都没有＝0（这一档舱也不存在）。
+static float EdgeCapsColH() {
+    const int n = EdgeCapsDrawn();
+    return n > 0 ? 20.0f * (float)n + 6.0f * (float)(n - 1) : 0.0f;
+}
+static float EdgeCapsW() {
+    float w = 0.0f;
+    if (EdgeCount() > 0) w = std::fmax(w, EdgeCapW(std::to_string(EdgeCount())));
+    if (EdgeUnseenCount() > 0) w = std::fmax(w, EdgeCapW(std::to_string(EdgeUnseenCount())));
+    return w;
+}
+/// 有待处理就摆 44pt 的舱；一条都没有时，静止是一道细线、指针推到跟前才长成 22pt 胶囊。
+/// 命中框跟着「长成什么样」走：还没长出来就只吃那 3pt 细线，别把桌面右侧凭空挡出一条。
+static ERect EdgeHandleRect() {
+    if (EdgePendingN() > 0) {
+        ERect r = EdgeDockRect();
+        const float w = EdgeCapsW();          // 格子顶出舱边时，那圈也还得吃得到鼠标
+        if (w > r.w) { r.x -= (w - r.w) * 0.5f; r.w = w; }
+        return r;
     }
+    return g_edgeReveal > 0.35f ? EdgeSliverRect(1.0f) : EdgeNubRect();
 }
 /// 指针落在这上面时窗口必须接收鼠标；其余地方一律穿透（见文件顶部那段）。
+/// 展开时要连卡带舱一起吃鼠标，中间那 12pt 缝也算：手在两个零件之间挪一下不算「离开」，
+/// 否则预览卡会在指尖底下自己崩掉（稿子里横移是活的）。
 static bool EdgeWantsMouse(float x, float y) {
-    return Inside(EdgeActiveRect(), x, y);
-}
-/// 稿子的 overHandle：从手柄右侧到热区起点这条带子（pending 22pt／hover 40pt）不算离开，
-/// 只管「别把刚长出来的手柄收掉」，不接点击。少了它，从 9pt 热区横移到签上会穿过
-/// 5pt 空白，停在那儿看字的人 160ms 后就看着手柄自己消失（稿子里反而活着）。
-static bool EdgeHandleBand(float x, float y) {
-    if (x < (float)kEdgeW - kEdgeInset - 40.0f || x > (float)kEdgeW - 8.0f) return false;
-    const float halfW = (g_edgeState == EDGE_HOVER || g_edgeState == EDGE_PEEK) ? 40.0f : 22.0f;
-    const float halfH = g_edgeState == EDGE_HOVER ? 62.0f
-                      : (g_edgeState == EDGE_PEEK ? 0.0f : 28.0f);
-    return x >= (float)kEdgeW - 14.0f - halfW && std::fabs(y - g_edgeHy) <= halfH;
+    if (Inside(EdgeHandleRect(), x, y)) return true;
+    if (g_edgeState != EDGE_PEEK) return false;
+    const ERect c = EdgeCardRect(), h = EdgeHandleRect();
+    const float top = std::fmin(c.y, h.y), bot = std::fmax(c.y + c.h, h.y + h.h);
+    return x >= c.x && x <= (float)kEdgeW && y >= top && y <= bot;
 }
 
 static void EdgeSetState(int st, double now, const char* why) {
@@ -5602,20 +5721,20 @@ static void EdgeSetState(int st, double now, const char* why) {
     g_edgeAnimUntil = now + (st == EDGE_PEEK ? 0.19 : 0.15);
     g_edgeRow = -1;
 }
+/// 收回预览卡：灯舱留在原位不动（v5 的舱是常驻的，不再跟着一起消失）。
+/// 行数一并归零，否则下一次展开会拿上一轮的旧高度摆卡，第一帧短一截。
 static void EdgeClose(double now, const char* why) {
     EdgeSetState(EDGE_IDLE, now, why);
-    g_edgeHy = EdgeHome();
-    g_edgeFrozen = false;
-    g_edgeStillAt = g_edgeHoverAt = g_edgePeekAt = g_edgeHideAt = 0;
+    g_edgeHideAt = 0;
     g_edgeRow = -1;
+    g_edgeRowN = 0;
 }
 static void EdgeLeave() {
-    g_edgeStillAt = g_edgeHoverAt = g_edgePeekAt = g_edgeHideAt = 0;
-    g_edgeFrozen = false;
+    g_edgeHideAt = 0;
     g_edgeRow = -1;
+    g_edgeRowN = 0;
     g_edgeState = EDGE_IDLE;
     g_edgeHy = EdgeHome();
-    g_edgeZonePrev = false;
 }
 static void EdgeOpenPanel() {
     ShowPanel();
@@ -5643,41 +5762,36 @@ static void EdgeClickRow(const UIRow& r, int idx) {
 }
 /// 一次点击落在谁身上。返回 true＝已处理（用于日志）。
 static bool EdgeClick(float lx, float ly, double now) {
-    const ERect card = EdgeCardRect();
-    if (g_edgeState == EDGE_PEEK) {
-        if (!Inside(card, lx, ly)) {   // 点卡外：收起（稿子的全局 click）
-            EdgeClose(now, "卡外一击");
-            return true;
-        }
-        const float yIn = ly - card.y;
-        if (yIn >= 38.0f && yIn < 38.0f + 44.0f * (float)g_edgeRowN) {
-            const int idx = (int)((yIn - 38.0f) / 44.0f);
-            const std::vector<const UIRow*> rows = EdgePeekRows();
-            if (idx >= 0 && idx < (int)rows.size()) {
-                printf("[边缘] 点预览卡第 %d 行：%s\n", idx + 1, rows[(size_t)idx]->title.c_str());
-                fflush(stdout);
-                EdgeClickRow(*rows[(size_t)idx], idx);
-                return true;
-            }
-        }
-        EdgeOpenPanel();   // 表头 / 页脚：进面板
-        return true;
-    }
-    if (Inside(EdgeActiveRect(), lx, ly)) {
+    if (Inside(EdgeHandleRect(), lx, ly)) {   // 舱与那条箭头：直接进面板
         EdgeOpenPanel();
         return true;
     }
-    return false;
+    if (g_edgeState != EDGE_PEEK) return false;
+    const ERect card = EdgeCardRect();
+    if (!Inside(card, lx, ly)) {   // 展开后点缝里：收起（稿子的全局 click）
+        EdgeClose(now, "卡外一击");
+        return true;
+    }
+    const float yIn = ly - card.y;
+    if (yIn >= 38.0f && yIn < 38.0f + 44.0f * (float)g_edgeRowN) {
+        const int idx = (int)((yIn - 38.0f) / 44.0f);
+        const std::vector<const UIRow*> rows = EdgePeekRows();
+        if (idx >= 0 && idx < (int)rows.size()) {
+            printf("[边缘] 点预览卡第 %d 行：%s\n", idx + 1, rows[(size_t)idx]->title.c_str());
+            fflush(stdout);
+            EdgeClickRow(*rows[(size_t)idx], idx);
+            return true;
+        }
+    }
+    EdgeOpenPanel();   // 表头 / 页脚：进面板
+    return true;
 }
 
 static void EdgeInput(double now, float gx, float gy, bool have) {
     if (!have) return;
     const float lx = gx - (float)EdgeWinX();
     const float ly = gy - (float)EdgeWinY();
-    const bool inZone = lx >= (float)kEdgeW - 9.0f &&
-                        ly >= EdgeZoneTop() && ly <= EdgeZoneBot();
-    const bool entered = inZone && !g_edgeZonePrev;
-    g_edgeZonePrev = inZone;
+    EdgeChipRows();   // 舱的高度由这一列图标决定：先量，后面判命中才用得上真几何
 
     // 取证：状态由环境变量钉死，不跑计时器；只按逻辑指针更新行悬停与点击。
     if (g_edgeForce >= 0) {
@@ -5694,62 +5808,33 @@ static void EdgeInput(double now, float gx, float gy, bool have) {
         return;
     }
 
-    const bool overAct = EdgeWantsMouse(lx, ly);
-    const bool alive = inZone || overAct || EdgeHandleBand(lx, ly);
-    if (alive) {
-        g_edgeHideAt = 0;
-        if (g_edgeState == EDGE_IDLE) {
-            if (entered) g_edgeStillAt = now + 0.08;
-        } else if (g_edgeState == EDGE_PENDING || g_edgeState == EDGE_IDLEHOVER) {
-            if (inZone && !g_edgeFrozen) {
-                const float hy = EdgeClampHy(ly);
-                if (std::fabs(hy - g_edgeHy) > 0.25f) g_edgeHy = hy;
-            }
-        } else if (g_edgeState == EDGE_PEEK) {
-            const ERect card = EdgeCardRect();
-            g_edgeRow = Inside(card, lx, ly) ? (int)((ly - card.y - 38.0f) / 44.0f) : -1;
-            if (g_edgeRow < 0 || g_edgeRow >= g_edgeRowN) g_edgeRow = -1;
+    const bool onHandle = Inside(EdgeHandleRect(), lx, ly);
+    // 唤出带：右缘 34pt、舱位上下各 80pt。指针一进这条带，细线就开始往胶囊长；
+    // 它比胶囊宽得多，所以「推过来」这件事不会因为差一两 pt 而落空。
+    g_edgeNear = onHandle || (lx >= (float)kEdgeW - kEdgeRevealX &&
+                              std::fabs(ly - g_edgeHy) <= kEdgeRevealY);
+    if (g_edgeState == EDGE_PEEK) {
+        const ERect card = EdgeCardRect();
+        g_edgeRow = Inside(card, lx, ly) ? (int)((ly - card.y - 38.0f) / 44.0f) : -1;
+        if (g_edgeRow < 0 || g_edgeRow >= g_edgeRowN) g_edgeRow = -1;
+        if (EdgeWantsMouse(lx, ly)) {
+            g_edgeHideAt = 0;
+        } else if (g_edgeHideAt == 0) {
+            g_edgeHideAt = now + 0.42;
         }
+        if (g_edgeHideAt > 0 && now >= g_edgeHideAt) EdgeClose(now, "离开灯舱");
     } else {
-        if (g_edgeStillAt > 0) g_edgeStillAt = 0;
-        if (g_edgeHideAt == 0) {
-            const double d = g_edgeState == EDGE_PEEK ? 0.42
-                           : g_edgeState == EDGE_HOVER ? 0.28
-                           : (g_edgeState == EDGE_PENDING || g_edgeState == EDGE_IDLEHOVER) ? 0.16 : 0.0;
-            if (d > 0) g_edgeHideAt = now + d;
+        g_edgeHideAt = 0;
+        g_edgeRow = -1;
+        // 指针压到舱上就展，不再先等 120ms（11-02 用户实拍：「移过去半天才展示」）。
+        // 清单空了才不展——卡要摆的就是这份清单，空着展出来是张空卡。
+        if (onHandle && EdgePendingN() > 0) {
+            EdgePeekRows();   // 先量行数，卡片高度进场那一帧就得是对的
+            EdgeSetState(EDGE_PEEK, now, "指针落到灯舱");
         }
     }
 
-    if (g_edgeState == EDGE_IDLE && g_edgeStillAt > 0 && now >= g_edgeStillAt) {
-        g_edgeStillAt = 0;
-        g_edgeHy = EdgeClampHy(ly);
-        g_edgeFrozen = false;
-        if (EdgeCount() > 0) {
-            EdgeSetState(EDGE_PENDING, now, "停 80ms");
-            g_edgeHoverAt = now + 0.12;
-        } else {
-            EdgeSetState(EDGE_IDLEHOVER, now, "停 80ms（0 条）");
-        }
-    }
-    if (g_edgeState == EDGE_PENDING && g_edgeHoverAt > 0 && now >= g_edgeHoverAt) {
-        g_edgeHoverAt = 0;
-        g_edgeFrozen = true;
-        EdgeSetState(EDGE_HOVER, now, "停 120ms");
-        g_edgePeekAt = now + 0.32;
-    }
-    if (g_edgeState == EDGE_HOVER && g_edgePeekAt > 0 && now >= g_edgePeekAt) {
-        // 稿子的展开只看「还停在边上」：指针留在右缘那条 9pt 热区里也算，不要求已经压到签上。
-        if (alive) {
-            g_edgePeekAt = 0;
-            g_edgeFrozen = true;
-            EdgeSetState(EDGE_PEEK, now, "停 320ms");
-        } else {
-            g_edgePeekAt = 0;   // 已经离开手柄：让它按 hover 的 280ms 自己收
-        }
-    }
-    if (g_edgeHideAt > 0 && now >= g_edgeHideAt) EdgeClose(now, "离区超时");
-
-    if (inZone || overAct) {
+    if (EdgeWantsMouse(lx, ly)) {
         const bool down = ap_mouse_down();
         const bool clicked = down && !g_edgeDownPrev;
         g_edgeDownPrev = down;
@@ -5760,126 +5845,313 @@ static void EdgeInput(double now, float gx, float gy, bool have) {
 }
 
 // ── 绘制原子 ────────────────────────────────────────────────────────────────
-static const ImU32 kEdgeSteel   = IM_COL32(144, 174, 212, 255);   // #90AED4
-static const ImU32 kEdgeSteelHi = IM_COL32(195, 212, 238, 255);   // #C3D4EE
-static const ImU32 kEdgeSteelLo = IM_COL32(143, 169, 206, 255);   // #8FA9CE
-static const ImU32 kEdgeInk     = IM_COL32(237, 238, 242, 255);   // #EDEEF2
-static const ImU32 kEdgeInk2    = IM_COL32(154, 156, 165, 255);   // #9A9CA5
-static const ImU32 kEdgeInk3    = IM_COL32(107, 109, 118, 255);   // #6B6D76
-static const ImU32 kEdgeRowInk  = IM_COL32(230, 232, 238, 255);   // #E6E8EE
-static const ImU32 kEdgeAgeInk  = IM_COL32(139, 142, 152, 255);   // #8B8E98
-static const ImU32 kEdgeAllInk  = IM_COL32(169, 196, 232, 255);   // #A9C4E8
-static const ImU32 kEdgeOpenInk = IM_COL32(195, 212, 238, 255);   // #C3D4EE
-static const ImU32 kEdgeGlass   = IM_COL32(12, 14, 18, 230);      // rgba(12,14,18,.90)
-static const ImU32 kEdgeGlassB  = IM_COL32(14, 16, 20, 235);      // rgba(14,16,20,.92)
-static const ImU32 kEdgeHair    = IM_COL32(255, 255, 255, 31);    // rgba(255,255,255,.12)
-static const ImU32 kEdgeHairB   = IM_COL32(255, 255, 255, 26);    // rgba(255,255,255,.10)
-static const ImU32 kEdgeHairS   = IM_COL32(255, 255, 255, 15);    // rgba(255,255,255,.06)
+// 每条颜色后面写着它抄自稿子的哪一句；alpha 都是 声明值×255 四舍五入，没有自己加的。
+static const ImU32 kEdgeSteelHi = IM_COL32(195, 212, 238, 255);   // --steel-hi #C3D4EE
+static const ImU32 kEdgeSteelLo = IM_COL32(143, 169, 206, 255);   // --steel-lo #8FA9CE
+// 11-02：右缘三块（舱／小条／预览卡）不再半透明，直接取面板那两档实心色。
+// 稿子的 rgba(15,17,23,.50)/.44 与 rgba(14,16,22,.62) 是「桌面被 backdrop-filter 压暗后再叠」，
+// 我们拿不到窗口背后的像素：压在用户那张白 Chrome 页上合成出 RGB(97,99,103) 的灰，
+// 卡上四支字有三条掉到 WCAG 4.5 以下（表头 2.89／时间 1.88／页脚 1.32），而面板的卡是
+// kSurf2 #161B22（同一套字 8.15／5.29／3.72）。实心之后右缘与面板是同一副材料，
+// 颜色也不再随桌面壁纸漂移。代价：右缘不再"透出"桌面——那层通透本来也是假的。
+static const ImU32 kDockGlass   = kSurf;    // 舱体（静止）＝面板 .rail 底 #12161C
+static const ImU32 kDockGlassOn = kSurf2;   // peek 态升一档＝面板的悬停/选中档 #161B22
+static const ImU32 kSliverGlass = kSurf;    // 收成小条时与静止舱同一档
+static const ImU32 kCardGlass   = kSurf2;   // 预览卡＝面板的卡底
+static const ImU32 kAmberHi     = IM_COL32(243, 183, 90, 255);    // .count{…#F3B75A}
+static const ImU32 kAmberLo     = IM_COL32(217, 141, 36, 255);    // .count{…#D98D24}
+static const ImU32 kAmberInk    = IM_COL32(43, 26, 2, 255);       // .count b{color:#2B1A02}
+static const ImU32 kMarkInk     = IM_COL32(240, 244, 251, 235);   // .agents{color:rgba(240,244,251,.92)}
+static const ImU32 kRowMarkInk  = IM_COL32(228, 233, 242, 204);   // .pk-row .ag{color:rgba(228,233,242,.80)}
+static const ImU32 kChevInk     = IM_COL32(255, 255, 255, 133);   // .openbtn{color:rgba(255,255,255,.52)}
+static const ImU32 kChevInkOn   = IM_COL32(255, 255, 255, 219);   // peek 态 .86
+static const ImU32 kChevInkSlim = IM_COL32(255, 255, 255, 143);   // .sliver{color:rgba(255,255,255,.56)}
+static const ImU32 kHeadTitle   = IM_COL32(174, 180, 192, 255);   // .pk-h .t{color:#AEB4C0}
+static const ImU32 kHeadSort    = IM_COL32(120, 128, 143, 255);   // .pk-h .sort{color:#78808F}
+static const ImU32 kRowTitle    = IM_COL32(228, 231, 238, 255);   // .pk-row .ti{color:#E4E7EE}
+static const ImU32 kRowAge      = IM_COL32(136, 144, 160, 255);   // .pk-row .age{color:#8890A0}
+static const ImU32 kRowOpen     = IM_COL32(169, 196, 232, 230);   // .pk-row .open{color:#A9C4E8;opacity:.9}
+static const ImU32 kFootFresh   = IM_COL32(110, 118, 134, 255);   // .pk-f .fresh{color:#6E7686}
+static const ImU32 kFootAll     = IM_COL32(169, 196, 232, 255);   // .pk-f .all{color:#A9C4E8}
 
-/// CSS 的 1px 描边落在半像素上；圆角用 AddRect 的 rounding 就够（半径都 < 半高）。
+/// CSS 的 0.5px 描边落在半像素上：AddRect 的 thickness 直接给 .5 就是这一条。
 static void EdgeStroke(ImDrawList* dl, const ERect& r, ImU32 col, float rad, float th = 1.0f) {
     dl->AddRect(ImVec2(r.x + th * 0.5f, r.y + th * 0.5f),
                 ImVec2(r.x + r.w - th * 0.5f, r.y + r.h - th * 0.5f), col, rad, 0, th);
 }
-/// 左侧渐变轨：按 0.5pt 横带切，每带左端从圆角轮廓起步（溢出的部分被卡片形状裁掉）。
-static void EdgeRail(ImDrawList* dl, const ERect& r, float rad, float railW, ImU32 top, ImU32 bot,
-                     int alpha = 255) {
-    const float step = 0.5f;
-    for (float yy = r.y; yy < r.y + r.h; yy += step) {
-        const float y0 = yy, y1 = std::fmin(yy + step, r.y + r.h);
-        const float ins = std::fmax(R31InsetAt(y0, r.y, r.h, rad), R31InsetAt(y1, r.y, r.h, rad));
-        const float x0 = r.x + ins, x1 = r.x + railW;
-        if (x1 <= x0) continue;
-        const float t = (y0 + y1) * 0.5f;
-        ImU32 c = MixA(top, bot, (t - r.y) / r.h);
-        if (alpha < 255) c = WithA(c, alpha);
-        dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1 + 0.01f), c);
+/// 落影＝形状与二维高斯的卷积。以前在 GPU 上现算：一圈圈套起来的矩形，每圈沿边再切成渐变条。
+/// 三代都留下台阶——10:42 白桌面上四块矩形鬼影（带按「那条边中段」一个常数铺）；11:23 断点列上
+/// 一排 1–5 灰阶的竖纹（相邻渐变条在共边上各少半覆盖）；11:37 整片等高梯田（改成一层套一层的
+/// 等高矩形后，每层自己的边界就成了台阶）。根因是同一个：连续场由有限个仿射片元拼出来，拼缝
+/// 就是台阶，换一种切法只是换一种缝。
+/// 现在把卷积挪到 CPU 上，烘成一张只存浓淡的纹理（按形状缓存，只在形状变了的那一帧重烘），
+/// 一帧发一个带纹理的四边形：双线性连续，没有缝可留。纹理与颜色、浓淡、位置、位移 dy 都无关——
+/// RGB 恒白、A 存覆盖率，颜色和 a0 由顶点色乘进去（本机后端的 shader 就是 Frag_Color * texel）。
+/// 算法：纵轴先积成闭式（形状在第 u 列是区间 [-h(u),h(u)]，一竖条对高斯的积分＝两个 erf），
+/// 再沿横轴对它做一次高斯卷积（中点法，步长＝纹素）。与逐点二维积分同值，但一次烘的 erf 从
+/// 60 万次降到 20 万次，而且只在重建时跑。
+/// 形状内那一片在烘完置 0：CSS 的 box-shadow 被元素自己的底挡在背后，透不上来（实测 .dock 正中
+/// α=0.503 正是声明的 .50 底）。预览卡入场那 190ms 底是半透明的，不置零就会在卡里糊出一层墨。
+/// 置零按**没下移的形状**裁——稿子藏掉的是元素底下那块，不是「影」底下那块：11:47 第一版按
+/// 下移后的形状裁，卡下方 dy 那一条影被整条抹掉，白桌面上描出一圈比卡还大的圆角轮廓线。
+/// 所以纹理的坐标原点取在形状形心（不是影本体形心），dy 烘进图里，四边形也按形心摆。
+static GLuint BakeShadowTex(float w, float h, float rr, float sig, float dy, float texel,
+                            int& pw, int& ph) {
+    const float halfW = w * 0.5f, halfH = h * 0.5f;
+    const float ext = 3.6f * sig;                                  // 3.6σ 外覆盖率 <0.02%，截在这
+    pw = std::max(2, (int)std::ceil(2.0f * (halfW + ext) / texel));
+    ph = std::max(2, (int)std::ceil(2.0f * (halfH + ext + std::fabs(dy)) / texel));
+    const int nj = std::max(1, (int)std::ceil(2.0f * halfW / texel));   // 形状横轴切 nj 格
+    if (((pw - nj) & 1) != 0) pw++;                                // 两套栅格同相位：格心差整数个纹素
+    const int delta = (pw - nj) / 2;
+    const int taps = std::max(1, (int)std::ceil(ext / texel));     // 核的半宽（格）
+    const float inv = 1.0f / (sig * kSqrt2), s2 = 2.0f * sig * sig;
+    const float ksc = texel / (sig * 2.5066282746f);               // 1/(σ√2π) × 步长
+
+    std::vector<float> kern((size_t)pw + nj, 0.0f);                // 下标 = (i - j) + nj
+    for (int p = -(nj - 1); p <= pw - 1; p++) {
+        const float t = ((float)p - (float)delta) * texel;
+        if (std::fabs(t) > ext) continue;
+        kern[(size_t)(p + nj)] = ksc * std::exp(-t * t / s2);
     }
+    std::vector<float> hy((size_t)ph * nj, 0.0f);                  // hy[k*nj+j]：第 j 竖条在第 k 行的纵向覆盖
+    for (int j = 0; j < nj; j++) {
+        const float u = ((float)j + 0.5f - 0.5f * (float)nj) * texel;
+        const float o = std::min(std::fabs(u) - (halfW - rr), rr);
+        const float hh = o <= 0.0f ? halfH
+                       : (halfH - rr) + std::sqrt(std::max(0.0f, rr * rr - o * o));
+        for (int k = 0; k < ph; k++) {
+            const float v = ((float)k + 0.5f - 0.5f * (float)ph) * texel - dy;   // 影本体下移 dy
+            hy[(size_t)k * nj + j] = 0.5f * ((float)std::erf((hh - v) * inv)
+                                             + (float)std::erf((hh + v) * inv));
+        }
+    }
+    std::vector<unsigned char> rgba((size_t)pw * ph * 4, 255);      // RGB 恒白，浓淡全在 A
+    for (int k = 0; k < ph; k++) {
+        const float* src = &hy[(size_t)k * nj];
+        unsigned char* dst = &rgba[(size_t)k * pw * 4];
+        const float y = ((float)k + 0.5f - 0.5f * (float)ph) * texel;
+        const bool yin = std::fabs(y) <= halfH;
+        for (int i = 0; i < pw; i++) {
+            int j0 = i - delta - taps, j1 = i - delta + taps + 1;
+            if (j0 < 0) j0 = 0;
+            if (j1 > nj) j1 = nj;
+            float acc = 0.0f;
+            for (int j = j0; j < j1; j++) acc += src[j] * kern[(size_t)(i - j + nj)];
+            const float x = ((float)i + 0.5f - 0.5f * (float)pw) * texel;
+            const float qx = std::fabs(x) - (halfW - rr), qy = std::fabs(y) - (halfH - rr);
+            if (yin && std::fabs(x) <= halfW &&
+                (qx <= 0.0f || qy <= 0.0f || qx * qx + qy * qy <= rr * rr)) acc = 0.0f;
+            const float a = acc * 255.0f + 0.5f;
+            dst[i * 4 + 3] = (unsigned char)(a < 0.0f ? 0 : (a > 255.0f ? 255.0f : a));
+        }
+    }
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pw, ph, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
 }
-/// 玻璃卡：外投影 → 底 → 描边 → 顶沿内侧高光。尺寸小，投影用 GlowRect 的软边就够。
+
+/// 落影纹理的缓存：键是**形状**（尺寸／夹过的圆角／σ／位移 dy／纹素），与颜色、浓淡、摆在哪都无关。
+/// 纹理是 GL 资源，换窗口就是另一个命名空间（离屏取证自己起一个 context），键里必须带 context。
+struct ShadowTex {
+    float w = 0, h = 0, rr = 0, sig = 0, dy = 0, texel = 0;
+    GLFWwindow* ctx = nullptr;
+    GLuint tex = 0;
+    int pw = 0, ph = 0;
+};
+static std::vector<ShadowTex> g_shadowTex;
+
+/// 灯舱／预览卡／琥珀胶囊的落影。稿子：`box-shadow: 0 18px 40px rgba(0,0,0,.34), 0 3px 10px …`
+/// ——CSS 的 blur 值是高斯直径，σ＝blur/2；dy 已经烘进图里，四边形就按形状的形心摆。
+static void EdgeShadow(ImDrawList* dl, const ERect& r, float rad, float blur, float dy, ImU32 col) {
+    const float sig = blur * 0.5f;
+    if (sig < 0.3f || (col >> 24) == 0 || r.w <= 0.0f || r.h <= 0.0f) return;
+    GLFWwindow* ctx = glfwGetCurrentContext();
+    if (!ctx) return;
+    const float halfW = r.w * 0.5f, halfH = r.h * 0.5f;
+    const float rr = std::min(rad, std::min(halfW, halfH));   // CSS 的圆角也这么夹：.sliver 声明 12 实得 11
+    const float texel = std::max(0.5f, std::min(1.0f, sig * 0.125f));   // 每个 σ 至少 8 个采样，且不粗于 1pt
+    ShadowTex* e = nullptr;
+    for (auto& c : g_shadowTex)
+        if (c.ctx == ctx && c.w == r.w && c.h == r.h && c.rr == rr && c.sig == sig &&
+            c.dy == dy && c.texel == texel) { e = &c; break; }
+    if (!e) {
+        if (g_shadowTex.size() > 24) {
+            for (auto& c : g_shadowTex)
+                if (c.ctx == ctx && c.tex) glDeleteTextures(1, &c.tex);
+            g_shadowTex.clear();
+        }
+        ShadowTex ne;
+        ne.w = r.w; ne.h = r.h; ne.rr = rr; ne.sig = sig; ne.dy = dy;
+        ne.texel = texel; ne.ctx = ctx;
+        ne.tex = BakeShadowTex(r.w, r.h, rr, sig, dy, texel, ne.pw, ne.ph);
+        g_shadowTex.push_back(ne);
+        e = &g_shadowTex.back();
+    }
+    const float cx = r.x + halfW, cy = r.y + halfH;
+    const float sx = 0.5f * (float)e->pw * texel, sy = 0.5f * (float)e->ph * texel;
+    dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)e->tex),
+                 ImVec2(cx - sx, cy - sy), ImVec2(cx + sx, cy + sy),
+                 ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), col);
+}
+/// 一块右缘材料 = 落影 → 实心底 → 0.5px 内白环 → 顶沿内侧那 1px 受光（box-shadow 那三条）。
+/// 受光只画圆角轮廓在这一行允许的那段弦：.dock 的半径＝半个宽，顶上是圆弧不是平边，
+/// 画满 44pt 会顶出轮廓，在透明窗口上变成一条亮胡子——那正是上一版「边太丑」的样子。
 static void EdgeGlassBody(ImDrawList* dl, const ERect& r, float rad, ImU32 fill,
-                          float blur1, float dy1, int a1, float blur2, float dy2, int a2, ImU32 hair) {
-    if (a1 > 0)
-        GlowRect(dl, ImVec2(r.x, r.y + dy1), ImVec2(r.x + r.w, r.y + r.h + dy1), rad, blur1, 0.0f,
-                 IM_COL32(0, 0, 0, a1));
-    if (a2 > 0)
-        GlowRect(dl, ImVec2(r.x, r.y + dy2), ImVec2(r.x + r.w, r.y + r.h + dy2), rad, blur2, 0.0f,
-                 IM_COL32(0, 0, 0, a2));
+                           float blur, float dy, ImU32 shadow, int rimA, int topA) {
+    EdgeShadow(dl, r, rad, blur, dy, shadow);
     GradRound(dl, r.x, r.y, r.w, r.h, rad, fill, fill, 0);
-    // inset 0 1px 0 white/8：只在内侧那半像素，画在描边之前
-    EdgeStroke(dl, r, WithA(IM_COL32_WHITE, 20), rad, 1.0f);
-    EdgeStroke(dl, r, hair, rad, 1.0f);
-}
-static void EdgeShadowText(ImDrawList* dl, float x, float y, const std::string& s, ImU32 col,
-                           int tier, int alpha) {
-    DrawTextRun(dl, x, y + 1.0f, s, g_loc, IM_COL32(0, 0, 0, (int)(alpha * 0.35f)), tier);
-    DrawTextRun(dl, x, y, s, g_loc, col, tier);
-}
-
-static void EdgeDrawQuiet(ImDrawList* dl, double now, float a) {
-    (void)now; (void)a;
-    const ERect r = EdgeQuietRect();
-    const float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
-    const bool lit = EdgeCount() > 0;
-    if (lit) GlowDisc(dl, ImVec2(cx, cy), 3.5f, 10.0f, 0.0f, IM_COL32(144, 174, 212, 71));
-    GlowDisc(dl, ImVec2(cx, cy + 1.0f), 3.5f, 4.0f, 0.0f, IM_COL32(0, 0, 0, lit ? 76 : 71));
-    dl->AddCircle(ImVec2(cx, cy), 4.0f, IM_COL32(0, 0, 0, lit ? 87 : 76), 24, 1.0f);
-    if (lit) GradCircle(dl, ImVec2(cx, cy), 3.5f, kEdgeSteelHi, kEdgeSteelLo, 0);
-    else dl->AddCircleFilled(ImVec2(cx, cy), 3.5f, IM_COL32(255, 255, 255, 66), 24);
-}
-
-static void EdgeDrawBadge(ImDrawList* dl, double now, float a) {
-    const ERect r = EdgeBadgeRect();
-    EdgeGlassBody(dl, r, 10.0f, kEdgeGlass, 28.0f, 10.0f, 107, 3.0f, 1.0f, 89, kEdgeHair);
-    EdgeRail(dl, r, 10.0f, 3.5f, kEdgeSteelHi, kEdgeSteelLo);
-    // .body:after：从轨右边开始的一条 1px 白 10%，右端被圆角裁掉
-    const float x0 = r.x + 3.5f;
-    const float x1 = r.x + r.w - R31InsetAt(r.y + 0.5f, r.y, r.h, 10.0f);
-    if (x1 > x0)
-        dl->AddLine(ImVec2(x0, r.y + 0.5f), ImVec2(x1, r.y + 0.5f), IM_COL32(255, 255, 255, 26), 1.0f);
-    const std::string num = std::to_string(EdgeCount());
-    const float cx = r.x + 3.5f + (r.w - 3.5f) * 0.5f;
-    const float cy = r.y + r.h * 0.5f;
-    EdgeShadowText(dl, cx - TextWidth(num, g_loc, T_S16B) * 0.5f, TextMid(cy, T_S16B, g_loc),
-                   num, IM_COL32(244, 246, 250, 255), T_S16B, 90);
-}
-
-static void EdgeDrawTab(ImDrawList* dl, double now, float a) {
-    const ERect r = EdgeTabRect();
-    EdgeGlassBody(dl, r, 12.0f, kEdgeGlass, 26.0f, 10.0f, 107, 2.0f, 0.0f, 51, kEdgeHair);
-    EdgeRail(dl, r, 12.0f, 2.5f, kEdgeSteelHi, kEdgeSteelLo);
-    const float cx = r.x + 2.5f + (r.w - 2.5f) * 0.5f;
-    const std::string num = std::to_string(EdgeCount());
-    const float ny = r.y + 10.0f + 7.5f;
-    EdgeShadowText(dl, cx - TextWidth(num, g_loc, T_S15B) * 0.5f, TextMid(ny, T_S15B, g_loc),
-                   num, IM_COL32(244, 246, 250, 255), T_S15B, 90);
-    const std::vector<const UIRow*> chips = EdgeChipRows();
-    const int aA = (int)(255.0f * a + 0.5f);
-    float y = r.y + 33.0f;
-    for (const auto* row : chips) {
-        const float x = cx - 10.0f;
-        RAgentTile(dl, x, y, 20.0f, 5.0f, row->hue, row->initial, g_loc, row->agent_id, aA);
-        dl->AddRect(ImVec2(x + 0.25f, y + 0.25f), ImVec2(x + 19.75f, y + 19.75f),
-                    IM_COL32(255, 255, 255, 41 * aA / 255), 5.0f, 0, 0.5f);
-        y += 26.0f;
+    EdgeStroke(dl, r, WithA(IM_COL32_WHITE, rimA), rad, 0.5f);
+    if (topA > 0) {
+        const float ins = R31InsetAt(r.y + 1.0f, r.y, r.h, rad);
+        const float x0 = r.x + ins, x1 = r.x + r.w - ins;
+        if (x1 - x0 > 1.0f)
+            dl->AddLine(ImVec2(x0, r.y + 0.5f), ImVec2(x1, r.y + 0.5f), WithA(IM_COL32_WHITE, topA), 1.0f);
     }
 }
-
-static void EdgeDrawGhost(ImDrawList* dl, double now, float a) {
-    const ERect r = EdgeGhostRect();
-    EdgeGlassBody(dl, r, 11.0f, kEdgeGlass, 28.0f, 10.0f, 107, 3.0f, 1.0f, 89, kEdgeHair);
-    EdgeRail(dl, r, 11.0f, 2.5f, kEdgeSteelHi, kEdgeSteelLo, 158);   // rgba(90,174,212,.62)
-    const std::string g = T("edge_ghost", g_loc);
-    const float cx = r.x + 2.5f + (r.w - 2.5f) * 0.5f;
-    const float cy = r.y + r.h * 0.5f - 0.5f;   // padding-bottom:1px
-    DrawTextRun(dl, cx - TextWidth(g, g_loc, T_S17) * 0.5f, TextMid(cy, T_S17, g_loc),
-                g, g_loc, IM_COL32(255, 255, 255, 184), T_S17);
+/// 稿子那枚展开箭头：viewBox 11×11、`M6.6 2.4 3.8 5.5 l2.8 3.1`、描边 1.35、圆头圆角。
+/// ImGui 的 AddPolyline 没有圆线帽，折点两头各补一颗半径＝线宽一半的实心圆，折角本身也要补
+/// （否则 12pt 处会豁一个口）——与 DrawIcon 同一套补法。
+static void EdgeChevron(ImDrawList* dl, float cx, float cy, float size, ImU32 ink) {
+    const float k = size / 11.0f, th = 1.35f * k;
+    const ImVec2 p[3] = {ImVec2(cx + (6.6f - 5.5f) * k, cy + (2.4f - 5.5f) * k),
+                         ImVec2(cx + (3.8f - 5.5f) * k, cy),
+                         ImVec2(cx + (6.6f - 5.5f) * k, cy + (8.6f - 5.5f) * k)};
+    dl->AddPolyline(p, 3, ink, 0, th);
+    for (int i = 0; i < 3; i++) dl->AddCircleFilled(p[i], th * 0.5f, ink, 10);
 }
 
-static void EdgeDrawPeek(ImDrawList* dl, double now, float a) {
+/// 稿子 LOCK：viewBox 12×12，机身 rect(2.5,5.2,7×4.7,rx1.4)、锁环 M4.3 5.2 V4 a1.7 1.7 0 0 1
+/// 3.4 0 V5.2，两处描边都是 1.15、环腿圆头。size＝.cap2 svg 那个盒子边长（11pt），
+/// 盒子按 viewBox 12 缩放，所以内容整体比盒子窄 1/12——SVG 就是这么渲染的，照抄。
+static void EdgeLockGlyph(ImDrawList* dl, float cx, float cy, float size, ImU32 ink) {
+    const float k = size / 12.0f, th = 1.15f * k, PI = 3.14159265f;
+    auto P = [&](float x, float y) {
+        return ImVec2(cx + (x - 6.0f) * k, cy + (y - 6.0f) * k);
+    };
+    // SVG 的描边压在 path 正中，ImGui 的 AddRect 也一样，所以直接给 rect 那条框线。
+    dl->AddRect(P(2.5f, 5.2f), P(9.5f, 9.9f), ink, 1.4f * k, th);
+    const ImVec2 lo = P(4.3f, 5.2f), hi = P(7.7f, 5.2f);
+    dl->PathLineTo(lo);
+    dl->PathLineTo(P(4.3f, 4.0f));
+    dl->PathArcTo(P(6.0f, 4.0f), 1.7f * k, PI, 2.0f * PI, 16);
+    dl->PathLineTo(P(7.7f, 4.0f));
+    dl->PathLineTo(hi);
+    dl->PathStroke(ink, th);                 // AddPolyline/PathStroke 没有圆线帽：腿端各补一颗
+    dl->AddCircleFilled(lo, th * 0.5f, ink, 8);
+    dl->AddCircleFilled(hi, th * 0.5f, ink, 8);
+}
+/// 稿子 EYE：`M1.4 6S3.2 3.3 6 3.3 10.6 6 10.6 6 8.8 8.7 6 8.7 1.4 6 1.4 6Z`＋瞳孔 r1.25。
+/// S 是光滑续段，首控制点＝上一段第二控制点关于当前点的镜像，四段展开后正是那颗杏仁；
+/// 描边 1.1、stroke-linejoin:round，两个尖角靠补圆实现。
+static void EdgeEyeGlyph(ImDrawList* dl, float cx, float cy, float size, ImU32 ink) {
+    const float k = size / 12.0f, th = 1.1f * k;
+    auto P = [&](float x, float y) {
+        return ImVec2(cx + (x - 6.0f) * k, cy + (y - 6.0f) * k);
+    };
+    const ImVec2 l = P(1.4f, 6.0f), r = P(10.6f, 6.0f);
+    dl->PathLineTo(l);
+    dl->PathBezierCubicCurveTo(P(1.4f, 6.0f), P(3.2f, 3.3f), P(6.0f, 3.3f));
+    dl->PathBezierCubicCurveTo(P(8.8f, 3.3f), r, r);
+    dl->PathBezierCubicCurveTo(r, P(8.8f, 8.7f), P(6.0f, 8.7f));
+    dl->PathBezierCubicCurveTo(P(3.2f, 8.7f), l, l);
+    dl->PathStroke(ink, th, ImDrawFlags_Closed);
+    dl->AddCircleFilled(l, th * 0.5f, ink, 8);
+    dl->AddCircleFilled(r, th * 0.5f, ink, 8);
+    dl->AddCircleFilled(P(6.0f, 6.0f), 1.25f * k, ink, 12);
+}
+/// 一格 .cap2：图标盒子（11pt）紧贴左 padding 6，其后 gap 3.5，再是数字。
+/// .cap2.a{background:linear-gradient(180deg,#F3B75A,#D98D24);color:#2B1A02;
+///   box-shadow:inset 0 0 0 .5px rgba(255,236,201,.55),0 2px 6px rgba(180,110,20,.38)}
+static void EdgeCapAmber(ImDrawList* dl, float cx, float y, const std::string& num) {
+    const ERect c = { cx - EdgeCapW(num) * 0.5f, y, EdgeCapW(num), 20.0f };
+    EdgeShadow(dl, c, 10.0f, 6.0f, 2.0f, IM_COL32(180, 110, 20, 97));
+    GradRound(dl, c.x, c.y, c.w, c.h, 10.0f, kAmberHi, kAmberLo, 0);
+    EdgeStroke(dl, c, IM_COL32(255, 236, 201, 140), 10.0f, 0.5f);
+    EdgeLockGlyph(dl, c.x + 11.5f, c.y + 10.0f, 11.0f, kAmberInk);
+    DrawTextRun(dl, c.x + 20.5f, TextMid(c.y + 10.0f, T_S12B, g_loc), num, g_loc,
+                kAmberInk, T_S12B);           // 600 12px/1，align-items:center
+}
+/// .cap2.s{background:rgba(143,169,206,.14);color:#C3D4EE;
+///   box-shadow:inset 0 0 0 1px rgba(195,212,238,.55)}——这一格没有落影，照抄。
+static void EdgeCapSteel(ImDrawList* dl, float cx, float y, const std::string& num) {
+    const ERect c = { cx - EdgeCapW(num) * 0.5f, y, EdgeCapW(num), 20.0f };
+    const ImU32 fill = IM_COL32(143, 169, 206, 36);
+    GradRound(dl, c.x, c.y, c.w, c.h, 10.0f, fill, fill, 0);
+    EdgeStroke(dl, c, WithA(kEdgeSteelHi, 140), 10.0f, 1.0f);
+    EdgeEyeGlyph(dl, c.x + 11.5f, c.y + 10.0f, 11.0f, kEdgeSteelHi);
+    DrawTextRun(dl, c.x + 20.5f, TextMid(c.y + 10.0f, T_S12B, g_loc), num, g_loc,
+                kEdgeSteelHi, T_S12B);
+}
+
+/// 灯舱本体（稿子 .dock）：44pt 实心舱（kSurf／peek 升 kSurf2），一列——琥珀格「锁 N」（要你动手：待授权＋失败）、
+/// 钢蓝格「眼 N」（今天跑完还没看）、各家剪影、展开箭头。
+/// 数为 0 的那枚不画（11-02 用户拍板：只展示有数字的，任何一个有数字都要出舱）；
+/// 于是舱高、格子列之间的 .g6 都跟着「实际画了几枚」走，不能按两枚写死。
+/// 全程不跟指针走：v5 的舱是常驻的，它自己就是那块「一直在右边」的东西。
+static void EdgeDrawDock(ImDrawList* dl, bool on) {
+    const std::vector<const UIRow*> chips = EdgeChipRows();   // 舱高由这一列决定：量在画之前
+    const ERect r = EdgeDockRect();
+    // 落影收到 14px/α.26：原来 22px σ=11 在浅色桌面上糊出一圈脏边（与小条同一成因，
+    // 11-01 用户实拍点过），实心底之后舱自己就有明确轮廓，不需要那么大的影撑。
+    EdgeGlassBody(dl, r, 22.0f, on ? kDockGlassOn : kDockGlass, 14.0f, 6.0f,
+                  IM_COL32(0, 0, 0, 66), 66, 77);
+    const float cx = r.x + r.w * 0.5f;
+    float y = r.y + 9.0f;                                     // .dock{padding:9px 0}
+    const int amber = EdgeCount(), steel = EdgeUnseenCount();
+    if (amber > 0) {
+        EdgeCapAmber(dl, cx, y, std::to_string(amber));       // 待授权＋失败
+        y += 20.0f;                                           // .cap2{height:20px}
+        if (steel > 0) y += 6.0f;                             // .g6 只在两枚都画出时占位
+    }
+    if (steel > 0) {
+        EdgeCapSteel(dl, cx, y, std::to_string(steel));       // 待查看
+        y += 20.0f;
+    }
+    y += 9.0f;                                                // .g9
+    for (const auto* c : chips) {
+        const float px = MarkPx(c->agent_id);
+        MarkGlyph(dl, cx, y + px * 0.5f, c->agent_id, c->initial, g_loc, px, kMarkInk);
+        y += px + 9.0f;                                       // .col{gap:9px}
+    }
+    EdgeChevron(dl, cx, y + 10.0f, 11.0f, on ? kChevInkOn : kChevInk);   // .g9 ＋ .chev{height:20px}
+}
+/// 静止那一档：贴屏幕右沿的一道细线。没有落影、没有箭头——它只说「这里能推」，
+/// 不承诺任何内容。浅色桌面上它是一条浅灰、深底上是一道中灰，两头都不再是一块死灰。
+static void EdgeDrawNub(ImDrawList* dl, float k) {
+    const int a = (int)(150.0f * k + 0.5f);
+    if (a <= 0) return;
+    const ERect r = EdgeNubRect();
+    dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h),
+                      IM_COL32(140, 145, 154, a), r.w * 0.5f, ImDrawFlags_RoundCornersLeft);
+}
+/// 0 条、指针已到跟前：同一副材质收成 .sliver{width:22px;height:46px;border-radius:12px}，
+/// 只剩那颗箭头。**不投落影**——这一档只在指针到跟前那 0.13 秒里存在，
+/// 那圈 σ=12 的高斯在浅色桌面上糊成一条脏边（11-01 用户实拍指的就是它）。
+static void EdgeDrawSliver(ImDrawList* dl, float a) {
+    const ERect r = EdgeSliverRect(a);
+    const float rad = r.w * 0.5f;
+    const ImU32 glass = kSliverGlass;
+    EdgeGlassBody(dl, r, rad, WithA(glass, (int)(255.0f * a + 0.5f)),
+                  0.0f, 0.0f, IM_COL32(0, 0, 0, 0), (int)(46 * a), (int)(66 * a));
+    EdgeChevron(dl, r.x + r.w * 0.5f, r.y + r.h * 0.5f, 10.0f * a,
+                WithA(kChevInkSlim, (int)(143 * a)));
+}
+
+/// 预览卡（稿子 .peek）：与灯舱同一副实心材料（kSurf2），右沿离屏幕 70pt，靠舱一侧留 12pt 缝。
+/// 每一处的字号／颜色都注了它抄自哪一条声明；行数最多三（等最久的在前）。
+static void EdgeDrawPeek(ImDrawList* dl, double now) {
     const std::vector<const UIRow*> rows = EdgePeekRows();
     const ERect r = EdgeCardRect();
-    // 入场：translateX(12) + 淡入 190ms
+    // 入场：translateX(12) + 淡入 190ms。稿子是 display:none↔block（没有过渡），
+    // 这里留一帧淡入，终态与稿子逐像素一致。
     float p = (float)((now - g_edgeStateAt) / 0.19);
     if (p < 0.0f) p = 0.0f;
     if (p > 1.0f) p = 1.0f;
@@ -5887,98 +6159,123 @@ static void EdgeDrawPeek(ImDrawList* dl, double now, float a) {
     const float dx = 12.0f * (1.0f - ease);
     const int A = (int)(255.0f * ease + 0.5f);
     auto C = [&](ImU32 c) { return WithA(c, (int)(((c >> 24) & 0xFF) * A / 255)); };
-    (void)a;
 
     dl->PushClipRect(ImVec2(0, 0), ImVec2((float)kEdgeW, (float)g_waH), false);
-    // 这里不用 translate 整块重画：卡本身是绝对布局，直接把起点右移 dx 即可。
+    // 卡是绝对布局，入场只把起点右移 dx，不整块平移重画。
     ERect q = r; q.x += dx;
-    GlowRect(dl, ImVec2(q.x, q.y + 26.0f), ImVec2(q.x + q.w, q.y + q.h + 26.0f), 18.0f, 70.0f, 0.0f,
-             C(IM_COL32(0, 0, 0, 140)));
-    GlowRect(dl, ImVec2(q.x, q.y + 2.0f), ImVec2(q.x + q.w, q.y + q.h + 2.0f), 18.0f, 8.0f, 0.0f,
-             C(IM_COL32(0, 0, 0, 102)));
-    GradRound(dl, q.x, q.y, q.w, q.h, 18.0f, C(kEdgeGlassB), C(kEdgeGlassB), 0);
-    EdgeStroke(dl, q, C(kEdgeHairB), 18.0f);
-    // inset 0 1px 0 white/7
-    dl->AddLine(ImVec2(q.x + 18.0f, q.y + 0.5f), ImVec2(q.x + q.w - 18.0f, q.y + 0.5f),
-                C(IM_COL32(255, 255, 255, 18)), 1.0f);
-    // ::before 左轨：top/bottom 各缩 14，宽 2，opacity .85
+    // 落影收到 0 18px 40px／0 3px 10px：原来那对 64px σ=32 的影在浅色桌面上糊出一圈
+    // 约 112pt 的脏边（11-02 用户实拍点的「背景冗余」），比卡本身还显眼。
+    EdgeShadow(dl, q, 18.0f, 40.0f, 18.0f, C(IM_COL32(0, 0, 0, 87)));    // 0 18px 40px rgba(0,0,0,.34)
+    EdgeShadow(dl, q, 18.0f, 10.0f, 3.0f, C(IM_COL32(0, 0, 0, 66)));     // 0 3px 10px rgba(0,0,0,.26)
+    const ImU32 cardFill = C(kCardGlass);
+    GradRound(dl, q.x, q.y, q.w, q.h, 18.0f, cardFill, cardFill, 0);
+    EdgeStroke(dl, q, C(IM_COL32(255, 255, 255, 46)), 18.0f, 0.5f);   // inset …rgba(255,255,255,.18)
+    {
+        const float ins = R31InsetAt(q.y + 1.0f, q.y, q.h, 18.0f);
+        dl->AddLine(ImVec2(q.x + ins, q.y + 0.5f), ImVec2(q.x + q.w - ins, q.y + 0.5f),
+                    C(IM_COL32(255, 255, 255, 61)), 1.0f);            // inset 0 1px 0 rgba(255,255,255,.24)
+    }
+    // .peek:before：左轨宽 2，上下各缩 14，钢蓝渐变，opacity .80
     GradRound(dl, q.x, q.y + 14.0f, 2.0f, q.h - 28.0f, 1.0f,
-              C(WithA(kEdgeSteelHi, 217)), C(WithA(kEdgeSteelLo, 217)), 0);
+              C(WithA(kEdgeSteelHi, 204)), C(WithA(kEdgeSteelLo, 204)), 0);
 
     const float hx = q.x + 16.0f, hr = q.x + q.w - 16.0f;
-    // 表头
+    // 表头 .pk-h{height:38px;padding:0 16px;gap:7px}
     {
         const std::string lead = T("r_needs_you", g_loc);
-        const float ty = TextMid(q.y + 19.0f, T_S12, g_loc);
-        const float ex = DrawTextRun(dl, hx, ty, lead, g_loc, C(kEdgeInk2), T_S12);
-        const std::string cnt = std::to_string(EdgeCount());
-        DrawTextRun(dl, ex + 7.0f, TextMid(q.y + 19.0f, T_S12B, g_loc), cnt, g_loc,
-                    C(kEdgeInk), T_S12B);
+        const float ex = DrawTextRun(dl, hx, TextMid(q.y + 19.0f, T_S12, g_loc), lead, g_loc,
+                                     C(kHeadTitle), T_S12);
+        // .pk-h .c{padding:3px 7px;border-radius:6px}＋同一支琥珀渐变＋顶沿 1px 白 .5
+        // 表头那颗数＝卡上这份清单的总条数，与面板「待处理」同一口径（介入＋失败＋跑完没看）；
+        // 舱上那两枚胶囊是它的拆分，不是另一个数。
+        const std::string cnt = std::to_string(EdgePendingN());
+        const ERect pill = { ex + 7.0f, q.y + 19.0f - 9.0f,
+                             TextWidth(cnt, g_loc, T_S12B) + 14.0f, 18.0f };
+        GradRound(dl, pill.x, pill.y, pill.w, pill.h, 6.0f, C(kAmberHi), C(kAmberLo), 0);
+        dl->AddLine(ImVec2(pill.x + 4.0f, pill.y + 0.5f), ImVec2(pill.x + pill.w - 4.0f, pill.y + 0.5f),
+                    C(IM_COL32(255, 255, 255, 128)), 1.0f);
+        DrawTextRun(dl, pill.x + 7.0f, TextMid(q.y + 19.0f, T_S12B, g_loc), cnt, g_loc,
+                    C(kAmberInk), T_S12B);
         const std::string sort = T("r_longest_first", g_loc);
-        DrawTextRight(dl, hr, TextMid(q.y + 19.0f, T_S10, g_loc), sort, g_loc, C(kEdgeInk3), T_S10);
+        DrawTextRight(dl, hr, TextMid(q.y + 19.0f, T_S11, g_loc), sort, g_loc, C(kHeadSort), T_S11);
         dl->AddLine(ImVec2(q.x + 1.0f, q.y + 37.5f), ImVec2(q.x + q.w - 1.0f, q.y + 37.5f),
-                    C(kEdgeHairS), 1.0f);
+                    C(IM_COL32(255, 255, 255, 18)), 1.0f);          // border-bottom rgba(255,255,255,.07)
     }
-    // 行
-    const float rowX0 = q.x + 16.0f, rowX1 = q.x + q.w - 14.0f;
+    // 行 .pk-row{padding:11px 16px;gap:10px}：量出来的内容中线在 y0+21.5
+    const float rowX0 = q.x + 16.0f, rowX1 = q.x + q.w - 16.0f;
     for (int i = 0; i < (int)rows.size(); i++) {
         const UIRow& row = *rows[(size_t)i];
-        const float y0 = q.y + 38.0f + 44.0f * (float)i;
+        const float y0 = q.y + 38.0f + 44.0f * (float)i, cy = y0 + 21.5f;
         const bool hot = g_edgeRow == i;
-        if (hot) dl->AddRectFilled(ImVec2(q.x + 1.0f, y0), ImVec2(q.x + q.w - 1.0f, y0 + 44.0f),
-                                   C(IM_COL32(255, 255, 255, 14)));
-        RAgentTile(dl, rowX0, y0 + 13.0f, 18.0f, 5.0f, row.hue, row.initial, g_loc, row.agent_id, A);
+        if (hot)
+            dl->AddRectFilled(ImVec2(q.x + 1.0f, y0), ImVec2(q.x + q.w - 1.0f, y0 + 44.0f),
+                              C(IM_COL32(255, 255, 255, 14)));      // .pk-row:hover{rgba(255,255,255,.055)}
+        MarkGlyph(dl, rowX0 + 10.0f, cy, row.agent_id, row.initial, g_loc, 20.0f, C(kRowMarkInk));
         const std::string age = Dur(row.age, g_loc);
         const std::string open = T("edge_open", g_loc);
-        const float rightW = hot ? TextWidth(open, g_loc, T_S105) : TextWidth(age, g_loc, T_S105);
-        const float tmax = rowX1 - rightW - 10.0f - (rowX0 + 18.0f + 10.0f);
+        const float rightW = hot ? TextWidth(open, g_loc, T_S11) : TextWidth(age, g_loc, T_S11);
+        const float tmax = rowX1 - rightW - 10.0f - (rowX0 + 30.0f);
         const std::string title = ClipToWidth(row.title.empty() ? row.project : row.title,
-                                              tmax > 8.0f ? tmax : 8.0f, g_loc, T_QT);
-        DrawTextRun(dl, rowX0 + 28.0f, TextMid(y0 + 22.0f, T_QT, g_loc), title, g_loc,
-                    C(kEdgeRowInk), T_QT);
-        if (hot)
-            DrawTextRight(dl, rowX1, TextMid(y0 + 22.0f, T_S105, g_loc), open, g_loc,
-                          C(kEdgeOpenInk), T_S105);
+                                              tmax > 8.0f ? tmax : 8.0f, g_loc, T_TITLE);
+        DrawTextRun(dl, rowX0 + 30.0f, TextMid(cy, T_TITLE, g_loc), title, g_loc, C(kRowTitle), T_TITLE);
+        if (hot)   // .pk-row:hover .age{display:none}／.open{display:inline}
+            DrawTextRight(dl, rowX1, TextMid(cy, T_S11, g_loc), open, g_loc, C(kRowOpen), T_S11);
         else
-            DrawTextRight(dl, rowX1, TextMid(y0 + 22.0f, T_S105, g_loc), age, g_loc,
-                          C(kEdgeAgeInk), T_S105);
+            DrawTextRight(dl, rowX1, TextMid(cy, T_S11, g_loc), age, g_loc, C(kRowAge), T_S11);
+        dl->AddLine(ImVec2(q.x + 1.0f, y0 + 43.5f), ImVec2(q.x + q.w - 1.0f, y0 + 43.5f),
+                    C(IM_COL32(255, 255, 255, 13)), 1.0f);          // border-bottom rgba(255,255,255,.05)
     }
-    // 页脚
+    // 页脚 .pk-f{padding:10px 16px 12px}
     {
         const float fy = q.y + 38.0f + 44.0f * (float)rows.size();
-        dl->AddLine(ImVec2(q.x + 1.0f, fy + 0.5f), ImVec2(q.x + q.w - 1.0f, fy + 0.5f),
-                    C(kEdgeHairS), 1.0f);
         char fresh[64];
         snprintf(fresh, sizeof fresh, T("edge_updated", g_loc), ClockOf(g_pd.now).c_str());
-        DrawTextRun(dl, q.x + 16.0f, TextMid(fy + 16.0f, T_S10, g_loc), fresh, g_loc,
-                    C(kEdgeInk3), T_S10);
+        DrawTextRun(dl, hx, TextMid(fy + 16.0f, T_S105, g_loc), fresh, g_loc, C(kFootFresh), T_S105);
         char all[64];
-        snprintf(all, sizeof all, T("edge_all", g_loc), EdgeCount());
-        DrawTextRight(dl, q.x + q.w - 14.0f, TextMid(fy + 16.0f, T_S11, g_loc), all, g_loc,
-                      C(kEdgeAllInk), T_S11);
+        snprintf(all, sizeof all, T("edge_all", g_loc), EdgePendingN());
+        DrawTextRight(dl, hr, TextMid(fy + 16.0f, T_S11, g_loc), all, g_loc, C(kFootAll), T_S11);
     }
     dl->PopClipRect();
 }
 
+/// 细线↔胶囊的进度：进带 130ms、离带 200ms（收回比展开慢，手在边缘蹭来蹭去时不会抖）。
+/// 有待介入时恒为 1——那块舱是提醒的本体，不能藏。
+static void EdgeRevealStep(double now, bool hasWork) {
+    bool want = hasWork || g_edgeNear || g_edgeState == EDGE_PEEK;
+    if (g_edgeRevealForce >= 0) want = g_edgeRevealForce > 0;
+    if (g_edgeRevealAt < 0) g_edgeRevealAt = now;
+    const float dt = (float)std::min(0.05, std::max(0.0, now - g_edgeRevealAt));
+    g_edgeRevealAt = now;
+    const float to = want ? 1.0f : 0.0f;
+    if (g_edgeReveal == to) return;
+    g_edgeRevealTo = to;
+    const float sp = 1.0f / (to > g_edgeReveal ? 0.13f : 0.20f);
+    g_edgeReveal = to > g_edgeReveal ? std::min(to, g_edgeReveal + dt * sp)
+                                     : std::max(to, g_edgeReveal - dt * sp);
+    if (g_edgeReveal != to) g_edgeRevealUntil = now + 0.05;
+}
+
+/// 灯舱一直在：0 条收成小条，有待处理就是那块 44pt 的舱；展开时舱换成 .56 的底、箭头提到 .86，
+/// 预览卡后画——稿子的 z-index 是 .dock 30／.peek 45，卡的落影压在舱那一侧。
 static void DrawEdge(ImDrawList* dl, double now) {
-    float a = 1.0f;
-    const double span = g_edgeState == EDGE_PEEK ? 0.19 : 0.15;
-    const double p = (now - g_edgeStateAt) / span;
-    if (p < 1.0) a = (float)(p < 0 ? 0 : (1.0 - (1.0 - p) * (1.0 - p)));
-    switch (g_edgeState) {
-        case EDGE_PENDING:   EdgeDrawBadge(dl, now, a); break;
-        case EDGE_HOVER:     EdgeDrawTab(dl, now, a); break;
-        case EDGE_PEEK:      EdgeDrawPeek(dl, now, a); break;
-        case EDGE_IDLEHOVER: EdgeDrawGhost(dl, now, a); break;
-        default:             EdgeDrawQuiet(dl, now, a); break;
+    const bool peek = g_edgeState == EDGE_PEEK;
+    const bool has = EdgePendingN() > 0;
+    EdgeRevealStep(now, has);
+    if (has) {
+        EdgeDrawDock(dl, peek);
+    } else {
+        const float a = g_edgeReveal;
+        if (a < 1.0f) EdgeDrawNub(dl, 1.0f - a);
+        if (a > 0.004f) EdgeDrawSliver(dl, a);
     }
+    if (peek) EdgeDrawPeek(dl, now);
 }
 
 static const char* WinModeName(int m) {
     switch (m) {
         case WIN_PANEL:  return "面板";
         case WIN_BANNER: return "横幅";
-        case WIN_EDGE:   return "手柄";
+        case WIN_EDGE:   return "灯舱";
         default:         return "收着";
     }
 }
@@ -6022,13 +6319,11 @@ static int ApplyWindowMode() {
             glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_TRUE);
             glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
             g_edgePass = true;
-            // AT 与指针一样是绝对屏幕 y，手柄几何却是窗口局部坐标：不折算会整条低一个菜单栏。
-            g_edgeHy = g_edgeAtForce >= 0 ? EdgeClampHy(g_edgeAtForce - (float)EdgeWinY())
-                                          : EdgeHome();
+            // 灯舱钉在工作区竖直居中，不再跟指针：只有窗口高度变了才重算。
+            g_edgeHy = EdgeHome();
             g_edgeState = g_edgeForce >= 0 ? g_edgeForce : EDGE_IDLE;
             g_edgeStateAt = glfwGetTime() - 1.0;   // 钉死态直接给满不透明度，不等入场动画
             g_edgeAnimUntil = glfwGetTime();
-            g_edgeZonePrev = false;
             glfwSetWindowSize(g_win, wantW, wantH);
             glfwSetWindowPos(g_win, wx, wy);
             glfwShowWindow(g_win);
@@ -6065,6 +6360,9 @@ static int ApplyWindowMode() {
     printf("[窗口形态] %s → %s（%dx%d @ %d,%d）%s\n", WinModeName(prev), WinModeName(target),
            wantW, wantH, wx, wy, wasEdge ? "｜手柄态已归位" : "");
     fflush(stdout);
+    // 灯舱这一档把系统阴影关掉：舱和预览卡各自已经把落影画进帧缓冲，而系统的阴影是照
+    // 窗口 alpha 蒙版的外沿生成的——落影在 3.5σ 处仍 α>0，于是外沿被再描一道硬边。
+    sb_float_window(target != WIN_EDGE);
     return 1;
 }
 
@@ -6185,6 +6483,18 @@ static void LoadProbeFixture() {
     p3->question = "write ~/…/app-icon.svg";
     p3->trigger = "Writing to paths outside the workspace";
     (void)p1; (void)p2; (void)p3;
+    // AGENTPING_EDGE_FIXTURE=1：只给右缘灯舱出图用。默认样例的待处理只有 qoder/claude
+    // 两家，舱上永远摆不满一列三枚剪影——那条路径（gap 9 累加、各家墨形边长不同、舱随之
+    // 变高）在真二进制上就没被看过一次。补两条最久等的 WorkBuddy/ZCode，把三枚凑齐；
+    // 不开这个口，前面每一轮面板实拍都会跟着多两行。
+    if (getenv("AGENTPING_EDGE_FIXTURE")) {
+        UIRow* w1 = row(ap::ST_AWAIT, "trip-log", "WorkBuddy", "workbuddy", "w1", at(3, 0), 0);
+        w1->question = "这版行程要不要按天气重排？";
+        UIRow* z1 = row(ap::ST_AWAIT, "novel-reader", "ZCode", "zcode", "z1", at(5, 0), 0);
+        z1->tool = "Edit";
+        z1->question = "Allow Edit on src/books.ts";
+        (void)w1; (void)z1;
+    }
 
     const struct { const char* proj; const char* agent; const char* aid; const char* sess;
                    int hh, mm; int turns; } kDone[] = {
@@ -6637,6 +6947,7 @@ int main(int argc, char** argv) {
 #endif
     // 屏头/菜单栏的品牌图是 GL 纹理，必须在上下文就绪之后建一次。
     BrandUpload();
+    MarkUpload();   // 灯舱的三枚白形遮罩同一条命：上下文就绪后才能烘
 
     // AGENTPING_FIXTURE：用探针样例数据顶掉活扫描（空态、定数版面的实拍验证要走这条）。
     const bool use_fixture = getenv("AGENTPING_FIXTURE") != nullptr;
@@ -6768,7 +7079,12 @@ int main(int argc, char** argv) {
             fflush(stdout);
         }
         g_edgeHy = EdgeHome();
-        // 右缘手柄的取证开关。状态用 AGENTPING_EDGE=home|badge|tab|peek|ghost 钉死，
+        // 右缘舱开不开由设置盘说了算（11-02 用户要求）：关掉时整条右缘什么都不留——
+        // 常驻的舱、静止的细线、推近长出的胶囊一起没有。放在取证开关之前：
+        // AGENTPING_EDGE=dock|peek 与 AGENTPING_EDGE_OFF 仍盖得过它，否则钉档出图轮
+        // 会被他存下的偏好拦成一张空屏。
+        g_edgeOff = !g_cfg.edge_dock;
+        // 右缘灯舱的取证开关。状态用 AGENTPING_EDGE=dock|sliver|peek 钉死，
         // 指针用 AGENTPING_EDGE_CURSOR=x,y 喂逻辑点（真指针可能不在屏上，出图轮不许动它）。
         {
             const char* eo = getenv("AGENTPING_EDGE_OFF");
@@ -6777,8 +7093,6 @@ int main(int argc, char** argv) {
             if (ee && *ee && strcmp(ee, "0") != 0) g_edgeEmpty = true;
             const char* et = getenv("AGENTPING_EDGE_TRACE");
             if (et && *et && strcmp(et, "0") != 0) g_edgeTrace = true;
-            const char* ea = getenv("AGENTPING_EDGE_AT");
-            if (ea && *ea) g_edgeAtForce = (float)atof(ea);
             const char* er = getenv("AGENTPING_EDGE_ROW");
             if (er && *er) g_edgeRowForce = atoi(er);
             const char* ec = getenv("AGENTPING_EDGE_CURSOR");
@@ -6795,14 +7109,13 @@ int main(int argc, char** argv) {
             }
             const char* es = getenv("AGENTPING_EDGE");
             if (es && *es) {
-                if (!strcmp(es, "home")) g_edgeForce = EDGE_IDLE;
-                else if (!strcmp(es, "badge")) g_edgeForce = EDGE_PENDING;
-                else if (!strcmp(es, "tab")) g_edgeForce = EDGE_HOVER;
+                if (!strcmp(es, "dock")) g_edgeForce = EDGE_IDLE;
+                else if (!strcmp(es, "sliver")) { g_edgeForce = EDGE_IDLE; g_edgeEmpty = true; g_edgeRevealForce = 1; }
+                else if (!strcmp(es, "nub")) { g_edgeForce = EDGE_IDLE; g_edgeEmpty = true; g_edgeRevealForce = 0; }
                 else if (!strcmp(es, "peek")) g_edgeForce = EDGE_PEEK;
-                else if (!strcmp(es, "ghost")) g_edgeForce = EDGE_IDLEHOVER;
             }
-            // 出图轮默认不插手柄：老脚本的 AGENTPING_PANEL=0 要的是「窗口收起来」。
-            // 要拍手柄就显式给 AGENTPING_EDGE=…；命中探针那档也要让手柄真的在。
+            // 出图轮默认不插灯舱：老脚本的 AGENTPING_PANEL=0 要的是「窗口收起来」。
+            // 要拍舱体就显式给 AGENTPING_EDGE=…；命中探针那档也要让舱体真的在。
             if (g_shot_to && !getenv("AGENTPING_EDGE") && !getenv("AGENTPING_EDGE_HITPROBE"))
                 g_edgeOff = true;
             if (g_edgeForce >= 0) g_edgeOff = false;
@@ -6815,7 +7128,7 @@ int main(int argc, char** argv) {
 
         glfwSwapInterval(1);
         glfwShowWindow(win);
-        sb_float_window();
+        sb_float_window(g_winMode != WIN_EDGE);
         // 切到别的 App 就收面板：macOS 走应用退前台通知；X11 没有这条通知，挂窗口焦点
         // 回调顶（点自己托盘会先失焦一次，TogglePanel 里按 0.4s 窗口把那一击认作「收」）。
         ap_set_app_deactivate_cb(HideOnFocusLoss);
@@ -7051,9 +7364,11 @@ int main(int argc, char** argv) {
                 // 预览卡的行与计数才不是上一轮的快照。
                 const long seqE = g_seq.load();
                 const bool dirty = g_edgeForce >= 0 || g_edgeState != EDGE_IDLE ||
-                                   enow < g_edgeAnimUntil || seqE != g_pd_seq ||
+                                   enow < g_edgeAnimUntil || enow < g_edgeRevealUntil ||
+                                   g_edgeReveal != g_edgeRevealTo ||
+                                   seqE != g_pd_seq ||
                                    enow - g_edgeBeatAt > 2.0;
-                if (!dirty) { usleep(16000); continue; }
+                if (!dirty) { g_edgeRevealAt = -1; usleep(16000); continue; }   // 空转那几帧不计动画步长
                 int fw, fh;
                 glfwGetFramebufferSize(win, &fw, &fh);
                 glViewport(0, 0, fw, fh);
@@ -7089,32 +7404,49 @@ int main(int argc, char** argv) {
                     int sw, sh; glfwGetFramebufferSize(win, &sw, &sh);
                     std::vector<unsigned char> pix((size_t)sw * sh * 4);
                     glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, pix.data());
+                    // 灯舱的说服力全在"透"上：P6 会抹掉 alpha，未画处回读成实心黑，
+                    // 这张实拍恰恰证明不了它要证明的东西。这里写 P7 RGB_ALPHA，取证脚本
+                    // 用 `ffmpeg -i x.pam x.png` 转回带 alpha 的位图，再叠到桌面底图上。
                     std::ofstream of(g_shot_to, std::ios::binary);
                     const bool opened = of.is_open();
-                    if (opened) of << "P6\n" << sw << "\n" << sh << "\n255\n";
+                    if (opened)
+                        of << "P7\nWIDTH " << sw << "\nHEIGHT " << sh
+                           << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
                     for (int y = sh - 1; opened && y >= 0; y--)
                         for (int x = 0; x < sw; x++) {
                             unsigned char* p = &pix[((size_t)y * sw + x) * 4];
-                            of << p[0] << p[1] << p[2];
+                            // 帧缓冲里是**预乘**的（ImGui 的混合用 SRC_ALPHA 同时乘 RGB 与 A），
+                            // 而 P7 RGB_ALPHA 声明的是直通 alpha。不除回来，叠到桌面上会被乘第二遍：
+                            // 实测 .62 的卡底合成后近黑，稿子上同一处是中灰——那是假对比。
+                            const int a = p[3];
+                            if (a > 0 && a < 255) {
+                                for (int c = 0; c < 3; c++) {
+                                    const int v = (p[c] * 255 + a / 2) / a;   // 四舍五入的 /a
+                                    p[c] = (unsigned char)(v > 255 ? 255 : v);
+                                }
+                            }
+                            of << p[0] << p[1] << p[2] << p[3];
                         }
                     of.close();
                     struct stat sb_st;
                     const bool wrote = opened && ::stat(g_shot_to, &sb_st) == 0 && sb_st.st_size > 0;
-                    // PPM 不带 alpha，透明与否只能在回读的 RGBA 里当场取两针：
-                    // 传感器带空白处必须 0（否则整条 320pt 宽的柱子在桌面上是块实心黑），
-                    // 手柄/卡自己的中心必须是 255（否则该看见的反而透了）。
+                    // 透明与否只能在回读的 RGBA 里当场取三针：空白带必须 0（否则整条 410pt
+                    // 宽的柱子在桌面上是块实心黑），舱体/卡片自己的中心必须 255（否则该看见的反而透了）。
                     const float scl = cw_now > 0 ? (float)sw / (float)cw_now : 1.0f;
                     auto alphaAt = [&](float xpt, float ypt) {
                         const int px = (int)(xpt * scl), py = sh - 1 - (int)(ypt * scl);
                         if (px < 0 || px >= sw || py < 0 || py >= sh) return -1;
                         return (int)pix[((size_t)py * sw + (size_t)px) * 4 + 3];
                     };
-                    const ERect act = EdgeActiveRect();
-                    printf("[实拍] %s（%dx%d，手柄态）｜状态=%d 行=%d 计数=%d"
-                           "｜alpha 空白带=%d 手柄内=%d（前者 0 才说明整条传感器带不挡桌面）\n",
+                    const ERect hd = EdgeHandleRect();
+                    const ERect cd = EdgeCardRect();
+                    printf("[实拍] %s（%dx%d，灯舱态）｜状态=%d 行=%d 待处理=%d（介入 %d）"
+                           "｜alpha 空白带=%d 舱体=%d 卡片=%d（空白非 0 ＝整条柱子挡桌面）\n",
                            wrote ? g_shot_to : "（未落盘）", sw, sh, g_edgeState, g_edgeRowN,
-                           EdgeCount(), alphaAt(160.0f, 20.0f),
-                           alphaAt(act.x + act.w * 0.5f, act.y + act.h * 0.5f));
+                           EdgePendingN(), EdgeCount(), alphaAt(160.0f, 20.0f),
+                           alphaAt(hd.x + hd.w * 0.5f, hd.y + hd.h * 0.5f),
+                           g_edgeState == EDGE_PEEK
+                               ? alphaAt(cd.x + cd.w * 0.5f, cd.y + cd.h * 0.5f) : -999);
                     fflush(stdout);
                     glfwSetWindowShouldClose(win, GLFW_TRUE);
                 }
@@ -7324,7 +7656,7 @@ int main(int argc, char** argv) {
                        "窗口内容框 %dx%dpt｜alpha 左上=%d 左下=%d 圆角内=%d（左上 0 才说明透明浮层真的生效）\n",
                        wrote ? shot_to : "（未落盘）", sw, sh, stamp, g_panelH, cw_now, ch_now, tl, bl, tlin);
                 fflush(stdout);
-                sb_float_window();   // 收摊前再报一次：resize 之后浮层属性有没有被 GLFW 改回去
+                sb_float_window(g_winMode != WIN_EDGE);   // 收摊前再报一次：resize 之后浮层属性有没有被 GLFW 改回去
                 // 菜单栏那颗不在我们这块窗口里，而外部截屏在这台机器上只会得到纯黑
                 // （驱动器没有屏幕录制授权），所以「数字到底挂上去没有」只能让按钮自绘一张。
                 if (const char* sb = getenv("AGENTPING_SB_SHOT")) {

@@ -847,10 +847,11 @@ extern "C" int sb_capture(const char* png_path) {
     return 1;
 }
 
-extern "C" int sb_float_window(void) {
+extern "C" int sb_float_window(int shadow) {
     // macOS 那套「系统按 alpha 蒙版生成阴影」在 X11 上没有对应概念：阴影由合成器（KWin /
     // picom / GNOME 的 mutter）自己决定，客户端只能请求 _NET_WM_STATE_ABOVE 这一项，
     // 而 GLFW 已经在我们设 GLFW_FLOATING 时替你发了那条原子消息。这里不冒充能读回采纳结果。
+    (void)shadow;
     printf("[浮层] X11：GLFW_FLOATING 已请求 _NET_WM_STATE_ABOVE；是否生效由合成器决定，"
            "本机无桌面合成器，读不回——不冒充 macOS 那种 layer= 实测\n");
     fflush(stdout);

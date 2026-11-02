@@ -10,6 +10,7 @@
 #include "brand_icon.h"
 #include "agent_icons.h"
 #include "agent_icons31.h"
+#include "edge_marks.h"
 
 // ImGui 只在 imgui_internal.h 里给 IM_PI；这一层不引内部头，自己留一份同值常量。
 static const float kRPi = 3.14159265358979323846f;
@@ -197,7 +198,7 @@ static void RParseD(const char* d, std::vector<RPoly>& out) {
 // ── 19 个图标：前 18 条路径数据逐字搬自 r20 的 ICON 表 ──────────────────────
 enum RIconId { RI_LIST, RI_CLOCK, RI_SLIDERS, RI_COPY, RI_JUMP, RI_BACK, RI_CHEV, RI_TERM,
                RI_FILE, RI_CHECK, RI_BELL, RI_BELLOFF, RI_PLUG, RI_SHIELD, RI_INFO,
-               RI_LAUNCH, RI_GLOBE, RI_EYE, RI_CARD, RI_N };
+               RI_LAUNCH, RI_GLOBE, RI_EYE, RI_CARD, RI_PANEL, RI_N };
 /// kind 0＝path（d）；1＝circle（a,b,c = cx,cy,r）；2＝rect（a,b,c,e,f = x,y,w,h,rx）
 struct RShapeSpec { int kind; const char* d; float a, b, c, e, f; };
 static const RShapeSpec kRShape[RI_N][4] = {
@@ -232,6 +233,9 @@ static const RShapeSpec kRShape[RI_N][4] = {
     // card：权益屏那一格的标记（k31Shape 的 card）等比降到 16 网格 —— 24 与 16 两系
     // 不能混着调（见 r31_views.inc 顶上那句），所以这里搬形状而不是直接引用 I31_CARD。
     /* card    */ {{2, nullptr, 2.0f, 3.3f, 12.0f, 9.4f, 2.0f}, {0, "M2 6.7h12M4.7 10h2.7"}},
+    // panel：设置屏「右缘侧边栏」那一格。lucide panel-right 等比降到 16 网格
+    // （24 网格 rect x3 w18 → 16 网格 x2.4 w11.2；分隔线 x15 → 10.0），与上面同一系。
+    /* panel   */ {{2, nullptr, 2.4f, 2.8f, 11.2f, 10.4f, 1.6f}, {0, "M10 2.8v10.4"}},
 };
 static std::vector<RIconDef> g_ricon;
 static void RBuildIcons() {
@@ -294,15 +298,18 @@ static void DrawIcon(ImDrawList* dl, int id, float x, float y, float size, ImU32
 // ── 品牌标：稿子的 <img class="mark"> / <img> 用的是同一张 1024 图标 ──────────
 // 本工程没有 PNG 解码器，所以两张位图（18pt 用的 36px、34pt 用的 68px）在
 // brand_icon.h 里以裸 RGBA 十六进制存着，启动后上传成 GL 纹理。
-static ImU64 RMakeTex(int n, const char* hex) {
-    std::vector<unsigned char> px((size_t)n * (size_t)n * 4);
-    auto hv = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return 0;
-    };
-    for (size_t i = 0; i < px.size(); i++) px[i] = (unsigned char)(hv(hex[i * 2]) * 16 + hv(hex[i * 2 + 1]));
+static int RHv(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+/// 裸十六进制 → 字节：两位一字节，逐字解进 out。
+static void RDecodeHex(const char* hex, unsigned char* out, size_t outN) {
+    for (size_t i = 0; i < outN; i++)
+        out[i] = (unsigned char)(RHv(hex[i * 2]) * 16 + RHv(hex[i * 2 + 1]));
+}
+static GLuint RUploadRGBA(int n, const unsigned char* px) {
     GLuint id = 0;
     glGenTextures(1, &id);
     if (!id) return 0;
@@ -312,8 +319,13 @@ static ImU64 RMakeTex(int n, const char* hex) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-    return (ImU64)id;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    return id;
+}
+static ImU64 RMakeTex(int n, const char* hex) {
+    std::vector<unsigned char> px((size_t)n * (size_t)n * 4);
+    RDecodeHex(hex, px.data(), px.size());
+    return (ImU64)RUploadRGBA(n, px.data());
 }
 /// 建好 GL 上下文之后再调（main 里 ImGui_ImplOpenGL3_Init 之后一行）。
 static void BrandUpload() {
@@ -333,6 +345,50 @@ static void BrandMark(ImDrawList* dl, float x, float y, float s) {
         return;
     }
     dl->AddImage((ImTextureID)tex, ImVec2(x, y), ImVec2(x + s, y + s), ImVec2(0, 0), ImVec2(1, 1));
+}
+
+// ── 灯舱的剪影：稿子 `.ag{background-color:currentColor;mask:url(…)}` ─────────
+// edge_marks.h 存的是「一像素一字节＝形状覆盖度」（Tools/make_edge_marks.py 从定稿那三张
+// 官方 logo 抠出剪影、LANCZOS 重采样到 96）。上传时涂成白底＋这道 alpha，画时把墨色当顶点
+// 色乘上去——同一枚位图于是能随灯舱（白 .92）与卡片行（亮灰 .80）各自染色，与 currentColor 同义。
+static ImU64 RMakeMaskTex(int n, const char* coverage) {
+    std::vector<unsigned char> cov((size_t)n * (size_t)n);
+    RDecodeHex(coverage, cov.data(), cov.size());
+    std::vector<unsigned char> px((size_t)n * (size_t)n * 4, 255);
+    for (size_t i = 0; i < cov.size(); i++) px[i * 4 + 3] = cov[i];
+    return (ImU64)RUploadRGBA(n, px.data());
+}
+/// 建好 GL 上下文之后调（main 里紧跟 BrandUpload 一行）。
+static void MarkUpload() {
+    if (g_markTexQoder) return;
+    g_markTexQoder = RMakeMaskTex(kMarkN, kMarkHexQoder);
+    g_markTexWorkBuddy = RMakeMaskTex(kMarkN, kMarkHexWorkBuddy);
+    g_markTexZCode = RMakeMaskTex(kMarkN, kMarkHexZCode);
+    g_markTexClaude = RMakeMaskTex(kMarkN, kMarkHexClaude);
+}
+static ImU64 MarkTex(const std::string& agent) {
+    return agent == "qoder" ? g_markTexQoder
+           : agent == "workbuddy" ? g_markTexWorkBuddy
+           : agent == "zcode" ? g_markTexZCode
+           : agent == "claude" ? g_markTexClaude : 0;
+}
+/// 稿子 AGENTS 表里那三个尺寸（21.5／26.2／22）：按实测墨量反解，为的是「一列看起来同一
+/// 重量」——ZCode 那个 Z 比 WorkBuddy 的鲸鱼细，同一号画出来就轻四成。
+static float MarkPx(const std::string& agent) {
+    return agent == "qoder" ? 21.5f : agent == "workbuddy" ? 26.2f : 22.0f;
+}
+/// 一枚剪影，居中画在 (cx,cy)；没有位图的那家退回同墨的首字母，不许画成别的形状。
+static void MarkGlyph(ImDrawList* dl, float cx, float cy, const std::string& agent,
+                      const std::string& initial, int loc, float px, ImU32 ink) {
+    const ImU64 tex = MarkTex(agent);
+    if (tex) {
+        dl->AddImage((ImTextureID)tex, ImVec2(cx - px * 0.5f, cy - px * 0.5f),
+                     ImVec2(cx + px * 0.5f, cy + px * 0.5f), ImVec2(0, 0), ImVec2(1, 1), ink);
+        return;
+    }
+    const std::string g = initial.empty() ? std::string("?") : initial;
+    DrawTextRun(dl, cx - TextWidth(g, loc, T_S12B) * 0.5f, TextMid(cy, T_S12B, loc),
+                g, loc, ink, T_S12B);
 }
 
 // ── 代理头像：稿子 `.ag img` / `.m1 img` 贴的是各家 logo ──────────────────────
