@@ -1,15 +1,20 @@
 cask "agent-ping" do
-  # 稳定文件名 + :latest：每次发版工作流都会把同一路径的 zip 覆盖掉，
-  # 所以这里不用跟着 tag 改 url / sha256。
-  version :latest
-  sha256 :no_check
+  version "0.1.4"
 
-  # 两个架构各一份预编译产物，都由 release 工作流产在同一批附件里。
+  # 两个架构各一份预编译产物（已用 Developer ID 签名、公证并 staple），
+  # 由 release 工作流产在同一批附件里。
+  #
+  # 这里刻意用带版本号的 URL，而不是 releases/latest/download 那种固定路径：
+  # Homebrew 的下载缓存是以 URL 为键的，URL 不变就永远命中第一次下载的那份包，
+  # 于是新版本发布后 brew install 装到的还是旧版（而且 sha256 根本没机会起作用）。
+  # 版本化之后缓存随 URL 一起变，sha256 也能真正校验。
   on_arm do
-    url "https://github.com/DreamOfXM/agent-ping/releases/latest/download/Agent-Ping-macos-arm64.zip"
+    sha256 "f086d5005721b63c328bb76b2f428acd84a37334bae42e143285f463b4f7e0dd"
+    url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-arm64.zip"
   end
   on_intel do
-    url "https://github.com/DreamOfXM/agent-ping/releases/latest/download/Agent-Ping-macos-x86_64.zip"
+    sha256 "c1191ca72f2cbd540598960a5edbd02b4f2e588eb0ee658352f7145bdb806716"
+    url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-x86_64.zip"
   end
 
   name "Agent Ping"
@@ -24,8 +29,8 @@ cask "agent-ping" do
     Agent Ping has no Dock icon. It appears at the right end of the menu bar —
     the oval icon with a star, next to the clock.
 
-    This cask tracks "latest", so upgrade it with --greedy:
-      brew upgrade --cask --greedy agent-ping
+    Upgrade it with:
+      brew upgrade --cask agent-ping
 
     Turn on "Launch at login" in its settings if you want it to start with the
     session.
