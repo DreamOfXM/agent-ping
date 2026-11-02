@@ -233,16 +233,17 @@ Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自�
 包是自包含的：glfw 与 freetype 静态链在可执行文件里，**不需要**你先装这两个依赖 ——
 那两个是编译版（formula）才需要的。
 
-> 它用的是 `version :latest`，所以升级必须带 `--greedy`：
-> `brew upgrade --cask --greedy agent-ping`。不带的话普通 `brew upgrade` 会跳过它。
+> cask 钉死了版本号和两个架构各自的 SHA-256，下载 URL 也带版本号，所以
+> `brew update && brew upgrade --cask agent-ping` 拉到的确实是新包，
+> 不会被 Homebrew 以 URL 为键的下载缓存挡回上一次那份旧件。
 
 > **关于「无法验证开发者」这个弹窗**：从 v0.1.3 起，两份预编译包都用 Developer ID
 > 证书签名、送 Apple 公证并已完成 staple。`spctl -a` 判 `accepted`，来源是
 > `Notarized Developer ID`；浏览器下载和 cask 安装都会打隔离标记，但带隔离标记照样能过。
 >
-> 所以正常安装不该弹这个窗。真弹了，先怀疑拿到的是旧包（`version :latest` 升级时没带
-> `--greedy`），跑一次 `brew upgrade --cask --greedy agent-ping`。上游二进制被中间层换过
-> 也会这样，此时**先核对签名再放行**：
+> 所以正常安装不该弹这个窗。真弹了，先怀疑拿到的是旧包——tap 本身是个 git 检出，
+> 停在旧提交上就还会指向上一版，跑一次 `brew update && brew upgrade --cask agent-ping`。
+> 上游二进制被中间层换过也会这样，此时**先核对签名再放行**：
 >
 > ```sh
 > codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
@@ -289,7 +290,8 @@ Homebrew 的构建跑在沙箱里，写不了那里 —— 想要应用程序文
 **升级与卸载**
 
 ```sh
-brew upgrade --cask --greedy agent-ping   # cask，--greedy 必须带
+brew update                               # tap 本身是个 git 检出
+brew upgrade --cask agent-ping            # cask
 brew upgrade agent-ping                   # formula
 
 brew uninstall --cask agent-ping

@@ -271,18 +271,20 @@ The bundle is self-contained: glfw and freetype are linked statically into the
 executable, so you do **not** need those dependencies installed first — they are
 only needed by the source build.
 
-> The cask uses `version :latest`, so upgrades must pass `--greedy`:
-> `brew upgrade --cask --greedy agent-ping`. A plain `brew upgrade` skips it.
+> The cask pins a version and a SHA-256 per architecture, and downloads from a
+> versioned URL — so `brew update && brew upgrade --cask agent-ping` really does
+> fetch the new bundle instead of replaying Homebrew's cached copy of the old one.
 
 > **About the "cannot verify the developer" dialog**: since v0.1.3 both prebuilt
 > bundles are signed with a Developer ID certificate, notarized by Apple, and
 > stapled. `spctl -a` reports `accepted` from `Notarized Developer ID`; a browser
 > download and a cask install both still tag it quarantined, and it passes anyway.
 >
-> A normal install should never show that dialog. If it does, suspect a stale
-> bundle first (upgrades of a `version :latest` cask must pass `--greedy`): run
-> `brew upgrade --cask --greedy agent-ping`. A swapped upstream binary looks the
-> same way, so **check the signature before you allow it**:
+> A normal install should never show that dialog. If it does, suspect an old
+> bundle first — the tap is a git checkout, so an outdated one keeps pointing at
+> the previous release: run `brew update && brew upgrade --cask agent-ping`. A
+> swapped upstream binary looks the same way, so **check the signature before you
+> allow it**:
 >
 > ```sh
 > codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
@@ -338,7 +340,8 @@ to look at; close it and the icon stays behind.
 **Upgrade and uninstall**
 
 ```sh
-brew upgrade --cask --greedy agent-ping   # cask; --greedy is required
+brew update                               # the tap is a git checkout
+brew upgrade --cask agent-ping            # cask
 brew upgrade agent-ping                   # formula
 
 brew uninstall --cask agent-ping
