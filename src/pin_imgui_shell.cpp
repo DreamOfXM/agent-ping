@@ -1913,6 +1913,7 @@ static double g_edgeCur2At = 0;
 static bool g_edgeCur2Arm = false;
 static double g_edgeFirstAt = -1;
 static int g_edgeRowForce = -1;         // AGENTPING_EDGE_ROW
+static int g_edgeClickRow = -1;         // AGENTPING_EDGE_CLICK：对预览卡第 N 行发一次合成点击
 
 // ── 设置屏接的三个活口子 ────────────────────────────────────────────────────
 // g_cfg 是「屏幕上那一屏」与 alert.cpp 的持久化之间唯一的桥：启动时 load、每次点击 save。
@@ -5758,6 +5759,9 @@ static void EdgeClickRow(const UIRow& r, int idx) {
     h.created = r.created;
     h.label = r.title;
     ShowPanel();
+    // 这张卡的每一击都必须与面板里双击同一套账。只跳不记账，屏上那行就永远消不掉
+    // （2026-11-02 用户实拍「右缘点开的不消失，面板点开的会消失」）。
+    MarkSeen(r);
     JumpAndReport(h);
 }
 /// 一次点击落在谁身上。返回 true＝已处理（用于日志）。
@@ -5801,6 +5805,19 @@ static void EdgeInput(double now, float gx, float gy, bool have) {
         else g_edgeRow = (g_edgeState == EDGE_PEEK && Inside(card, lx, ly))
                              ? (int)((ly - card.y - 38.0f) / 44.0f) : -1;
         if (g_edgeRow < 0 || g_edgeRow >= g_edgeRowN) g_edgeRow = g_edgeRowForce;
+        // AGENTPING_EDGE_CLICK=N：对第 N 行发一次合成点击，走的是与真点击同一个 EdgeClick
+        // 分发（含它那段行带命中算术），不另搭一条假路径。
+        // 要等卡上真的摆了行才发：待处理清单由主循环在 DrawEdge 那一段重建，EdgeInput 跑在
+        // 它前面，第一帧量到的是 0 行——11-02 首次实跑就是被这一帧吃掉并消耗掉了这一次
+        // （日志：「越界（卡上摆 0 行）」，而实拍同一轮报的是「行=3」）。
+        if (g_edgeClickRow >= 0 && g_edgeState == EDGE_PEEK && g_edgeRowN > 0) {
+            const int n = g_edgeClickRow;
+            g_edgeClickRow = -1;                    // 一次性：连着发会把同一行消两次、行数越界
+            if (n >= 0 && n < g_edgeRowN)
+                EdgeClick(card.x + card.w * 0.5f, card.y + 38.0f + 44.0f * (float)n + 22.0f, now);
+            else
+                fprintf(stderr, "[边缘] AGENTPING_EDGE_CLICK=%d 越界（卡上摆 %d 行）\n", n, g_edgeRowN);
+        }
         const bool down = ap_mouse_down();
         const bool clicked = down && !g_edgeDownPrev;
         g_edgeDownPrev = down;
@@ -7095,6 +7112,12 @@ int main(int argc, char** argv) {
             if (et && *et && strcmp(et, "0") != 0) g_edgeTrace = true;
             const char* er = getenv("AGENTPING_EDGE_ROW");
             if (er && *er) g_edgeRowForce = atoi(er);
+            // AGENTPING_EDGE_CLICK=N：对预览卡第 N 行（从 0 数）发一次合成点击。
+            // 钉行号不钉坐标——这张卡没有 g_hits 可认，行数一漂坐标就落到别的行上，
+            // 与面板那条「展开N」同一个理由。出图轮里 JumpAndReport 本来就惰性，
+            // 所以这一击只写「看过」账，不会真的把别的 App 唤到前台。
+            const char* ek = getenv("AGENTPING_EDGE_CLICK");
+            if (ek && *ek) g_edgeClickRow = atoi(ek);
             const char* ec = getenv("AGENTPING_EDGE_CURSOR");
             if (ec && *ec) {
                 float cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
