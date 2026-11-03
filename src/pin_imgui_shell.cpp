@@ -7109,9 +7109,16 @@ int main(int argc, char** argv) {
     // 取证：把来源导轨钉在某一家的屏上（"all" 仍是不给这个变量的默认）。
     if (const char* src = getenv("AGENTPING_SRC"); src && *src) g_r31_src = src;
     // 真启动（访达双击 / open / launchd 拉起，一个参数都没有）才对齐开机项。
-    // 取证的跑法都带参数或环境变量，不许碰 ~/Library —— 那会儿在跑的可能是开发构建，
-    // 写进去等于把刚修好的问题再种回去。
-    if (argc == 1) {
+    // 取证的跑法不许碰 ~/Library —— 那会儿在跑的可能是开发构建，
+    // 写进去等于把刚修好的问题再种回去。只带环境变量、不带参数的跑法以前会漏进来
+    // （实测 `AGENTPING_SHOT=… 二进制` 的 argc 仍是 1），所以这里连环境变量一起判。
+    bool forensic_run = false;
+    {
+        extern char** environ;
+        for (char** e = environ; *e; ++e)
+            if (strncmp(*e, "AGENTPING_", 10) == 0) { forensic_run = true; break; }
+    }
+    if (argc == 1 && !forensic_run) {
         char why[1024] = {0};
         if (ap_autostart_repair(why, (int)sizeof why) > 0) printf("[开机项] %s\n", why);
         fflush(stdout);
