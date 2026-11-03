@@ -6900,20 +6900,38 @@ static void LoadProbeFixture() {
 }
 
 int main(int argc, char** argv) {
-    bool windowed = false, dump = false, hook_status = false;
+    bool windowed = false, dump = false, hook_status = false, repair_launch = false;
     std::string hook_install, hook_uninstall;
     std::vector<std::string> pos;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--window")) windowed = true;
         else if (!strcmp(argv[i], "--dump")) dump = true;
         else if (!strcmp(argv[i], "--hook-status")) hook_status = true;
+        else if (!strcmp(argv[i], "--repair-autostart")) repair_launch = true;
         else if (!strcmp(argv[i], "--install-hook") && i + 1 < argc) hook_install = argv[++i];
         else if (!strcmp(argv[i], "--uninstall-hook") && i + 1 < argc) hook_uninstall = argv[++i];
         else pos.push_back(argv[i]);
     }
     // 无参数＝从访达双击：出窗口。带参数＝离屏探针，按老用法渲一帧存 PPM。
-    if (pos.empty() && !dump && !hook_status && hook_install.empty() && hook_uninstall.empty())
+    if (pos.empty() && !dump && !hook_status && !repair_launch &&
+        hook_install.empty() && hook_uninstall.empty())
         windowed = true;
+
+    // 开机项对齐：登录时跑的是文件里记的那条路径，不是「现在这份」。换过安装方式
+    // （开发构建 → brew 装到 /Applications）之后它仍指向旧副本，下次登录就把没公证的
+    // 那份拉回来。CLI 与双击两条路共用同一个函数，CLI 是给沙盒 HOME 里验证用的。
+    if (repair_launch) {
+        char why[1024] = {0};
+        const int rc = ap_autostart_repair(why, (int)sizeof why);
+        if (rc < 0) {
+            fprintf(stderr, "对齐开机项失败：%s\n", why);
+            return 1;
+        }
+        if (rc == 1) printf("开机项已对齐：%s\n", why);
+        else if (*why) printf("开机项不动：%s\n", why);
+        else printf("没装开机项（开关文件不存在），什么都不写\n");
+        return 0;
+    }
 
     // 接线走命令行：与面板里那颗按钮调的是同一个 ap::install_hook（同一份字节、同一套备份）。
     // 退出码沿用全仓口径：0 成功 / 1 失败（原因打到 stderr）/ 2 用法错。
@@ -7043,6 +7061,14 @@ int main(int argc, char** argv) {
     }
     // 取证：把来源导轨钉在某一家的屏上（"all" 仍是不给这个变量的默认）。
     if (const char* src = getenv("AGENTPING_SRC"); src && *src) g_r31_src = src;
+    // 真启动（访达双击 / open / launchd 拉起，一个参数都没有）才对齐开机项。
+    // 取证的跑法都带参数或环境变量，不许碰 ~/Library —— 那会儿在跑的可能是开发构建，
+    // 写进去等于把刚修好的问题再种回去。
+    if (argc == 1) {
+        char why[1024] = {0};
+        if (ap_autostart_repair(why, (int)sizeof why) > 0) printf("[开机项] %s\n", why);
+        fflush(stdout);
+    }
     if (!glfwInit()) return 2;
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);   // 窗口先藏，定位好再 show，免得在默认位置闪一下
     // 出图轮不许抢键盘：取证实例出现在他正在打字的桌面上，一 show 就会成 key 窗口，

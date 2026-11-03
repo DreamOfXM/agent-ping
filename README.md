@@ -149,7 +149,7 @@ Files it writes:
 | `<hook.sh path>` | only when you install a hook; mode `0755`, written atomically |
 | `~/.claude/settings.json` / `~/.qoder/settings.json` | only when you install a hook: one `Notification` entry per matcher, merged into the existing JSON |
 | `<that config>.bak-agentping-<YYYYmmdd-HHMMSS>` | immediately before the merge, holding the original bytes |
-| macOS `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist`, Linux `~/.config/autostart/agentping.desktop` | only while the *Launch at login* toggle is on |
+| macOS `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist`, Linux `~/.config/autostart/agentping.desktop` | only while the *Launch at login* toggle is on; each normal launch re-points it at whichever copy is actually running |
 | `/tmp/agentping-err-<pid>.log` | Linux only, mode `0600`, only when a notification fails |
 
 Session titles are shown on screen and are what the alert quotes, so treat the

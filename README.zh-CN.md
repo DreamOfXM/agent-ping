@@ -126,7 +126,7 @@ Linux 上 Agent Ping 自己的两条路径改到 `$XDG_CONFIG_HOME/AgentPing/…
 | `<hook.sh 路径>` | 只在你装 hook 时；`0755`，原子写 |
 | `~/.claude/settings.json` / `~/.qoder/settings.json` | 只在你装 hook 时：按 matcher 各并一条 `Notification` 进现有 JSON |
 | `<那个配置>.bak-agentping-<YYYYmmdd-HHMMSS>` | 合并之前，存原始字节 |
-| macOS `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist`、Linux `~/.config/autostart/agentping.desktop` | 只在「登录时启动」开着的时候 |
+| macOS `~/Library/LaunchAgents/io.github.dreamofxm.agentping.plist`、Linux `~/.config/autostart/agentping.desktop` | 只在「登录时启动」开着的时候；每次正常启动都会把它改成当前真在跑的那份的路径 |
 | `/tmp/agentping-err-<pid>.log` | 仅 Linux，`0600`，仅当通知失败 |
 
 会话标题会显示在屏幕上，也是提醒里被引用的内容——请把它当成你自己的终端回滚缓冲来看待。

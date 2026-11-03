@@ -65,6 +65,46 @@ std::string XmlEscape(const std::string& s) {
     return o;
 }
 
+std::string ReadFile(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return {};
+    std::string out;
+    char buf[4096];
+    size_t n = 0;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+    fclose(f);
+    return out;
+}
+
+// 只认 ap_autostart_set 自己写出来的那个形状：ProgramArguments 之后第一个 <string>。
+// 读不出（被人手改过、形状不认识）就返回空串，调用方按「不动」处理，不猜。
+std::string RecordedExe(const std::string& xml) {
+    size_t at = xml.find("<key>ProgramArguments</key>");
+    if (at == std::string::npos) return {};
+    at = xml.find("<string>", at);
+    if (at == std::string::npos) return {};
+    at += 8;
+    size_t end = xml.find("</string>", at);
+    if (end == std::string::npos || end == at) return {};
+    std::string s = xml.substr(at, end - at);
+    // XmlEscape 的反向：&amp; 必须最后解，否则 &amp;lt; 会被解成 <
+    for (size_t i = 0; (i = s.find("&lt;", i)) != std::string::npos; i += 1) s.replace(i, 4, "<");
+    for (size_t i = 0; (i = s.find("&gt;", i)) != std::string::npos; i += 1) s.replace(i, 4, ">");
+    for (size_t i = 0; (i = s.find("&amp;", i)) != std::string::npos; i += 1) s.replace(i, 5, "&");
+    return s;
+}
+
+// 马上要消失的副本：DMG 挂载点、Gatekeeper 的 App Translocation（在 /private/var/folders 下）。
+// 从这些地方跑起来时不许把登录项改过去 —— 改完下次登录就是个死路径。
+bool HasPrefix(const std::string& p, const char* pre) {
+    return p.compare(0, strlen(pre), pre) == 0;
+}
+
+bool IsTransient(const std::string& p) {
+    return HasPrefix(p, "/Volumes/") || HasPrefix(p, "/private/var/folders/") ||
+           HasPrefix(p, "/private/tmp/");
+}
+
 }   // namespace
 
 extern "C" int ap_autostart_get(char* where, int out_len) {
@@ -126,4 +166,31 @@ extern "C" int ap_autostart_set(int on, char* reason, int out_len) {
     }
     Say(reason, out_len, "已写入 " + p + "（下次登录生效）");
     return 0;
+}
+
+extern "C" int ap_autostart_repair(char* reason, int out_len) {
+    const std::string p = PlistPath();
+    if (access(p.c_str(), F_OK) != 0) { Say(reason, out_len, ""); return 0; }   // 没开这个功能
+    const std::string want = ExePath();
+    if (want.empty()) {
+        Say(reason, out_len, "读不到自己的可执行文件路径，对不上开机项");
+        return -1;
+    }
+    if (IsTransient(want)) {
+        Say(reason, out_len, "这份是从临时位置跑的（" + want + "），开机项不动");
+        return 0;
+    }
+    const std::string rec = RecordedExe(ReadFile(p));
+    if (rec.empty()) {
+        Say(reason, out_len, "读不懂 " + p + " 里的路径（被手改过？），不动");
+        return 0;
+    }
+    if (rec == want) {
+        Say(reason, out_len, "已经指着在跑的这份 " + want + "，不用动");
+        return 0;
+    }
+    if (ap_autostart_set(1, reason, out_len) != 0) return -1;
+    std::string msg = "开机项原来指 " + rec + "，已改成本次在跑的 " + want;
+    Say(reason, out_len, msg);
+    return 1;
 }
