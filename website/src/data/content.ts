@@ -261,11 +261,11 @@ const zh: SiteContent = {
   install: {
     eyebrow: "Install",
     title: "装法三种，都不花钱",
-    sub: "macOS 13+ 用仓库里的 Homebrew Formula；Linux（Debian 12 实测）只有源码构建这一条，没有对应的 formula；Windows 暂不支持。没有预编译包可下载。",
+    sub: "macOS 13+ 用仓库里的 Homebrew cask 装预编译包（Apple 芯片与 Intel 各一份，已签名并公证）；同一个 tap 里的 formula 则现场编译。Linux（Debian 12 实测）只有源码构建这一条，没有对应的 formula；Windows 暂不支持。",
     channels: [
       {
         name: "Homebrew（macOS）",
-        desc: "Formula 就住在这个仓库的 Formula/agent-ping.rb，按 v0.1.1 标签的源码现场编译。第一次装需要 Xcode 命令行工具，Apple 芯片上约一分钟。macOS 26 上若 brew 停在 Error: Xcode alone is not sufficient，那是 Homebrew 自己的准入检查，跑一次 xcode-select --install 再重试。",
+        desc: "cask 按架构从 Release 附件里挑那一份预编译包（约 26 MB），已用 Developer ID 签名、Apple 公证并 staple，装完 Agent Ping.app 就在 /Applications。想让 Homebrew 现场编译就换成 brew install agent-ping：formula 从它钉住的那个标签的源码编译，第一次装需要 Xcode 命令行工具，Apple 芯片上约一分钟。macOS 26 上若 brew 停在 Error: Xcode alone is not sufficient，那是 Homebrew 自己的准入检查，跑一次 xcode-select --install 再重试。",
         action: BREW_CMD,
       },
       {
@@ -279,7 +279,7 @@ const zh: SiteContent = {
         action: LINUX_BUILD,
       },
     ],
-    note: "brew trust 只需要跑一次：这是第三方 tap，Homebrew 在你没点头之前不肯按短名加载它的 formula。不跑这句，就只有 dreamofxm/agent-ping/agent-ping 这个全名可用，而 brew upgrade agent-ping 会直接拒绝执行。装好后 agent-ping 是启动器，App 住在 Homebrew 的 opt 目录而不是 /Applications——Homebrew 在沙箱里编译，写不进 /Applications。",
+    note: "brew trust 只需要跑一次：这是第三方 tap，Homebrew 在你没点头之前不肯按短名加载它的 formula 与 cask。不跑这句，就只有 dreamofxm/agent-ping/agent-ping 这个全名可用，而 brew upgrade agent-ping 会直接拒绝执行。cask 把 Agent Ping.app 放进 /Applications；formula 编出来的那份留在 Homebrew 的 opt 目录——它在沙箱里编译，写不进 /Applications。",
   },
   cta: {
     eyebrow: "Star & Feedback",
@@ -303,8 +303,8 @@ const zh: SiteContent = {
         a: "默认不动。只有你在 Connect 屏按下按钮，或者自己跑 Tools/install_hook.sh install claude|qoder 时才写，顺序是：先在自己的数据目录里原子写出 hook.sh（0755），再把目标配置备份成 <config>.bak-agentping-<YYYYmmdd-HHMMSS>，最后往 hooks.Notification 里按 matcher 合并一条并原子写回。Codex 的 notify 槽位只检测：如果它属于别的工具，面板会说明并停手，不碰那个文件。钩子本身只把 CLI 的 JSON 载荷拷进收件箱，从不替你回答，收件箱写不进也照样 exit 0——钩子的退出码会被 CLI 读成一个决定。",
       },
       {
-        q: "为什么没有下载好的二进制？",
-        a: "这个仓库不发预编译包：Formula 从 v0.1.1 标签的源码现场编译。好处是任何人用同一条命令就能复现你机器上那个 App，坏处是第一次装要等约一分钟编译，而且需要 Xcode 命令行工具。",
+        q: "预编译包和源码现编，该选哪个？",
+        a: "要双击就装上、要它出现在 /Applications，走 cask：它按架构下那份已签名、公证并 staple 的预编译包，本机什么都不用编。要装出来的每一份都能被别人复现，走 formula：它从仓库里钉住的标签源码现场编译，任何人用同一条命令就能编出你机器上那个 App，代价是第一次装等约一分钟，而且需要 Xcode 命令行工具。两条路住在同一个 tap 里，装的是同一个 App。",
       },
       {
         q: "额度数字是不是猜的？",
@@ -527,11 +527,11 @@ const en: SiteContent = {
   install: {
     eyebrow: "Install",
     title: "Three ways in, all free",
-    sub: "macOS 13+ uses the Homebrew formula in this repository; Linux (verified on Debian 12) has source builds only — there is no formula for it; Windows is not supported. There is no prebuilt binary to download.",
+    sub: "macOS 13+ uses the Homebrew cask in this repository — prebuilt bundles, one per architecture, signed and notarized; the formula in the same tap compiles from source instead. Linux (verified on Debian 12) has source builds only, there is no formula for it; Windows is not supported.",
     channels: [
       {
         name: "Homebrew (macOS)",
-        desc: "Formula/agent-ping.rb lives in this repo and compiles the source at the v0.1.1 tag. The first install needs the Xcode command line tools and takes about a minute on an Apple-silicon Mac. If brew stops with Error: Xcode alone is not sufficient on macOS 26, that is Homebrew's own gate: run xcode-select --install once and retry.",
+        desc: "The cask picks the prebuilt bundle for your architecture (~26 MB) out of the release assets — Developer ID signed, notarized and stapled — and Agent Ping.app lands in /Applications. Prefer Homebrew to compile it here? Use brew install agent-ping: the formula builds the source at the tag it pins, so the first install needs the Xcode command line tools and takes about a minute on an Apple-silicon Mac. If brew stops with Error: Xcode alone is not sufficient on macOS 26, that is Homebrew's own gate: run xcode-select --install once and retry.",
         action: BREW_CMD,
       },
       {
@@ -545,7 +545,7 @@ const en: SiteContent = {
         action: LINUX_BUILD,
       },
     ],
-    note: "brew trust runs once: this is a third-party tap, and Homebrew refuses to load a formula from it by short name until you say so. Without it only the fully-qualified dreamofxm/agent-ping/agent-ping works, and brew upgrade agent-ping refuses to run. Afterwards agent-ping is a launcher — the app lives in Homebrew's opt directory rather than /Applications, because Homebrew builds inside a sandbox that cannot write there.",
+    note: "brew trust runs once: this is a third-party tap, and Homebrew refuses to load its formula or cask by short name until you say so. Without it only the fully-qualified dreamofxm/agent-ping/agent-ping works, and brew upgrade agent-ping refuses to run. The cask puts Agent Ping.app in /Applications; the formula's build stays in Homebrew's opt directory, because it compiles inside a sandbox that cannot write there.",
   },
   cta: {
     eyebrow: "Star & Feedback",
@@ -569,8 +569,8 @@ const en: SiteContent = {
         a: "Not by default. It writes only when you press the button on the Connect screen or run Tools/install_hook.sh install claude|qoder yourself, in this order: write hook.sh atomically in its own data directory (0755), back the target config up as <config>.bak-agentping-<YYYYmmdd-HHMMSS>, then merge one hooks.Notification entry per matcher and rewrite the config atomically. Codex's notify slot is detected only: if it belongs to another tool, the panel says so and leaves the file alone. The hook itself just copies the CLI's JSON payload into the inbox — it never answers a prompt, and exits 0 even when the inbox is unwritable, because the CLI reads a hook's exit code as a decision.",
       },
       {
-        q: "Why is there no prebuilt binary?",
-        a: "This repository ships none: the formula compiles the source at the v0.1.1 tag. The upside is that anyone can reproduce the exact app on their machine with one command; the downside is a roughly one-minute compile on first install, plus the Xcode command line tools.",
+        q: "Prebuilt or built from source — which one?",
+        a: "Take the cask if you want the double-clickable bundle in /Applications: it downloads the notarized prebuilt zip for your architecture and nothing compiles locally. Take the formula if you want every install reproducible: it compiles the source at the tag the repo pins, so anyone can rebuild the exact app on their machine with one command, at the cost of a roughly one-minute first install plus the Xcode command line tools. Both live in the same tap and install the same app.",
       },
       {
         q: "Are the quota numbers guesses?",

@@ -7,13 +7,16 @@ export const REPO = "https://github.com/DreamOfXM/agent-ping";
 export const RELEASE_TAG = `${REPO}/releases/latest`;
 export const ISSUES = `${REPO}/issues`;
 
-// 安装四句与 README 的 sh 块逐字一致：页面上显示的、剪贴板里的、README 里的三者同串。
-// 不用 && 串成一行——那一摆在窄卡里必然被省略号截断，而截断后的命令贴进终端是跑不通的。
+// 安装三句与 README 的「Recommended: the cask」sh 块逐字一致：页面上显示的、剪贴板里的、
+// README 里的三者同串。不用 && 串成一行——那一摆在窄卡里必然被省略号截断，而截断后的命令
+// 贴进终端是跑不通的。
 export const BREW_TAP = "brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping";
 export const BREW_TRUST = "brew trust dreamofxm/agent-ping";
-export const BREW_INSTALL = "brew install agent-ping";
+export const BREW_CASK = "brew install --cask agent-ping";
+// formula 那条路（源码现编，App 留在 Homebrew 的 opt 目录）单独一行，供第二张卡用。
+export const BREW_FORMULA = "brew install agent-ping";
 export const BREW_RUN = "agent-ping";
-export const BREW_CMD = `${BREW_TAP}\n${BREW_TRUST}\n${BREW_INSTALL}\n${BREW_RUN}`;
+export const BREW_CMD = `${BREW_TAP}\n${BREW_TRUST}\n${BREW_CASK}`;
 
 export const MAC_BUILD = "cmake -S . -B build -G Ninja && cmake --build build && sh Tools/make_bundle.sh";
 export const LINUX_BUILD = "cmake -S . -B build-linux -G Ninja && cmake --build build-linux";
