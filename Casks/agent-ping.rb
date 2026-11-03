@@ -1,5 +1,5 @@
 cask "agent-ping" do
-  version "0.1.8"
+  version "0.1.9"
 
   # URL 刻意带版本号，而不是 releases/latest/download 那种固定路径：Homebrew 的下载缓存以
   # URL 为键，URL 不变就永远命中第一次下的那份包，新版本发布后装到的还是旧版（sha256 根本没机会起作用）。
