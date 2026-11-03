@@ -74,6 +74,7 @@ judgement are one code path.
 |---|---|---|
 | Window | borderless, transparent, follows the menu-bar item | same, via GLFW/X11 |
 | Status item | `NSStatusItem` with a three-number label | StatusNotifierItem over D-Bus (needs `libdbus-1-dev`; otherwise a stub with no tray icon) |
+| Right-edge dock | click-through strip at the screen edge, grows on proximity | same, via X11 `ShapeInput` + `XQueryPointer`; stays off on a display where either one cannot be verified |
 | Banner | `UNUserNotificationCenter` | shells out to `notify-send` (from `libnotify-bin`) |
 | Sound | `afplay` on a system sound | `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`, picked by what is installed and what the file format allows (`aplay` takes only `.wav`, `paplay` not) |
 | Autostart | a plist under `~/Library/LaunchAgents` | an entry under `$XDG_CONFIG_HOME/autostart` |
@@ -241,6 +242,8 @@ only, so questions and options stay empty for them.
 - GLFW3, FreeType 2, OpenGL 3.3 core
 - optional SQLite3 (without it, ZCode, WorkBuddy and OpenCode are skipped and the build warns)
 - optional libdbus-1 (Linux status item; without it the build falls back to a stub with no tray icon)
+- optional libx11 + libxext (Linux right-edge dock: input-shape passthrough and the
+  global pointer query; without them the dock stays off and CMake says so)
 - macOS 13+ **or** Linux with X11; `notify-send` for banners and any of
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` for sound
 
@@ -362,16 +365,24 @@ sh Tools/make_bundle.sh
 ```
 
 Linux (Debian 12 package names; installed, built, and run from a clean Debian 12
-container on 2026-10-30 — the UI rendered and the tray item registered on the
-session bus):
+container on 2026-11-03 — the UI rendered, the tray item registered on the session
+bus, and the right-edge dock was measured passing clicks through to the window
+underneath it):
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
-    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev
+    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
 cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 # the alert layer needs two more packages for real behaviour:
 #   libnotify-bin (banners), sound-theme-freedesktop (sound)
 ```
+
+`libx11-dev` and `libxext-dev` are what the right-edge dock needs: Debian 12's
+GLFW is 3.3, which has no mouse-passthrough attribute, so the dock supplies it
+with X11's `ShapeInput` and reads the pointer position with `XQueryPointer`.
+Missing either, the build still succeeds and CMake prints that the dock is off —
+the strip never appears rather than appearing as a transparent block that eats
+clicks.
 
 A slim container image needs `build-essential` (or another compiler) as well;
 `libdbus-1-dev` is what selects the real status item over the stub.

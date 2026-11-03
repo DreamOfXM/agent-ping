@@ -88,6 +88,11 @@ if(APPLE)
   set_source_files_properties(${FOCUS_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(CURSOR_SRC src/platform/cursor_macos.mm)
   set(MOTION_SRC src/platform/motion_macos.mm)
+  set(PASSTHROUGH_SRC src/platform/passthrough.cpp)
+  # macOS 这一档的穿透用 GLFW 3.4+ 的窗口属性（本机 3.5.1），不需要 X11。
+  set(X11_DEFS "")
+  set(X11_LIBS "")
+  set(X11_INC "")
   set_source_files_properties(${MOTION_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
   # 静态链 glfw 时 cocoa_window.m 会引用 CAMetalLayer，必须自己带上 QuartzCore
@@ -96,8 +101,10 @@ if(APPLE)
   set(PLATFORM_LIBS ${COCOA_LIB} ${IOKIT_LIB} ${OPENGL_LIB} ${COREGRAPHICS_LIB}
                     ${USERNOTIFICATIONS_LIB} ${QUARTZCORE_LIB})
 else()
-  # Debian 12 (bookworm) aarch64 实测零 error 编过，依赖就这四个包：
-  #   apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev libsqlite3-dev libgl1-mesa-dev
+  # Debian 12 (bookworm) aarch64 实测零 error 编过（2026-11-03 在容器里重编：cmake 3.25.1 + g++ 12）：
+  #   apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev libsqlite3-dev \
+  #     libgl1-mesa-dev libx11-dev libxext-dev
+  # libx11-dev/libxext-dev 是下面那条灯舱路要的，libglfw3-dev 不会把它们捎带进来。
   # 出图/跑 GUI 用 xvfb-run -a -s "-screen 0 1400x1100x24"（Mesa llvmpipe 软渲染即可，1.0x 栅格）。
   # 提醒层另需两个包才有真行为：libnotify-bin（横幅）、sound-theme-freedesktop + pipewire-utils
   #   或 alsa-utils（出声）—— 少哪一个，ap_notify_post 都会把「哪一边不通」写回 reason。
@@ -117,6 +124,37 @@ else()
   set(FOCUS_SRC src/platform/focus_posix.cpp)
   set(CURSOR_SRC src/platform/cursor_posix.cpp)
   set(MOTION_SRC src/platform/motion_posix.cpp)
+  set(PASSTHROUGH_SRC src/platform/passthrough.cpp)
+  # 灯舱那条 320×整条工作区高的透明带要两样 X11 才立得住：ShapeInput（点击穿透）与
+  # XQueryPointer（全局指针、物理按键）。GLFW 3.4 以上自带穿透属性，但 3.3（Debian 12）没有，
+  # 而全局点无论如何只能问 X 服务器。查到 x11+xext 就编真实现，查不到退到「读不到」并明说。
+  if(PkgConfig_FOUND)
+    pkg_check_modules(X11PC QUIET x11 xext)
+  endif()
+  set(X11_DEFS "")
+  set(X11_LIBS "")
+  set(X11_INC "")
+  if(X11PC_FOUND)
+    set(X11_DEFS AP_HAVE_X11=1)
+    set(X11_LIBS ${X11PC_LIBRARIES})
+    set(X11_INC ${X11PC_INCLUDE_DIRS})
+  else()
+    find_library(X11_LIB X11)
+    find_library(XEXT_LIB Xext)
+    find_path(X11_HDR X11/Xlib.h)
+    find_path(XEXT_HDR X11/extensions/shape.h)
+    if(X11_LIB AND XEXT_LIB AND X11_HDR AND XEXT_HDR)
+      set(X11_DEFS AP_HAVE_X11=1)
+      set(X11_LIBS ${X11_LIB} ${XEXT_LIB})
+      set(X11_INC ${X11_HDR})
+    else()
+      message(STATUS "X11：查不到 x11/xext 开发包（apt-get install libx11-dev libxext-dev），"
+                     "这一档读不到全局指针、灯舱那条带不会出现")
+    endif()
+  endif()
+  if(X11_DEFS)
+    message(STATUS "X11：已链 x11/xext（全局指针＋点击穿透）")
+  endif()
   set(PLATFORM_LIBS ${OPENGL_LIB})
   if(LIBDBUS_FOUND)
     set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
@@ -150,16 +188,17 @@ add_executable(pin_imgui_shell
   ${FOCUS_SRC}
   ${CURSOR_SRC}
   ${MOTION_SRC}
+  ${PASSTHROUGH_SRC}
   ${IMGUI_SRC}
   # 粗体字形要真加粗轮廓（FT_GlyphSlot_Embolden）才不糊：只给 pin_imgui_shell 编进来，
   # i18n_probe 只量覆盖，不需要加载器。
   ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
-target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
+target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC} ${X11_INC})
 # 面板表头那个「v…」就取这一个数（r20_views.inc 的 RHead）。0.1.7 那次只改了
 # Info.plist 与 Formula，这里的 0.1.6 跟着编进了二进制，屏上念的版本号比装的包低一格。
-target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="${PROJECT_VERSION}")
-target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="${PROJECT_VERSION}" ${X11_DEFS})
+target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} ${X11_LIBS} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})
   target_link_directories(pin_imgui_shell PRIVATE ${LIBDBUS_LIBRARY_DIRS})
@@ -198,6 +237,24 @@ add_executable(claims_probe
 )
 target_include_directories(claims_probe PRIVATE src)
 target_link_libraries(claims_probe Threads::Threads)
+
+# X11 这一档的取证探针：点击到底穿没穿过这条带，只有 X 服务器答得出——事件送给谁由
+# 输入形状决定，不是我们自己在日志里说「我穿透了」。只在链得上 x11/xext/Xtst 的 Linux 上建。
+if(NOT APPLE AND X11_DEFS)
+  find_library(XTST_LIB Xtst)
+  if(XTST_LIB)
+    add_executable(x11_probe
+      src/x11_probe.cpp
+      ${PASSTHROUGH_SRC}
+      ${CURSOR_SRC}
+    )
+    target_include_directories(x11_probe PRIVATE src ${GLFW_INC} ${X11_INC})
+    target_compile_definitions(x11_probe PRIVATE ${X11_DEFS})
+    target_link_libraries(x11_probe ${GLFW_LIB} ${X11_LIBS} ${XTST_LIB} ${OPENGL_LIB} Threads::Threads)
+  else()
+    message(STATUS "x11_probe：没找到 Xtst（apt-get install libxtst-dev），这一支取证不建")
+  endif()
+endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 安装规则：解决「装完之后去哪儿找它」。

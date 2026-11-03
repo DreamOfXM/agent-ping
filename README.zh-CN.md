@@ -61,6 +61,7 @@
 |---|---|---|
 | 窗口 | 无边框、透明、跟着菜单栏项落位 | 同，走 GLFW/X11 |
 | 状态项 | `NSStatusItem`，标签是三个数 | D-Bus 上的 StatusNotifierItem（要 `libdbus-1-dev`，没有就退成无托盘的占位实现） |
+| 右缘灯舱 | 点得穿的竖条贴在屏幕右缘，指针推近才长开 | 同，走 X11 的 `ShapeInput` + `XQueryPointer`；哪一样验不过，整条带就不出现 |
 | 横幅 | `UNUserNotificationCenter` | 起子进程跑 `notify-send`（来自 `libnotify-bin`） |
 | 提示音 | `afplay` 播系统音 | 按安装情况依次试 `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`，并匹配文件格式（`aplay` 只吃 `.wav`，`paplay` 就不试 wav） |
 | 登录时启动 | `~/Library/LaunchAgents` 下的 plist | `$XDG_CONFIG_HOME/autostart` 下的条目 |
@@ -207,6 +208,7 @@ Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别�
 - GLFW3、FreeType 2、OpenGL 3.3 core
 - 可选 SQLite3（没有它，ZCode、WorkBuddy、OpenCode 三路被跳过，构建会警告）
 - 可选 libdbus-1（Linux 状态项；没有它构建退成无托盘图标的占位实现）
+- 可选 libx11 + libxext（Linux 右缘灯舱：输入形状穿透与全局指针；没有它灯舱关着，CMake 会明说）
 - macOS 13+ **或** 带 X11 的 Linux；横幅要 `notify-send`，出声要
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` 里任意一个
 
@@ -311,14 +313,20 @@ cmake -S . -B build -G Ninja && cmake --build build
 sh Tools/make_bundle.sh
 ```
 
-Linux（Debian 12 包名；2026-10-30 在全新 Debian 12 容器里照下面三行装成、构建、跑起来并截到界面）：
+Linux（Debian 12 包名；2026-11-03 在全新 Debian 12 容器里照下面几行装成、构建、跑起来：
+界面截到了、托盘项挂上了会话总线、右缘灯舱量到了「点击穿到它下面那块窗」）：
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
-    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev
+    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
 cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 # 提醒层要真行为还需两个包：libnotify-bin（横幅）、sound-theme-freedesktop（出声）
 ```
+
+`libx11-dev`、`libxext-dev` 是右缘灯舱要的：Debian 12 的 GLFW 停在 3.3，没有鼠标穿透这个
+窗口属性，灯舱于是自己用 X11 的 `ShapeInput` 补上，指针位置也只能问 `XQueryPointer`。
+少这两个包构建照样过，CMake 会明说灯舱关着——那条带不出现，而不是出现成一根吃掉点击的
+透明柱子。
 
 精简容器镜像还得补 `build-essential`（或别的编译器）；`libdbus-1-dev` 决定的是走真
 状态项还是占位实现。

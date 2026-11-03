@@ -23,6 +23,7 @@
 #include "platform/focus.h"
 #include "platform/cursor.h"
 #include "platform/motion.h"
+#include "platform/passthrough.h"
 #include "alert.h"
 #include "claims.h"
 #include "scan.h"
@@ -1885,7 +1886,9 @@ static bool g_edgePass = true;          // 窗口当前是不是鼠标穿透（�
 #ifdef __APPLE__
 static const bool g_edgeHost = true;
 #else
-static const bool g_edgeHost = false;   // X11 拿不到可靠的全局指针与穿透，整条不出现
+// X11 这一档要有「能穿透」这条真路才敢亮这条带：路不通就整条不出现，建窗后问过系统再定
+// （见 main 里那次 ap_mouse_passthrough_supported）。默认关，不给「没问就算有」留口子。
+static bool g_edgeHost = false;
 #endif
 
 enum EdgeState { EDGE_IDLE = 0, EDGE_PEEK = 1 };
@@ -6486,6 +6489,21 @@ static const char* WinModeName(int m) {
         default:         return "收着";
     }
 }
+/// 切换鼠标穿透走平台层：GLFW 3.4 以下没有 GLFW_MOUSE_PASSTHROUGH（Debian 12 停在 3.3.8），
+/// 那条路得由 X11 的 ShapeInput 补。做不到时明说一句并且只说一次——静默继续等于在桌面上
+/// 留一条吞点击的透明竖条；每帧一条又会把真信号埋掉。
+static void ApPass(GLFWwindow* w, bool on) {
+    char reason[96] = {0};
+    const int r = ap_set_mouse_passthrough(w, on ? 1 : 0, reason, (int)sizeof reason);
+    static bool complained = false;
+    if (r < 0 && !complained) {
+        complained = true;
+        printf("[穿透] 做不到：%s｜这条带会挡住它覆盖区域的点击\n", reason);
+        fflush(stdout);
+    }
+    if (getenv("AGENTPING_EDGE_HITPROBE"))
+        printf("[穿透] 设为%s → %s%s\n", on ? "穿透" : "收点击", reason, r < 0 ? "（未生效）" : "");
+}
 /// 同一块窗口换形态只走这一处：show/hide、尺寸、位置、焦点、鼠标穿透全在这里落地。
 /// 别处只改意图（g_panelVisible / g_bannerActive）并置 g_modeDirty——两处各自 show/hide
 /// 会在同一帧里把窗口横竖各摆一次，实测闪成一条线。
@@ -6523,7 +6541,7 @@ static int ApplyWindowMode() {
             wx = EdgeWinX();
             wy = EdgeWinY();
             // 手柄窗口整条工作区高，默认穿透：只有指针落在零件上时才由主循环放开。
-            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_TRUE);
+            ApPass(g_win, true);
             glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
             g_edgePass = true;
             // 灯舱钉在工作区竖直居中，不再跟指针：只有窗口高度变了才重算。
@@ -6538,7 +6556,7 @@ static int ApplyWindowMode() {
         case WIN_PANEL:
             wx = g_panelPosKnown ? g_panelX : (g_waKnown ? g_waX + g_waW - kPanelW - 14 : 40);
             wy = g_panelPosKnown ? g_panelY : (g_waKnown ? g_waY + 34 : 40);
-            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            ApPass(g_win, false);
             glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
             g_edgePass = false;
             glfwSetWindowSize(g_win, wantW, wantH);
@@ -6549,7 +6567,7 @@ static int ApplyWindowMode() {
         case WIN_BANNER:
             wx = g_panelPosKnown ? g_panelX : (g_waKnown ? g_waX + g_waW - kPanelW - 14 : 40);
             wy = g_panelPosKnown ? g_panelY : (g_waKnown ? g_waY + 34 : 40);
-            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            ApPass(g_win, false);
             glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
             g_edgePass = false;
             glfwSetWindowSize(g_win, wantW, wantH);
@@ -6557,7 +6575,7 @@ static int ApplyWindowMode() {
             glfwShowWindow(g_win);   // 不抢焦点：他可能正在别的 App 里打字
             break;
         default:
-            glfwSetWindowAttrib(g_win, GLFW_MOUSE_PASSTHROUGH, GLFW_FALSE);
+            ApPass(g_win, false);
             glfwHideWindow(g_win);
             break;
     }
@@ -7119,6 +7137,23 @@ int main(int argc, char** argv) {
     if (!win) return 2;
     g_win = win;
     glfwMakeContextCurrent(win);
+#ifndef __APPLE__
+    {
+        // 灯舱这条带要两样齐全才允许出现：点得穿（否则它是一块挡桌面的透明柱子）＋
+        // 读得到全局指针（否则「推近才长开」永远不触发，摆出来的是一根打不开的柱子）。
+        // 这一问不改窗口状态：置空/还原输入形状是 ApplyWindowMode 的活，建窗时动它会把
+        // 「面板本来该收点击」这一档先写脏。Wayland 上 GLFW 的穿透属性给得了、X 的指针读不到，
+        // 于是整条带关——这是要的效果，不是漏的。
+        char pr[96] = {0};
+        const bool canPass = ap_mouse_passthrough_supported(win, pr, (int)sizeof pr) > 0;
+        double gx = 0, gy = 0;
+        const bool canCur = ap_global_cursor(&gx, &gy);
+        g_edgeHost = canPass && canCur;
+        printf("[灯舱] 这条路＝%s（穿透 %s｜全局指针 %s｜%s）\n", g_edgeHost ? "有" : "没有",
+               canPass ? "有" : "没有", canCur ? "读得到" : "读不到", pr);
+        fflush(stdout);
+    }
+#endif
 
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -7616,8 +7651,7 @@ int main(int argc, char** argv) {
                     const bool flipped = wantMouse == g_edgePass;
                     if (flipped) {   // 要收点击却还穿透着（或反过来）
                         g_edgePass = !wantMouse;
-                        glfwSetWindowAttrib(win, GLFW_MOUSE_PASSTHROUGH,
-                                            g_edgePass ? GLFW_TRUE : GLFW_FALSE);
+                        ApPass(win, g_edgePass);
                     }
                     // 探针每秒报一次，不只报切换那一帧：静置时「系统命中是谁」才是穿透的证据，
                     // 只报切换等于永远看不见「没挡桌面」的那一半。
