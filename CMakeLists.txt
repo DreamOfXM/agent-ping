@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(agent_ping_cpp VERSION 0.1.6 LANGUAGES CXX)
+project(agent_ping_cpp VERSION 0.1.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -87,6 +87,8 @@ if(APPLE)
   set(FOCUS_SRC src/platform/focus_macos.mm)
   set_source_files_properties(${FOCUS_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(CURSOR_SRC src/platform/cursor_macos.mm)
+  set(MOTION_SRC src/platform/motion_macos.mm)
+  set_source_files_properties(${MOTION_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   find_library(USERNOTIFICATIONS_LIB UserNotifications REQUIRED)
   # 静态链 glfw 时 cocoa_window.m 会引用 CAMetalLayer，必须自己带上 QuartzCore
   # （动态链时是 libglfw.3.dylib 的 LC_LOAD_DYLIB 替你带进来的，静态链没人管）。
@@ -114,6 +116,7 @@ else()
   set(AUTOSTART_SRC src/platform/autostart_posix.cpp)
   set(FOCUS_SRC src/platform/focus_posix.cpp)
   set(CURSOR_SRC src/platform/cursor_posix.cpp)
+  set(MOTION_SRC src/platform/motion_posix.cpp)
   set(PLATFORM_LIBS ${OPENGL_LIB})
   if(LIBDBUS_FOUND)
     set(STATUSBAR_SRC src/platform/statusbar_sni.cpp)
@@ -146,13 +149,16 @@ add_executable(pin_imgui_shell
   ${AUTOSTART_SRC}
   ${FOCUS_SRC}
   ${CURSOR_SRC}
+  ${MOTION_SRC}
   ${IMGUI_SRC}
   # 粗体字形要真加粗轮廓（FT_GlyphSlot_Embolden）才不糊：只给 pin_imgui_shell 编进来，
   # i18n_probe 只量覆盖，不需要加载器。
   ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
 )
 target_include_directories(pin_imgui_shell PRIVATE src ${IMGUI_DIR} ${GLFW_INC} ${FREETYPE_INC})
-target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="0.1.6")
+# 面板表头那个「v…」就取这一个数（r20_views.inc 的 RHead）。0.1.7 那次只改了
+# Info.plist 与 Formula，这里的 0.1.6 跟着编进了二进制，屏上念的版本号比装的包低一格。
+target_compile_definitions(pin_imgui_shell PRIVATE AP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(pin_imgui_shell ${GLFW_LIB} ${PLATFORM_LIBS} ${FREETYPE_LIB} Threads::Threads)
 if(LIBDBUS_FOUND)
   target_include_directories(pin_imgui_shell PRIVATE ${LIBDBUS_INCLUDE_DIRS})

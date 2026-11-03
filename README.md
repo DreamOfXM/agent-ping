@@ -300,10 +300,10 @@ only needed by the source build.
 **Alternative: the formula (built from source, stays out of `/Applications`)**
 
 Use this if you would rather not run a prebuilt binary, want to compile it
-yourself, or simply cannot pull 26 MB. It builds from source at the
-[v0.1.7](https://github.com/DreamOfXM/agent-ping/tree/v0.1.7) tag, so the first
-install needs the Xcode command line tools and takes about a minute on an
-Apple-silicon Mac.
+yourself, or simply cannot pull 26 MB. It builds from the tagged source pinned
+in [`Formula/agent-ping.rb`](https://github.com/DreamOfXM/agent-ping/blob/main/Formula/agent-ping.rb),
+so the first install needs the Xcode command line tools and takes about a
+minute on an Apple-silicon Mac.
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping

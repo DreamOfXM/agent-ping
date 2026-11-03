@@ -24,6 +24,10 @@ class AgentPing < Formula
     (app/"Contents/Resources/fonts").mkpath
     cp "build/pin_imgui_shell", app/"Contents/MacOS/AgentPing"
     cp "assets/Info.plist", app/"Contents/Info.plist"
+    # 包里的版本号盖成 formula 这一行的 version：屏上「v…」来自 CMakeLists 的
+    # project(VERSION)，而它跟标签名同源。0.1.7 就是各写各的——包 0.1.7、界面 v0.1.6。
+    info = app/"Contents/Info.plist"
+    info.write info.read.sub(%r{(<key>CFBundleShortVersionString</key>\s*<string>)[^<]*}) { "#{$1}#{version}" }
     cp "assets/AppIcon.icns", app/"Contents/Resources/AppIcon.icns"
     cp Dir["assets/menubar-icon*.png"], app/"Contents/Resources/"
     cp Dir["fonts/*.ttf"], app/"Contents/Resources/fonts/"

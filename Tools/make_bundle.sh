@@ -29,6 +29,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/fonts"
 cp "$BIN" "$APP/Contents/MacOS/AgentPing"
 cp assets/Info.plist "$APP/Contents/Info.plist"
+# 版本号只认 CMakeLists 的 project(VERSION) 这一处：二进制里那个「v…」由它编进去，
+# 包里的 Info.plist 在这里盖同一个数。0.1.7 那次两处各写各的，屏上念 v0.1.6、包装出来 0.1.7。
+VER=$(awk '/^project\(agent_ping_cpp VERSION/{print $3; exit}' CMakeLists.txt)
+[ -n "$VER" ] || { echo "CMakeLists 里读不到 project VERSION"; exit 2; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$APP/Contents/Info.plist"
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VER" ] \
+  || { echo "Info.plist 没盖上 $VER"; exit 2; }
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp assets/menubar-icon.png assets/menubar-icon@2x.png "$APP/Contents/Resources/"
 cp fonts/*.ttf "$APP/Contents/Resources/fonts/"

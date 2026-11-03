@@ -22,6 +22,7 @@
 #include "platform/autostart.h"
 #include "platform/focus.h"
 #include "platform/cursor.h"
+#include "platform/motion.h"
 #include "alert.h"
 #include "claims.h"
 #include "scan.h"
@@ -6394,6 +6395,26 @@ static void EdgeDrawPeek(ImDrawList* dl, double now) {
     dl->PopClipRect();
 }
 
+/// 这位用户要不要少动。开机读一次并缓存：macOS 那一格偏好没有公开的「值变了」通知可挂
+/// （只有 HIServices 里下划线开头的私有符号，不链），所以翻完系统设置要重启 Agent Ping 才
+/// 生效——这是明写的边界，不是漏的。
+/// AGENTPING_REDUCE_MOTION=1/0 把这条分支钉住给取证用：实拍那台机器上系统值是 0，
+/// 不钉就拍不到冻结那一格（也不去动他的无障碍设置）。
+static bool EdgeMotionReduced() {
+    static const bool reduced = [] {
+        char src[160] = "";
+        int v = ap_reduce_motion(src, (int)sizeof src);
+        const char* ov = getenv("AGENTPING_REDUCE_MOTION");
+        const bool forced = ov && *ov;
+        if (forced) v = (*ov == '0') ? 0 : 1;
+        fprintf(stderr, "[减弱动效] %d · %s%s\n", v, src,
+                forced ? "（AGENTPING_REDUCE_MOTION 覆盖）" : "");
+        fflush(stderr);
+        return v != 0;
+    }();
+    return reduced;
+}
+
 /// 细线↔胶囊的进度：进带 130ms、离带 200ms（收回比展开慢，手在边缘蹭来蹭去时不会抖）。
 /// 有待介入时恒为 1——那块舱是提醒的本体，不能藏。
 static void EdgeRevealStep(double now, bool hasWork) {
@@ -6405,7 +6426,9 @@ static void EdgeRevealStep(double now, bool hasWork) {
     const float to = want ? 1.0f : 0.0f;
     if (g_edgeReveal == to) return;
     g_edgeRevealTo = to;
-    const float sp = 1.0f / (to > g_edgeReveal ? 0.13f : 0.20f);
+    // 减弱动效时这一步直接落到位：130/200ms 那一段是「尺寸变化」，正是要被减掉的东西。
+    const float sp = EdgeMotionReduced() ? 1.0e6f
+                                         : 1.0f / (to > g_edgeReveal ? 0.13f : 0.20f);
     g_edgeReveal = to > g_edgeReveal ? std::min(to, g_edgeReveal + dt * sp)
                                      : std::max(to, g_edgeReveal - dt * sp);
     if (g_edgeReveal != to) g_edgeRevealUntil = now + 0.05;
@@ -6420,6 +6443,11 @@ static bool EdgeGlowOn() {
                                  !strcmp(getenv("AGENTPING_EDGE_GLOW"), "0");
     return !glow_off && g_pd.run > 0 && !g_edgeNoRun;
 }
+
+/// 这团光动不停。「减弱动效」开着时光仍然要画——它是「有会话在跑」唯一的可见标记，
+/// 撤掉等于把 11-03 刚修好的那一格再弄回看不见——只是把相位钉死在 0。
+/// 出帧闸门必须认这句而不是 EdgeGlowOn()：光不动时画面是静的，还按动画每帧刷就是空转。
+static bool EdgeGlowMoves() { return EdgeGlowOn() && !EdgeMotionReduced(); }
 
 /// 灯舱一直在：待处理或在跑＝那块 44pt 的舱（舱体外沿跑一团「在跑」的晕）；两者都无＝0 条收成小条。
 /// 展开时舱换成 .56 的底、箭头提到 .86，预览卡后画——稿子的 z-index 是 .dock 30／.peek 45，卡的落影压在舱那一侧。
@@ -6440,7 +6468,8 @@ static void DrawEdge(ImDrawList* dl, double now) {
         // 先画舱再画光：稿子里 .glow 是 .dock 的最后一个子元素，压在舱体上（舱内那半条看得清），
         // 反过来画会被实心舱底遮掉一半。EdgeDrawDock 里会回填 g_edgeAgentsH，跑道几何要在它之后取。
         EdgeDrawDock(dl, peek);
-        if (EdgeGlowOn()) EdgeRunGlow(dl, EdgeDockRect(), now, pending ? 7 : 3);
+        if (EdgeGlowOn()) EdgeRunGlow(dl, EdgeDockRect(), EdgeMotionReduced() ? 0.0 : now,
+                                      pending ? 7 : 3);
     } else {
         const float a = g_edgeReveal;
         if (a < 1.0f) EdgeDrawNub(dl, 1.0f - a);
@@ -7614,7 +7643,7 @@ int main(int argc, char** argv) {
                                    enow < g_edgeAnimUntil || enow < g_edgeRevealUntil ||
                                    g_edgeReveal != g_edgeRevealTo ||
                                    seqE != g_pd_seq ||
-                                   EdgeGlowOn() ||
+                                   EdgeGlowMoves() ||
                                    enow - g_edgeBeatAt > 2.0;
                 if (!dirty) { g_edgeRevealAt = -1; usleep(16000); continue; }   // 空转那几帧不计动画步长
                 int fw, fh;
