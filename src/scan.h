@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -145,7 +146,32 @@ struct Snapshot {
     /// hook 收件箱的三个数：读到几条、真落到会话上几条、解析不了几条。
     /// 只报 live 会把已作废的也算成待处理，面板就比真相急。
     int hook_live = 0, hook_landed = 0, hook_dropped = 0;
+    /// Qoder 桌面 App 的运行状态盖上了几条（见 QoderLive）。0 ＝ 这一轮 App 没给可用读数，
+    /// 那 qoder 那一行的状态就仍是由日志时间戳反推的。
+    int live_landed = 0;
 };
+
+/// Qoder 桌面 App 自己按会话提交的运行状态。它每次状态变更往
+/// `…/com.qoder.app.stable/logs/<run>/main.log` 写一行
+/// `ChatSession control state committed {"sessionId":…,"runtimeState":…,…}`，
+/// 实测取值 cold／opening／running／waiting-user／ready／interrupted（本机 14 份日志 1337 行）。
+/// 这是「它现在到底在不在跑」的正证，比按日志静默多久反推强一整档。
+struct QoderLive {
+    double ts = 0;
+    std::string state;      // runtimeState 原文
+    int pending = 0;        // pendingInteractionCount：>0 ＝ 它正等你点一下
+};
+
+/// 认一行 control state；不是这一行返回 false。解析与读盘分开，探针才能拿真日志行喂它。
+bool parse_qoder_control(const std::string& line, std::string& sid, QoderLive& out);
+
+/// 读最新一轮 App 日志，按 sessionId 留最新的那行。桌面 App 没跑过 ＝ 空表。
+std::map<std::string, QoderLive> read_qoder_live();
+
+/// 把 App 报的运行状态盖到 qoder 那一路上：running/opening 压掉「90 秒没回＝疑似等授权」
+/// 的反推，waiting-user（或 pendingInteractionCount>0）才算真等你、才许响铃。
+/// 返回盖上几条。必须在 apply_hook_signals 之前调 —— CLI 亲口问出来的那句话优先级更高。
+int apply_qoder_live(Snapshot& snap, const std::map<std::string, QoderLive>& live, double now);
 
 /// 全量重扫一轮。内部按 (mtime, size, 窗起点) 缓存「尾部判定」和「窗内用量」，
 /// 所以每几秒调一次只会重读这一轮真的被写过的文件。

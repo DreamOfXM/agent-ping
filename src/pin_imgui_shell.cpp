@@ -114,6 +114,9 @@ static const Key kStr[] = {
                         "← Torna a tutti", "← 全体に戻る", "← 전체로 돌아가기"}},
     // await 行专属的三颗（稿子 SessionRow.tsx:190 / 状态胶囊「等待确认」）
     {"await_confirm",  {"等待确认", "Waiting to confirm", "Warten auf Zusage", "In attesa di conferma", "確認待ち", "확인 대기"}},
+    {"suspect_await",  {"疑似等你授权", "Possibly waiting", "Wartet möglicherweise", "In attesa forse", "おそらく待機", "대기 중일 수 있음"}},
+    // 待处理行右端那一格（与「授权」「回答」同列）：只放限定词，档名由图标承担。
+    {"r_suspect_short", {"疑似", "Maybe", "Evtl.", "Forse", "疑似", "미확인"}},
     {"ask_confirm",    {"需要你确认", "needs your confirmation", "braucht deine Bestätigung", "richiede la tua conferma", "確認が必要です", "확인 필요"}},
     {"ask_answer",     {"需要你回答", "needs your answer", "braucht deine Antwort", "richiede una risposta", "回答が必要です", "답변이 필요"}},
     {"in_wait",        {"在等你", "Waiting on you", "Wartet auf dich", "In attesa di te", "待っています", "기다리는 중"}},
@@ -1449,6 +1452,7 @@ static const ImU32 kT4       = IM_COL32(97, 106, 116, 255);  // --t4 #616A74
 static const ImU32 kT5       = IM_COL32(69, 77, 86, 255);    // --t5 #454D56
 static const ImU32 kAmber    = IM_COL32(232, 163, 61, 255);  // --amber #E8A33D
 static const ImU32 kCyan     = IM_COL32(95, 198, 218, 255);  // --cyan #5FC6DA
+static const ImU32 kCyanHi   = IM_COL32(127, 220, 236, 255); // 彗尾最亮那一段（稿子 rgba(127,220,236)）
 static const ImU32 kGreen    = IM_COL32(87, 179, 104, 255);  // --green #57B368
 static const ImU32 kRed      = IM_COL32(217, 105, 90, 255);  // --red #D9695A
 static const ImU32 kInk      = IM_COL32(10, 13, 17, 255);    // 反色字落在浅底上
@@ -1894,6 +1898,7 @@ static int g_edgeRow = -1;              // 预览卡里指针停在哪一行
 static bool g_edgeDownPrev = false;
 static int g_edgeForce = -1;            // AGENTPING_EDGE：取证时钉死一态
 static bool g_edgeEmpty = false;        // AGENTPING_EDGE_EMPTY：只验空态版面
+static bool g_edgeNoRun = false;        // AGENTPING_EDGE_NORUN＝把「有在跑」压成 0，只验「光只跟着在跑走」
 static bool g_edgeTrace = false;
 // 「没有待介入」那一档不再常驻一块灰：静止时只是贴屏幕右沿的一道细线，指针推到跟前才长成胶囊。
 // 11-01 用户实拍：浅色桌面上那颗常驻小条被压成 #787a7e 的死灰块，外面还糊一圈投影。
@@ -2169,12 +2174,14 @@ static float DiscCov(float r, float R, float sig) {
     return acc * h / 3.0f;
 }
 
-static void GlowDisc(ImDrawList* dl, ImVec2 c, float R, float blur, float spread, ImU32 col) {
+static int GlowDisc(ImDrawList* dl, ImVec2 c, float R, float blur, float spread, ImU32 col,
+                    float min_inc = 0.0f) {
     const float sig = blur * 0.5f;
     const float a0 = (float)(col >> 24) / 255.0f;
-    if (sig < 0.3f || a0 <= 0.0f) return;
+    if (sig < 0.3f || a0 <= 0.0f) return 0;
     const float Rs = R + spread;
     const float step = 0.5f;
+    int nf = 0;                                 // 真画了几层，给成本读数用（不是推算）
     // 从最外圈往里画**实心**圆盘，每圈的 alpha 取「目标覆盖 − 已画覆盖」/(1 − 已画覆盖)，
     // 于是一个像素上从外到内的所有次混合正好凑成模糊后的轮廓覆盖率。
     // 不用描边圆环：环宽 0.5pt 在 Retina 上只有 1 个设备像素，ImGui 的路径抗锯齿两边各
@@ -2183,12 +2190,22 @@ static void GlowDisc(ImDrawList* dl, ImVec2 c, float R, float blur, float spread
     for (float e = 3.5f * sig; e > 0.0f; e -= step) {
         float t = a0 * DiscCov(R + e + step * 0.5f, Rs, sig);
         if (t <= done) continue;
-        int a = (int)(255.0f * (t - done) / (1.0f - done) + 0.5f);
+        float inc = (t - done) / (1.0f - done);
+        // 攒到 ≥min_inc 再画：8 位帧缓冲下，一层只有 1/255 时每个通道各被舍向 0，叠 35 层
+        // 也攒不出一个 LSB，且「哪条通道先饿死」取决于色值——实测把这支青光的红通道整个吃掉
+        // （稿子头 Δ(+33,+66,+70) → 画成 (+3,+50,+63)，舱外读成纯青 #00ACAC）。
+        if (inc < min_inc) continue;
+        int a = (int)(255.0f * inc + 0.5f);
         if (a <= 0) continue;
         dl->AddCircleFilled(c, R + e + step * 0.5f, (col & 0x00FFFFFFu) | ((ImU32)a << 24), 0);
+        nf++;
         done += (1.0f - done) * ((float)a / 255.0f);   // 按真画上去的浓度反算，量化偏差不累积
     }
-    dl->AddCircleFilled(c, R, col, 0);                 // 原形内部，随后被实心元素盖住
+    if (R > 0.0f) {
+        dl->AddCircleFilled(c, R, col, 0);             // 原形内部，随后被实心元素盖住
+        nf++;
+    }
+    return nf;
 }
 
 // 同一条曲线，原形换成长方条。取短边算覆盖率：稿子的 Rail 是 3pt 宽、39pt 高，
@@ -2371,11 +2388,13 @@ static int g_shown[G_N];      // 上一帧每组真摆了几条（翻页步长�
 // 所以每帧把这组账写成一行诊断，配合 AGENTPING_HITS 的命中区表一起读。
 static char g_fold_diag[256];
 static std::map<std::string, double> g_later;    // 「稍后提醒」：会话键 → 恢复时刻（epoch 秒）
-// 「看过」按会话键记，落盘 seen.txt。原来是一条时间水位线（seen_until）：点一条就把水位
-// 推到它的完成时刻，同批完成、还没看过的其它会话被一起抹掉——2026-10-31 用户实测
-// 「一个 agent 多条待处理，点一条其余全没了」。水位线只留作升级前那批存量的起点。
-static std::set<std::string> g_seen;
-static std::vector<std::string> g_seen_order;
+// 「看过」按「会话键 → 看过那一轮的完成时刻」记，落盘 seen.txt（一行「键<TAB>时刻」）。
+// 两代教训各砍掉一种写法：只存一条时间水位线，点一条会把同批还没看的其它会话一起抹掉
+// （2026-10-31 实测「一个 agent 多条待处理，点一条其余全没了」）；只存会话键，同一个会话
+// 再跑完第二轮就永远不再出数（2026-11-02 实测：一条 WorkBuddy 会话 15:31 点过一次，之后
+// 又跑完 9 轮，右缘灯舱一整天再没出过数）。水位线只留作升级前那批存量的起点。
+static std::map<std::string, long long> g_seen;
+static std::vector<std::string> g_seen_order;    // 键的首次出现顺序：压缩时按它截断
 
 /// Tailwind 的 transition-* 默认曲线 cubic-bezier(.4,0,.2,1) + duration-150。
 static const float kEaseTail[4] = { 0.4f, 0.0f, 0.2f, 1.0f };
@@ -3190,15 +3209,28 @@ static void DrainBannerClick() {
 
 /// 就地翻这一行的状态：下一轮重扫（3s）才会走 RebuildPanel，点下去必须马上看见反应。
 static int GroupOf(int st);    // 定义在绘制段；这里前置声明给 MarkSeen 用
-/// 看过一条完成会话（双击跳走或 ⓘ 进详情）：把这一条记进「看过」账本并落盘。
+/// 这一条算不算「跑完但没人看过」：完成时刻在水位线之后，且账本里没有这一轮的记录。
+/// 比的是时刻不是「键在不在」：同一个会话再跑完一轮，完成时刻变大＝重新变成没看过。
+/// 调用方自己先判 GroupOf(state)==G_DONE（这一层只管账本，样例轮没有 state 可判）。
+static bool RowUnseen(const std::string& key, long long at) {
+    const auto it = g_seen.find(key);
+    return at > g_cfg.seen_until && (it == g_seen.end() || it->second < at);
+}
+/// 看过一条完成会话（双击跳走或 ⓘ 进详情）：把「这一轮的完成时刻」记进账本并落盘。
 /// 不落盘的话重启就把今天全部点回未读，那比没有点还吵。
-/// 记的是会话键，不是时间水位线：水位线一推，同批完成、还没看过的其它会话会被一起
-/// 抹掉（2026-10-31 用户实测「点一条其余全没了」），与「点哪个哪个消失」相反。
+/// 记到「哪一轮」而不是「哪个会话」：只存键，同一会话再跑完一轮就再也不回待处理。
 static void MarkSeen(const UIRow& r) {
     if (GroupOf(r.state) != G_DONE) return;
-    if ((long long)r.at <= g_cfg.seen_until) return;    // 升级前那批存量：本来就算看过
-    if (!g_seen.insert(r.key).second) return;           // 已经记过：不重复落盘
-    g_seen_order.push_back(r.key);
+    const long long at = (long long)r.at;
+    if (at <= g_cfg.seen_until) return;              // 升级前那批存量：本来就算看过
+    auto it = g_seen.find(r.key);
+    if (it != g_seen.end()) {
+        if (it->second >= at) return;                // 这一轮已经记过：不重复落盘
+        it->second = at;
+    } else {
+        g_seen.emplace(r.key, at);
+        g_seen_order.push_back(r.key);
+    }
     // 内存里这一条立刻撤下「未看」：活扫描要到下一轮（≤3s）才重算，样例轮根本不重算，
     // 不当场改就会出现「账本记了、屏上还在」的半拍。只改被点的那一条。
     for (auto& row : g_pd.rows)
@@ -3206,13 +3238,18 @@ static void MarkSeen(const UIRow& r) {
     if (g_pd.unseen_n > 0) g_pd.unseen_n--;
     std::string err;
     if (g_seen_order.size() > 4000) {                   // 键会随日子涨：只留最近 2000，整份重写
-        g_seen_order.erase(g_seen_order.begin(), g_seen_order.end() - 2000);
-        g_seen = std::set<std::string>(g_seen_order.begin(), g_seen_order.end());
-        if (!ap::save_seen(g_seen_order, &err))
+        const size_t cut = g_seen_order.size() - 2000;
+        for (size_t i = 0; i < cut; i++) g_seen.erase(g_seen_order[i]);
+        g_seen_order.erase(g_seen_order.begin(), g_seen_order.begin() + (long)cut);
+        std::vector<std::string> lines;
+        lines.reserve(g_seen.size());
+        for (const auto& kv : g_seen)
+            lines.push_back(kv.first + "\t" + std::to_string(kv.second));
+        if (!ap::save_seen(lines, &err))
             fprintf(stderr, "[已读] 账本压缩没写下去：%s\n", err.c_str());
         return;
     }
-    if (!ap::append_seen(r.key, &err))
+    if (!ap::append_seen(r.key + "\t" + std::to_string(at), &err))
         fprintf(stderr, "[已读] 没写下去：%s\n", err.c_str());
 }
 
@@ -4076,6 +4113,16 @@ static ImU32 GrpColor(int g) {
         default: return kStDone;
     }
 }
+/// 「现在真要你动手」的硬判据：有正证的待授权（hook 亲口问的、或 Qoder 桌面 App 自己
+/// 报的 waiting-user）＋ 异常中断。反推出来的那条（inferred）不算——它给不了正证。
+/// 11-02 实拍误判就是这条漏的：一条跑了 240 秒的 git clone 被「tool_use 90 秒没回」
+/// 反推成待授权，右缘于是摆出「待处理 1」，而同一分钟 Qoder 的 main.log 写着
+/// runtimeState:"running"。这一条以后仍留在会话列表里，标「疑似等你授权」，
+/// 但不进任何计数、不进待处理清单、不响铃（响铃那侧本来就拦着）。
+static bool DemandsYou(const UIRow& r) {
+    const int g = GroupOf(r.state);
+    return g == G_FAIL || (g == G_AWAIT && !r.inferred);
+}
 
 // 逐码点量宽后贪心折行；超过 maxlines 就在最后一行补省略号。
 // （整串反复量会随文本长度平方增长，常驻面板吃不消，所以先拆成单字再累加。）
@@ -4577,7 +4624,8 @@ static float drawDetail(ImDrawList* dl, float L, float R, float maxBot, int loc,
         return cy + kTierPx[T_SM] * 1.5f;
     }
     const bool asks = RowAsksQuestion(*r);
-    cy += SourceCard(dl, L, R, cy, *r, asks ? "in_wait" : "await_confirm",
+    cy += SourceCard(dl, L, R, cy, *r,
+                     asks ? "in_wait" : (r->inferred ? "suspect_await" : "await_confirm"),
                      asks ? kStRun : kStAwait, loc) + 10.0f;
 
     const std::string q = r->question.empty() ? r->title : r->question;
@@ -4864,10 +4912,11 @@ static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UI
     // 呼吸环：pb-breathe 是 box-shadow 0 0 0 {0→6px} 琥珀 42%→0%，1.9s 一轮 ——
     // 零模糊 + 只有 spread，所以是一圈**硬边实心带**：外沿＝行框外扩 t，内沿＝行框（圆角 7）。
     // 只有 await 行挂这个动画，且光晕色是写死的琥珀而不是行状态色 —— 照抄。
+    // 反推出来的那条（inferred）不挂：这圈琥珀是「现在动手」的催促，而它给不了正证（见 DemandsYou）。
     // 不用粗描边：ImGui 给描边的内外两条边各羽化约 1 个设备像素，实测带中段比应有浓度低
     // 4/255、外沿那一列只剩一半（差 17/255）；改成「填外圆角矩形 → 用卡底回填行框」，
     // 边界是填充级硬边，和 Chrome 的 spread 同形。必须在状态条之前画，回填才不会擦掉它。
-    if (is_await && !mute) {
+    if (is_await && !mute && !row.inferred) {
         float k = PingK(tn, 1.9f, kEaseOut);      // .anim-breathe = pb-breathe 1.9s ease-out
         float t = 6.0f * k;
         if (t > 0.8f) {
@@ -4904,7 +4953,9 @@ static float DrawSessionRow(ImDrawList* dl, float L, float R, float ry, const UI
     // 先量右侧这一坨的实宽，标题才知道自己剩多少（否则长标题会压在胶囊下）。
     // 宽度都要带上 1px 边框：稿子是 border-box，px-[6px] 之外还有左右各 1pt 的边。
     const bool asks_q = RowAsksQuestion(row);
-    std::string plab = T(is_await ? (asks_q ? "needs_you" : "await_confirm")
+    // 反推那条不写「等待确认」——它没有正证，只有「疑似」这两个字对得上（11-02 误判收口）。
+    std::string plab = T(is_await ? (row.inferred ? "suspect_await"
+                                     : (asks_q ? "needs_you" : "await_confirm"))
                                   : StateKey(row.state), loc);
     float pillW = 7 + 5 + 4 + TextWidth(plab, loc, T_PILL) + 7;
     std::string readlab = (is_await && !mute) ? T("mark_read", loc) : "";
@@ -5158,8 +5209,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.created = se.created;
             row.children = se.children;
             row.at = se.last_activity;
-            row.unseen = GroupOf(row.state) == G_DONE &&
-                         (long long)row.at > g_cfg.seen_until && g_seen.count(row.key) == 0;
+            row.unseen = GroupOf(row.state) == G_DONE && RowUnseen(row.key, (long long)row.at);
             if (se.state == ap::ST_FAILED) row.detail = se.error_text;   // 出错才有原文可引
             pd.rows.push_back(std::move(row));
             shown++;
@@ -5211,7 +5261,8 @@ static void RebuildPanel(const ap::Snapshot& s) {
     // 所以它的公式看不见这一档；把失败算成 0 会让面板比真相慢），running = 运行中 + 排队中。
     for (const auto& r : pd.rows) {
         int g = GroupOf(r.state);
-        if (g == G_AWAIT) { pd.needs++; pd.await_n++; }
+        // 「介入」这一档只数有正证的：反推那条仍画在会话列表里，但不推计数（见 DemandsYou）。
+        if (g == G_AWAIT) { if (!r.inferred) { pd.needs++; pd.await_n++; } }
         else if (g == G_FAIL) { pd.needs++; pd.fail_n++; }
         else if (g == G_RUN) pd.run++;
         else if (g == G_QUEUE) { pd.run++; pd.queue_n++; }
@@ -5226,7 +5277,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
     pd.window_start = s.window_start;
     // 每个工具「在等」几条：R31 的工具列表要摆这一格，判据与总览队列同源。
     for (const auto& r : pd.rows) {
-        if (GroupOf(r.state) != G_AWAIT && GroupOf(r.state) != G_FAIL) continue;
+        if (!DemandsYou(r)) continue;
         for (auto& t : pd.tools)
             if (t.id == r.agent_id) { t.wait_n++; break; }
     }
@@ -5595,7 +5646,7 @@ static std::vector<const UIRow*> EdgePendingRows() {
     if (!g_edgeEmpty) {
         for (const auto& r : g_pd.rows) {
             const int g = GroupOf(r.state);
-            if (g == G_AWAIT) seg[0].push_back(&r);
+            if (g == G_AWAIT) { if (!r.inferred) seg[0].push_back(&r); }
             else if (g == G_FAIL) seg[1].push_back(&r);
             else if (g == G_DONE && r.unseen) seg[2].push_back(&r);
         }
@@ -5613,7 +5664,7 @@ static int EdgePendingN() {
     int n = 0;
     for (const auto& r : g_pd.rows) {
         const int g = GroupOf(r.state);
-        if (g == G_AWAIT || g == G_FAIL || (g == G_DONE && r.unseen)) n++;
+        if (DemandsYou(r) || (g == G_DONE && r.unseen)) n++;
     }
     return n;
 }
@@ -5655,8 +5706,7 @@ static int EdgeCount() {
     if (g_edgeEmpty) return 0;
     int n = 0;
     for (const auto& r : g_pd.rows) {
-        const int g = GroupOf(r.state);
-        if (g == G_AWAIT || g == G_FAIL) n++;
+        if (DemandsYou(r)) n++;
     }
     return n;
 }
@@ -5691,10 +5741,10 @@ static float EdgeCapsW() {
     if (EdgeUnseenCount() > 0) w = std::fmax(w, EdgeCapW(std::to_string(EdgeUnseenCount())));
     return w;
 }
-/// 有待处理就摆 44pt 的舱；一条都没有时，静止是一道细线、指针推到跟前才长成 22pt 胶囊。
+/// 有待处理或有会话在跑就摆 44pt 的舱；两者都没有时，静止是一道细线、指针推到跟前才长成 22pt 胶囊。
 /// 命中框跟着「长成什么样」走：还没长出来就只吃那 3pt 细线，别把桌面右侧凭空挡出一条。
 static ERect EdgeHandleRect() {
-    if (EdgePendingN() > 0) {
+    if (EdgePendingN() > 0 || g_pd.run > 0) {
         ERect r = EdgeDockRect();
         const float w = EdgeCapsW();          // 格子顶出舱边时，那圈也还得吃得到鼠标
         if (w > r.w) { r.x -= (w - r.w) * 0.5f; r.w = w; }
@@ -6108,6 +6158,95 @@ static void EdgeCapSteel(ImDrawList* dl, float cx, float y, const std::string& n
                 kEdgeSteelHi, T_S12B);
 }
 
+/// ── 沿舱体外沿跑的「在跑」晕（11-02 拍板 SA3 双团对转 ＋ S32／R1 档）────────────
+/// 跑道是胶囊形＝两个半圆＋两条直边，与稿子 svg 的 rect{rx=w/2} 同一形状：
+/// 周长 2·(h−w)＋π·w，起点在**顶边正中**，方向**顺时针**（弧→直边→弧→弧→直边→弧）。
+static float EdgeStadiumPerim(const ERect& r) { return 2.0f * (r.h - r.w) + 3.14159265358979f * r.w; }
+static ImVec2 EdgeStadiumPoint(const ERect& r, float L) {
+    const float R = r.w * 0.5f, q = 3.14159265358979f * R * 0.5f;   // 四分之一圈弧长
+    const float s = r.h - r.w;                                      // 一条直边
+    float P = EdgeStadiumPerim(r);
+    L = std::fmod(L, P);
+    if (L < 0) L += P;
+    const ImVec2 T(r.x + R, r.y + R), B(r.x + R, r.y + r.h - R);
+    const auto arc = [](ImVec2 c, float R, float deg) {
+        const float a = deg * 0.0174532925199433f;
+        return ImVec2(c.x + R * std::cos(a), c.y + R * std::sin(a));
+    };
+    if (L < q)        return arc(T, R, -90.0f + 90.0f * (L / q));            // 右上四分之一
+    L -= q;
+    if (L < s)        return ImVec2(r.x + r.w, r.y + R + L);                 // 右直边
+    L -= s;
+    if (L < q)        return arc(B, R, 90.0f * (L / q));                     // 右下四分之一
+    L -= q;
+    if (L < q)        return arc(B, R, 90.0f + 90.0f * (L / q));             // 左下四分之一
+    L -= q;
+    if (L < s)        return ImVec2(r.x, r.y + r.h - R - L);                 // 左直边
+    L -= s;
+    return arc(T, R, 180.0f + 90.0f * (L / q));                              // 左上四分之一
+}
+/// 两团各带一条尾巴，沿跑道顺时针跑。每段＝一颗 GlowDisc，σ＝5pt（CSS blur(5px)，
+/// GlowDisc 内部再乘 0.5，所以传 blur=10）。
+/// 段的「铺底 5pt」在这里落在 **spread**（源半径＝2.5pt＝笔画半宽）而不是 R 上，与拍板文档里
+/// 那句「铺底 5pt 就是那颗盘的实心核半径」不一样——实拍量出来是反证：GlowDisc 的 R 是「实心核」，
+/// 它会在最后一步 AddCircleFilled(c, R, col) 把半径 R 以内涂成满 α。σ＝R＝5 时这一步把峰值抬到
+/// 11.5:1（稿子 S32 实测 2.34:1），并且带出一条 5pt 的硬边——正是上一轮被打回的那个形状。
+/// 改传 R=0／spread＝笔画半宽：源半径还是那 5pt 宽（Rs=R+spread），同心环的目标曲线
+/// DiscCov(ρ,Rs,σ) 就是高斯模糊后的强度分布，中心只有 1−e^(−R²/2σ²)＝0.12 的 α，且那句实心填充
+/// 落在 0 半径上＝不画，硬边随之消失。
+/// 一颗圆盘对不上稿子的一条**笔画**：稿子每段是 11pt 长 × 5pt 宽（两头圆帽）的胶囊，
+/// 沿边那 11pt 的材料对峰值有实打实的贡献。单圆盘量出来是「宽对、峰矮」——2026-11-03 扫档：
+/// spread 2.5pt 时半高全宽 12.0pt（稿子 12.25）但峰值只有 1.27:1（稿子 2.34）；把 spread 抬到
+/// 5pt 峰是 2.76:1 了，宽又涨成 14.5pt。所以每段沿边走 kSub 颗小盘铺满那 11pt，这才是「一条笔画」
+/// 而不是「一个圆点」。颗数按面积配平定死，不是扫档扫出来的：稿子一段＝11×5pt 圆帽胶囊≈74.6pt²，
+/// 一颗盘源＝π·2.5²≈19.6pt²，4 颗＝78.4pt² 刚好铺满；每颗盘带的是全额 α（不是 α/4），
+/// 所以 5、6 颗是超面积——峰值会顺着颗数继续涨，那是在调数字不是在抄稿子。
+/// 2026-11-03 复算（glow_sweep.json，空舱那侧剖面没撞胶囊）：4 颗／源 2.5pt／攒够 2 LSB 再画
+/// ＝ 峰 2.19:1、半高全宽 12.0pt、染青 37（稿子 2.34／12.25pt／37）。
+/// 段序与稿子一致：i＝0 最亮（头 α 1.00，#7FDCEC），往后每段 ×0.62——亮的那段**落后**于
+/// 暗的那串，即尾巴指向前进方向。这条朝向是 2026-11-03 用 probe_sign.py 在 Chrome 里钉死的
+/// （stroke-dashoffset 0→−100 让光段沿跑道顺时针走），凭直觉写会镜像成反的。
+static void EdgeRunGlow(ImDrawList* dl, const ERect& r, double now, int segs) {
+    const float P = EdgeStadiumPerim(r);
+    const float kSegPx = 11.0f, kV = 110.0f, kDecay = 0.62f;
+    // 源半径＝稿子那笔笔画的半宽（stroke-width 5pt）。默认 2.5，扫档对上 2.34:1／12.25pt 后钉死；
+    // 留 AGENTPING_EDGE_GLOW_R 给尺子复算：改一档不必重编，与这文件里其余取证开关同一规矩。
+    static const float kSource = getenv("AGENTPING_EDGE_GLOW_R")
+                                     ? (float)atof(getenv("AGENTPING_EDGE_GLOW_R")) : 2.5f;
+    // 一段笔画用几颗盘沿边铺开（AGENTPING_EDGE_GLOW_SEG）：1＝退化成一个圆点。
+    static const int kSub = getenv("AGENTPING_EDGE_GLOW_SEG")
+                                ? atoi(getenv("AGENTPING_EDGE_GLOW_SEG")) : 4;
+    // 每层至少攒到几个 LSB 才画（AGENTPING_EDGE_GLOW_MININC，单位 1/255）：0＝维持逐层攒的老画法。
+    static const float kMinInc = (getenv("AGENTPING_EDGE_GLOW_MININC")
+                                      ? (float)atoi(getenv("AGENTPING_EDGE_GLOW_MININC")) : 2.0f)
+                                 / 255.0f;
+    // AGENTPING_EDGE_GLOW_PIN＝头走的弧长（pt）：钉死相位才量得出「垂直于边」的半高宽。
+    // 尺子（measure.py 那套）在稿子那边靠 __phase 钉相位，这里没那层 JS，不钉就只能连拍
+    // 挑峰落在直边的那几张——每档 3～6 pt 的随机抖动会把宽度读数扫出一大片假差异。
+    static const float kPin = getenv("AGENTPING_EDGE_GLOW_PIN")
+                                  ? (float)atof(getenv("AGENTPING_EDGE_GLOW_PIN")) : -1.0f;
+    int discs = 0, fills = 0;
+    for (int s = 0; s < 2; s++) {
+        const float head = kPin >= 0.0f ? kPin + s * P * 0.5f
+                                        : (float)(std::fmod(now * kV, P)) + s * P * 0.5f;
+        for (int i = 0; i < segs; i++) {
+            const float a = i ? std::pow(kDecay, (float)i) : 1.0f;
+            const ImU32 col = WithA(i ? kCyan : kCyanHi, (int)(255.0f * a + 0.5f));
+            // 稿子里第 i 段的笔画占 [i*11, (i+1)*11] 这一段弧；kSub 颗盘把它铺满。
+            for (int j = 0; j < kSub; j++) {
+                discs++;
+                fills += GlowDisc(dl,
+                                  EdgeStadiumPoint(r, head + i * kSegPx + (j + 0.5f) * kSegPx / kSub),
+                                  0.0f, 10.0f, kSource, col, kMinInc);
+            }
+        }
+    }
+    // 成本读数交给尺子复算：报告里「几颗图元、几次填充」必须是数出来的，不是按层数推算的。
+    if (getenv("AGENTPING_EDGE_GLOW_COUNT"))
+        fprintf(stderr, "glow discs=%d fills=%d segs=%d sub=%d R=%.1f mininc=%.0f\n",
+                discs, fills, segs, kSub, kSource, kMinInc * 255.0f);
+}
+
 /// 灯舱本体（稿子 .dock）：44pt 实心舱（kSurf／peek 升 kSurf2），一列——琥珀格「锁 N」（要你动手：待授权＋失败）、
 /// 钢蓝格「眼 N」（今天跑完还没看）、各家剪影、展开箭头。
 /// 数为 0 的那枚不画（11-02 用户拍板：只展示有数字的，任何一个有数字都要出舱）；
@@ -6272,14 +6411,36 @@ static void EdgeRevealStep(double now, bool hasWork) {
     if (g_edgeReveal != to) g_edgeRevealUntil = now + 0.05;
 }
 
-/// 灯舱一直在：0 条收成小条，有待处理就是那块 44pt 的舱；展开时舱换成 .56 的底、箭头提到 .86，
-/// 预览卡后画——稿子的 z-index 是 .dock 30／.peek 45，卡的落影压在舱那一侧。
+/// 光画不画的一句话判据。DrawEdge 与出帧闸门共用它——两处各写一份就会分叉，
+/// 11-03 活桌面实拍撞到的正是这个形状：舱在、光也在，但循环以为自己在空转。
+static bool EdgeGlowOn() {
+    // AGENTPING_EDGE_GLOW=0 出一个「灯灭」的同几何对照张：量这团光的尺子
+    // （measure.py 那套 Δ蓝／染青）必须拿同机位、同版面的两张比，不能靠算。
+    static const bool glow_off = getenv("AGENTPING_EDGE_GLOW") &&
+                                 !strcmp(getenv("AGENTPING_EDGE_GLOW"), "0");
+    return !glow_off && g_pd.run > 0 && !g_edgeNoRun;
+}
+
+/// 灯舱一直在：待处理或在跑＝那块 44pt 的舱（舱体外沿跑一团「在跑」的晕）；两者都无＝0 条收成小条。
+/// 展开时舱换成 .56 的底、箭头提到 .86，预览卡后画——稿子的 z-index 是 .dock 30／.peek 45，卡的落影压在舱那一侧。
 static void DrawEdge(ImDrawList* dl, double now) {
     const bool peek = g_edgeState == EDGE_PEEK;
-    const bool has = EdgePendingN() > 0;
+    // 舱的出场条件从「只有待处理」放宽到「待处理 或 有在跑」（11-03 用户拍板「干吧」）。
+    // 原来 0 待处理时右缘只剩一根 3×56 的细线，而 D 组实测证明那根线连「变亮」都给不出
+    // （DN2 1.28:1 ＜ 静止灰线自己的 DN0 1.36:1），所以「有会话在跑」这件事在屏上不存在。
+    // 只有在跑时舱里没格子、没剪影（那两个数据源此刻都是 0，按「没数据不画」整格撤），
+    // 收成 44×56 的空舱，尾巴也从 7 段收到 3 段——空舱跑道只有 162pt，7 段会占满一圈。
+    const bool pending = EdgePendingN() > 0;
+    // 这团光的语义是「有会话正在跑」，不是「舱在不在」。只有待处理、一个都没在跑的那一格
+    // 以前也照样转光，等于用一盏「在跑」的灯去报「等你回答」——11-03 逐帧带读图时发现的。
+    const bool running = g_pd.run > 0 && !g_edgeNoRun;
+    const bool has = pending || running;
     EdgeRevealStep(now, has);
     if (has) {
+        // 先画舱再画光：稿子里 .glow 是 .dock 的最后一个子元素，压在舱体上（舱内那半条看得清），
+        // 反过来画会被实心舱底遮掉一半。EdgeDrawDock 里会回填 g_edgeAgentsH，跑道几何要在它之后取。
         EdgeDrawDock(dl, peek);
+        if (EdgeGlowOn()) EdgeRunGlow(dl, EdgeDockRect(), now, pending ? 7 : 3);
     } else {
         const float a = g_edgeReveal;
         if (a < 1.0f) EdgeDrawNub(dl, 1.0f - a);
@@ -6500,6 +6661,17 @@ static void LoadProbeFixture() {
     p3->question = "write ~/…/app-icon.svg";
     p3->trigger = "Writing to paths outside the workspace";
     (void)p1; (void)p2; (void)p3;
+    // AGENTPING_FIXTURE_SUSPECT=1：补一条「反推出来的待授权」（inferred）。11-02 起这一档
+    // 走的是另一套展示——画在列表里、胶囊写「疑似等你授权」、不挂呼吸环，但不进任何计数。
+    // 本机此刻不一定有真会话落在这一档，所以要留一个能把它摆出来的口；默认不开，
+    // 前面每一轮已拍板的样例条数与舱上数字都不受影响。
+    if (getenv("AGENTPING_FIXTURE_SUSPECT")) {
+        UIRow* s1 = row(ap::ST_AWAIT, "novel-reader", "ZCode", "zcode", "s1", at(9, 12), 0);
+        s1->inferred = true;
+        s1->tool = "Bash";
+        s1->question = "npm run build && npm test";
+        (void)s1;
+    }
     // AGENTPING_EDGE_FIXTURE=1：只给右缘灯舱出图用。默认样例的待处理只有 qoder/claude
     // 两家，舱上永远摆不满一列三枚剪影——那条路径（gap 9 累加、各家墨形边长不同、舱随之
     // 变高）在真二进制上就没被看过一次。补两条最久等的 WorkBuddy/ZCode，把三枚凑齐；
@@ -6527,9 +6699,12 @@ static void LoadProbeFixture() {
     for (const auto& d : kDone) {
         UIRow* r2 = row(ap::ST_RESTING, d.proj, d.agent, d.aid, d.sess, at(d.hh, d.mm), d.turns);
         r2->at = midnight + (d.hh * 3600.0 + d.mm * 60.0);   // 完成时刻：未读点按它对水位线
-        // 样例也要认已读账本：MarkSeen 落的是这些键，重装载却把它们抹回「未看」，
-        // 「点哪条哪条消失」在样例轮就永远拍不出来（2026-10-31 取证发现）。
-        r2->unseen = (d.hh >= 19) && g_seen.count(r2->key) == 0;
+        // 样例也要认已读账本：MarkSeen 落的是这些键＋那一轮的时刻，重装载却把它们抹回
+        // 「未看」，「点哪条哪条消失」在样例轮就永远拍不出来（2026-10-31 取证发现）。
+        // 不走 RowUnseen：它那道水位线在样例里由 d.hh>=19 表达，样例日没有「首次启动」。
+        const long long kat = (long long)r2->at;
+        const auto kit = g_seen.find(r2->key);
+        r2->unseen = (d.hh >= 19) && (kit == g_seen.end() || kit->second < kat);
     }
 
     // 行级用量也各留缺口：Qoder 只有 Credits（JSONL 没有 token 明细 → has_tokens 假），
@@ -6833,8 +7008,24 @@ int main(int argc, char** argv) {
     // 先开窗再改会让他在启动瞬间看见一次「本该置顶却没置顶」的闪。
     g_cfg = ap::load_alert_cfg();
     // 「看过」账本启动一次读进内存：MarkSeen 只追加，不在每帧里读盘。
-    for (const auto& k : ap::load_seen())
-        if (g_seen.insert(k).second) g_seen_order.push_back(k);
+    // 一行「键<TAB>那一轮的完成时刻」。老格式只有键（10-31 那批）：按账本文件的 mtime
+    // 当时刻——那次点击不会晚于最后一行追加，于是「升级前看过、之后又跑完一轮」的会话
+    // 能重新出数，而当天更早完成的存量不会整批倒灌回待处理。同一键多行：留最晚那次。
+    long long seen_legacy = 0;
+    {
+        struct stat sb{};
+        if (stat(ap::seen_path().c_str(), &sb) == 0) seen_legacy = (long long)sb.st_mtime;
+    }
+    for (const auto& line : ap::load_seen()) {
+        const size_t tab = line.find('\t');
+        const std::string k = tab == std::string::npos ? line : line.substr(0, tab);
+        const long long at = tab == std::string::npos
+                                 ? seen_legacy
+                                 : strtoll(line.c_str() + tab + 1, nullptr, 10);
+        const auto it = g_seen.find(k);
+        if (it == g_seen.end()) { g_seen.emplace(k, at); g_seen_order.push_back(k); }
+        else if (at > it->second) it->second = at;
+    }
     // 设置屏改过语言就得活过重启：HIT_LANG 把 lang=0..5 写进 settings.txt，但这一版
     // 原来只有「写」没有「读」——他选德语、重启，界面又回中文（2026-10-30 实拍发现）。
     // 优先级是 探测 < settings.txt < AGENTPING_LANG：环境变量是取证口，必须能盖过他
@@ -7108,6 +7299,10 @@ int main(int argc, char** argv) {
             if (eo && *eo && strcmp(eo, "0") != 0) g_edgeOff = true;
             const char* ee = getenv("AGENTPING_EDGE_EMPTY");
             if (ee && *ee && strcmp(ee, "0") != 0) g_edgeEmpty = true;
+            // AGENTPING_EDGE_NORUN=1：有待处理、一个都没在跑。这一格以前没法出图，
+            // 而「光只跟着在跑走」这条判据必须拍得出反证，不是写在注释里就算。
+            const char* en = getenv("AGENTPING_EDGE_NORUN");
+            if (en && *en && strcmp(en, "0") != 0) g_edgeNoRun = true;
             const char* et = getenv("AGENTPING_EDGE_TRACE");
             if (et && *et && strcmp(et, "0") != 0) g_edgeTrace = true;
             const char* er = getenv("AGENTPING_EDGE_ROW");
@@ -7386,10 +7581,14 @@ int main(int argc, char** argv) {
                 // 空闲且没有动画/数据变化就不空转 GPU；重扫有新数时借这一帧把 g_pd 重建，
                 // 预览卡的行与计数才不是上一轮的快照。
                 const long seqE = g_seq.load();
+                // EdgeGlowOn() 必须在里面：光的相位是按墙上时钟算的（110pt/s），
+                // 少了这一项就只剩 2 秒一拍，每拍跳 220pt≈一整圈——11-03 活桌面实拍
+                // 连拍 14 帧只抓到 4 个不同画面，桌面看到的是瞬移而不是流动。
                 const bool dirty = g_edgeForce >= 0 || g_edgeState != EDGE_IDLE ||
                                    enow < g_edgeAnimUntil || enow < g_edgeRevealUntil ||
                                    g_edgeReveal != g_edgeRevealTo ||
                                    seqE != g_pd_seq ||
+                                   EdgeGlowOn() ||
                                    enow - g_edgeBeatAt > 2.0;
                 if (!dirty) { g_edgeRevealAt = -1; usleep(16000); continue; }   // 空转那几帧不计动画步长
                 int fw, fh;
@@ -7731,6 +7930,22 @@ int main(int argc, char** argv) {
             getenv("AGENTPING_FIXTURE") ? " · 样例数据（AGENTPING_FIXTURE）" : "");
         ImGui::PopFont();
         ImGui::End();
+        // 探针这一趟不跑 HandleInput（那是真窗口主循环里的），所以滚动偏移在这里自己钉。
+        // 长页的下半截不落这一手就永远拍不到，而它恰恰是新增版式最常待的地方。
+        if (const char* kProbeScroll = getenv("AGENTPING_SCROLL"))
+            g_scroll[g_view] = g_scrollTarget[g_view] = (float)std::atof(kProbeScroll);
+        // 同上：详情那一屏要指哪一行，真窗口里靠点 ⓘ，探针没有指针，就按 key 钉。
+        // 详情屏自己那套「挑第一条」永远绕开反推行（见 view 3/4 的兜底），
+        // 所以「疑似」那一档点开后的版式只有这条路能拍到。
+        if (const char* kSel = getenv("AGENTPING_SEL")) {
+            for (const auto& r : g_pd.rows) {
+                if (r.key != kSel) continue;
+                g_sel_key = r.key;
+                g_sel_copy = r;
+                g_sel_kind = (r.state == ap::ST_RESTING) ? 3 : (RowAsksQuestion(r) ? 1 : 2);
+                break;
+            }
+        }
         for (int loc = 0; loc < kLocales; loc++) {
             drawPanel(14.0f + loc * kTileGap, kTileY, (float)kPanelW, loc, g_view);
             if (pass == 0) printf("[探针] 屏%d 语%d 内容 %.1fpt / 可视 %.1fpt / 滚动上限 %.1fpt\n",

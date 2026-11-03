@@ -7,6 +7,7 @@
 #include "platform/notify.h"
 #include "scan.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -14,6 +15,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -67,6 +71,66 @@ ap::Snapshot snap_with(std::initializer_list<ap::Session> qoder,
     }
     return s;
 }
+/// 一条 Qoder 桌面 App 的运行状态读数（见 scan.h::QoderLive）。
+ap::QoderLive liv(const char* state, double ts, int pending = 0) {
+    ap::QoderLive q; q.state = state; q.ts = ts; q.pending = pending; return q;
+}
+/// 四条本机 main.log 的原样抄录（只把 sessionId 换成探针用的 id）：
+/// 这是判据的唯一来源，改这里必须重新从日志里抓。
+/// 2026-11-02 从 …/com.qoder.app.stable/logs/20261101-021024.878-655-7c5462e1/main.log
+/// 与前十个运行目录抓的；本机六档实际出现次数＝running 734／ready 519／opening 242／
+/// cold 157／interrupted 35／waiting-user 19。
+const char* kLineRunning =
+    "[2026-11-02T08:55:39.552Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-run\",\"previousRuntimeState\":\"opening\","
+    "\"runtimeState\":\"running\",\"previousActiveTurnId\":\"1bd159d1-1b32-4890-a729-210c968b08c3\","
+    "\"previousActiveTurnState\":\"starting\",\"activeTurnId\":\"1bd159d1-1b32-4890-a729-210c968b08c3\","
+    "\"activeTurnState\":\"running\",\"pendingInteractionCount\":0,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":null,\"terminalStatus\":null}";
+const char* kLineWaiting =
+    "[2026-10-28T06:01:32.381Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-ask\",\"previousRuntimeState\":\"running\","
+    "\"runtimeState\":\"waiting-user\",\"previousActiveTurnId\":\"ef6d9e39-2ca0-4818-b139-35beb140311c\","
+    "\"previousActiveTurnState\":\"running\",\"activeTurnId\":\"ef6d9e39-2ca0-4818-b139-35beb140311c\","
+    "\"activeTurnState\":\"waiting-user\",\"pendingInteractionCount\":1,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":null,\"terminalStatus\":null}";
+const char* kLineInterrupted =
+    "[2026-10-27T16:56:42.698Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-cut\",\"previousRuntimeState\":\"cold\","
+    "\"runtimeState\":\"interrupted\",\"previousActiveTurnId\":null,\"previousActiveTurnState\":null,"
+    "\"activeTurnId\":\"94fcde85-2916-4d55-80f3-6fa91620337e\",\"activeTurnState\":\"interrupted\","
+    "\"pendingInteractionCount\":0,\"queuedTurnCount\":0,\"terminalTurnId\":null,\"terminalStatus\":null}";
+const char* kLineNotControl =
+    "[2026-11-02T08:43:44.048Z] [INFO] [main] [ChatSession] Main ChatSession turn=completed rt=ready";
+
+/// 一个会话在尾部窗口里连写三条（真实日志就是这个形状：opening→running→ready）。
+/// 按落盘顺序（旧在前）排，最新那条是文件最后一行 —— 谁新由 tail_lines 的返回顺序说。
+/// 2026-11-02 那次「跑完了还显示运行中」就是这一组：读盘时后写覆盖先写，留下的是最旧的 running。
+const char* kLineMultiOld =
+    "[2026-11-02T12:00:00.000Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-multi\",\"previousRuntimeState\":\"opening\","
+    "\"runtimeState\":\"running\",\"activeTurnId\":\"aaaaaaaa-0000-0000-0000-000000000001\","
+    "\"activeTurnState\":\"running\",\"pendingInteractionCount\":0,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":null,\"terminalStatus\":null}";
+const char* kLineMultiAsk =
+    "[2026-11-02T12:00:30.000Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-multi\",\"previousRuntimeState\":\"running\","
+    "\"runtimeState\":\"waiting-user\",\"activeTurnId\":\"aaaaaaaa-0000-0000-0000-000000000001\","
+    "\"activeTurnState\":\"waiting-user\",\"pendingInteractionCount\":1,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":null,\"terminalStatus\":null}";
+const char* kLineMultiReady =
+    "[2026-11-02T12:01:00.000Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-multi\",\"previousRuntimeState\":\"running\","
+    "\"runtimeState\":\"ready\",\"activeTurnId\":\"aaaaaaaa-0000-0000-0000-000000000001\","
+    "\"activeTurnState\":\"waiting-user\",\"pendingInteractionCount\":0,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":\"aaaaaaaa-0000-0000-0000-000000000001\",\"terminalStatus\":\"completed\"}";
+/// 另一条会话只写了一次，夹在上面三条中间：不许被多提交那条带跑。
+const char* kLineSingle =
+    "[2026-11-02T12:00:45.000Z] [INFO] [main] [ChatSession] Main ChatSession control state "
+    "committed {\"sessionId\":\"probe-single\",\"previousRuntimeState\":\"opening\","
+    "\"runtimeState\":\"running\",\"activeTurnId\":\"bbbbbbbb-0000-0000-0000-000000000002\","
+    "\"activeTurnState\":\"running\",\"pendingInteractionCount\":0,\"queuedTurnCount\":0,"
+    "\"terminalTurnId\":null,\"terminalStatus\":null}";
 
 int selftest() {
     const char* dir = getenv("AGENTPING_STATE_DIR");
@@ -335,6 +399,201 @@ int selftest() {
         ap::AlertRound rn = ap::select_alerts(sn, nl, def, &no);
         expect("去抖：Pending 带上会话的最后动静时刻",
                rn.to_post.size() == 1 && rn.to_post[0].last_activity == 1234.0 ? 1 : 0, 1);
+    }
+
+    {
+        // ⑫ Qoder 桌面 App 亲口报的运行状态（2026-11-02 误判的收口）。
+        // 一条跑了 240 秒的 Bash 被「tool_use 90 秒没回」反推成待授权，右缘于是摆出
+        // 「待处理 1」——而同一分钟 App 自己在 main.log 写着 runtimeState:"running"。
+        // 这一节验的就是：有这行它以这行为准；没这行退回推断，但推断不再是「要你动手」。
+        std::string sid; ap::QoderLive q;
+        expect_true("解析：running 那行读出会话与状态",
+                    ap::parse_qoder_control(kLineRunning, sid, q) && sid == "probe-run" &&
+                    q.state == "running" && q.pending == 0);
+        expect_true("解析：时间戳取到秒级（[YYYY-MM-DDThh:mm:ss.mmmZ]）", q.ts > 1e9);
+        expect_true("解析：waiting-user 那行带上 pendingInteractionCount=1",
+                    ap::parse_qoder_control(kLineWaiting, sid, q) && sid == "probe-ask" &&
+                    q.state == "waiting-user" && q.pending == 1);
+        expect_true("解析：interrupted 那行 pending=0 但状态认得",
+                    ap::parse_qoder_control(kLineInterrupted, sid, q) && q.state == "interrupted" &&
+                    q.pending == 0);
+        expect_true("解析：非 control 的一行不认", !ap::parse_qoder_control(kLineNotControl, sid, q));
+        expect_true("解析：缺 sessionId 的 JSON 不认",
+                    !ap::parse_qoder_control("control state committed {\"runtimeState\":\"ready\"}",
+                                            sid, q));
+
+        const double now = q.ts + 100.0;      // 拿真时间戳当下做基准，20 分钟那道门才量得准
+        auto at_await = [&](bool inferred, double act) {
+            ap::Session s = ses("w", "反推出来的那条", ap::ST_AWAIT, inferred);
+            s.last_activity = act; return s;
+        };
+        // ⑫-1 误判本体：App 说在跑 → 运行中，且「疑似」这个标记要撤掉
+        {
+            auto s = snap_with({ at_await(true, now - 240) });
+            int n = ap::apply_qoder_live(s, {{"w", liv("running", now - 60)}}, now);
+            expect("盖状态：running 压掉 90 秒反推", s.agents[0].sessions[0].state == ap::ST_WORKING ? 1 : 0, 1);
+            expect("盖状态：压掉后不再是推断", s.agents[0].sessions[0].inferred_wait ? 1 : 0, 0);
+            expect("盖状态：本轮落地条数", (long)n, 1);
+        }
+        // ⑫-2 幂等：连着盖三轮不许把行弄脏（面板每 3 秒重扫一次）
+        {
+            auto s = snap_with({ at_await(true, now - 240) });
+            const std::map<std::string, ap::QoderLive> m = {{"w", liv("running", now - 60)}};
+            ap::apply_qoder_live(s, m, now);
+            ap::apply_qoder_live(s, m, now);
+            expect("盖状态：重复盖同一条只落 1（不叠加）",
+                   (long)ap::apply_qoder_live(s, m, now), 1);
+            expect("盖状态：三轮后仍是运行中",
+                   s.agents[0].sessions[0].state == ap::ST_WORKING ? 1 : 0, 1);
+        }
+        // ⑫-3 opening 也算在跑；cold／ready 是「没有进行中的轮次」，不许拿它盖任何状态
+        {
+            auto s = snap_with({ at_await(true, now - 240), ses("c", "静置的", ap::ST_RESTING) });
+            long n = ap::apply_qoder_live(s, {{"w", liv("opening", now - 20)},
+                                              {"c", liv("ready", now - 20)}}, now);
+            expect("盖状态：opening 同 running", s.agents[0].sessions[0].state == ap::ST_WORKING ? 1 : 0, 1);
+            expect("盖状态：ready 不许把静置行改成别的", s.agents[0].sessions[1].state == ap::ST_RESTING ? 1 : 0, 1);
+            expect("盖状态：只数真盖上的那一条", n, 1);
+            auto s2 = snap_with({ at_await(true, now - 240) });
+            expect("盖状态：cold 不许抹掉推断（它只说这轮没开过）",
+                   (long)ap::apply_qoder_live(s2, {{"w", liv("cold", now - 20)}}, now), 0);
+            expect_true("盖状态：cold 后那行仍是推断待授权",
+                        s2.agents[0].sessions[0].inferred_wait);
+        }
+        // ⑫-4 waiting-user 是正证：升为待授权、撤「疑似」、并把等待起点钉在这行落下的时刻
+        {
+            ap::Session s = ses("w", "App 说它正等人", ap::ST_WORKING);
+            s.last_activity = now - 30;
+            auto snap = snap_with({ s });
+            ap::apply_qoder_live(snap, {{"w", liv("waiting-user", now - 5, 1)}}, now);
+            expect("盖状态：waiting-user 升为待授权",
+                   snap.agents[0].sessions[0].state == ap::ST_AWAIT ? 1 : 0, 1);
+            expect("盖状态：这是正证（不再带疑似）",
+                   snap.agents[0].sessions[0].inferred_wait ? 1 : 0, 0);
+            expect("盖状态：等待起点＝那行落盘的时刻",
+                   snap.agents[0].sessions[0].await_since == now - 5 ? 1 : 0, 1);
+            // 正证必须能响铃——这是「读到它才算正证、可响铃」那半句承诺
+            expect_true("盖状态：盖成正证后提醒层认它",
+                        ap::should_alert(snap.agents[0].sessions[0].state,
+                                         snap.agents[0].sessions[0].inferred_wait));
+            // 只有 pendingInteractionCount>0、runtimeState 还写 running 的那一行：
+            // 顺序上 running 先盖，它就该是「在跑」——本机 19 条 waiting-user 全是两值同现，
+            // 这条断言钉的是「别把 pending 当成第二判据去抢 running」。
+            auto s3 = snap_with({ s });
+            ap::apply_qoder_live(s3, {{"w", liv("running", now - 5, 1)}}, now);
+            expect_true("盖状态：running 带 pending 仍判在跑",
+                        s3.agents[0].sessions[0].state == ap::ST_WORKING);
+        }
+        // ⑫-5 interrupted＝那一轮被停下且不等你点：按「等你回复」处理，不是「在跑」
+        {
+            ap::Session s = ses("w", "被中断的那轮", ap::ST_WORKING);
+            s.last_activity = now - 30;
+            auto snap = snap_with({ s });
+            ap::apply_qoder_live(snap, {{"w", liv("interrupted", now - 5)}}, now);
+            expect("盖状态：interrupted 判成等你回复",
+                   snap.agents[0].sessions[0].state == ap::ST_NEEDS_USER ? 1 : 0, 1);
+        }
+        // ⑫-6 两处不许盖：失败中断（它比 App 的一行更具体）与比这行更新的日志记录
+        {
+            ap::Session f = ses("w", "失败的那条", ap::ST_FAILED); f.last_activity = now - 30;
+            auto snap = snap_with({ f });
+            expect("盖状态：running 不许把失败中断洗成在跑",
+                   (long)ap::apply_qoder_live(snap, {{"w", liv("running", now - 20)}}, now), 0);
+            expect_true("盖状态：那行还是失败中断",
+                        snap.agents[0].sessions[0].state == ap::ST_FAILED);
+            // 这行是 5 分钟前的，transcript 刚落下更新的一条 → 以日志为准（推断还在）
+            ap::Session w = ses("w", "日志比它新", ap::ST_WORKING); w.last_activity = now - 10;
+            auto s2 = snap_with({ w });
+            expect("盖状态：过旧的 waiting-user 让位于新记录",
+                   (long)ap::apply_qoder_live(s2, {{"w", liv("waiting-user", now - 300, 1)}}, now), 0);
+            expect_true("盖状态：让位后状态还是日志说的",
+                        s2.agents[0].sessions[0].state == ap::ST_WORKING);
+        }
+        // ⑫-7 20 分钟那道门（与「等你回复」超时同一口径）：App 很久没写这行就别再拿它作证
+        {
+            auto snap = snap_with({ at_await(true, now - 1300) });
+            expect("盖状态：读数与日志都超过 20 分钟 → 不盖",
+                   (long)ap::apply_qoder_live(snap, {{"w", liv("running", now - 1300)}}, now), 0);
+            expect_true("盖状态：不盖就仍是推断（面板标疑似）",
+                        snap.agents[0].sessions[0].inferred_wait);
+        }
+        // ⑫-8 读不到（只跑 CLI／没开桌面 App）：整轮一条都不盖，退回原推断，且不响铃
+        {
+            auto snap = snap_with({ at_await(true, now - 240) });
+            expect("无读数：空表一条不盖",
+                   (long)ap::apply_qoder_live(snap, {}, now), 0);
+            expect_true("无读数：那行仍是推断待授权",
+                        snap.agents[0].sessions[0].inferred_wait);
+            expect_true("无读数：推断那条不响铃",
+                        !ap::should_alert(snap.agents[0].sessions[0].state,
+                                          snap.agents[0].sessions[0].inferred_wait));
+            // 这一路只属于 Qoder 桌面 App：别的家的会话 id 万一撞进这张表也不许盖。
+            // 三条一起判（落地条数／状态／疑似标记）——少一条就会被别的改动掩盖过去。
+            expect("隔离：qoder 之外的家一条不盖",
+                   [&] {
+                       auto s = snap_with({}, {ses("x", "Claude 反推", ap::ST_AWAIT, true)});
+                       return (long)ap::apply_qoder_live(s, {{"x", liv("running", now - 10)}}, now);
+                   }(),
+                   0);
+            expect_true("隔离：Claude 那行状态与疑似标记都不动",
+                        [&] {
+                            auto s = snap_with({}, {ses("x", "Claude 反推", ap::ST_AWAIT, true)});
+                            ap::apply_qoder_live(s, {{"x", liv("running", now - 10)}}, now);
+                            return s.agents[1].sessions[0].state == ap::ST_AWAIT &&
+                                   s.agents[1].sessions[0].inferred_wait;
+                        }());
+        }
+        // ⑫-9 读盘那一层：同一个会话在尾部窗口里写了多条，只许留最新那条。
+        // 上面几块都是手工喂 map，恰好绕过了「map 从哪来」。2026-11-02 的「跑完了还显示
+        // 运行中」就出在 read_qoder_live：它逐行 c.live[sid]=q，而 tail_lines 是新在前，
+        // 于是每会话留下的是窗口里最旧的一行（本机那句 opening@18:29），永远盖成在跑。
+        {
+            const std::string base = ap::state_dir() + "/livefix";
+            const std::string run = base +
+                "/Library/Application Support/com.qoder.app.stable/logs/probe-run";
+            // 逐级建目录：夹具树整棵都落在 state_dir 里，不碰任何真实路径
+            for (std::size_t i = 1; i < run.size(); i++)
+                if (run[i] == '/') ::mkdir(run.substr(0, i).c_str(), 0755);
+            ::mkdir(run.c_str(), 0755);
+            {
+                std::ofstream mf(run + "/main.log", std::ios::trunc);
+                mf << "[2026-11-02T11:59:59.000Z] [INFO] [main] unrelated line\n"
+                   << kLineMultiOld << "\n" << kLineMultiAsk << "\n"
+                   << kLineSingle << "\n" << kLineMultiReady << "\n";
+            }
+            const char* home0 = getenv("HOME");
+            const std::string keep = home0 ? home0 : "";
+            setenv("HOME", base.c_str(), 1);
+            std::map<std::string, ap::QoderLive> live = ap::read_qoder_live();
+            if (!keep.empty()) setenv("HOME", keep.c_str(), 1);
+
+            expect("读盘：窗口里两条会话都认到", (long)live.size(), 2);
+            std::string wid; ap::QoderLive newest;
+            ap::parse_qoder_control(kLineMultiReady, wid, newest);
+            expect_true("读盘：三条提交留最新那条（ready，不是最旧的 running）",
+                        live.count("probe-multi") && live["probe-multi"].state == "ready");
+            expect("读盘：留下的时间戳＝最新那条",
+                   live.count("probe-multi") && live["probe-multi"].ts == newest.ts ? 1 : 0, 1);
+            expect_true("读盘：只提交过一次的另一条没被带跑",
+                        live.count("probe-single") && live["probe-single"].state == "running");
+            // 用户看得到的那一面：日志侧这轮已经写完（判成「答完了」），App 最新那句是 ready
+            // → 一条都不许盖。旧码在这里会拿最旧那句 running 把它钉回「运行中」。
+            ap::Session done = ses("probe-multi", "跑完的那条", ap::ST_NEEDS_USER);
+            done.last_activity = newest.ts;
+            auto snap = snap_with({ done });
+            expect("读盘→盖状态：最新一句是 ready，一条不盖",
+                   (long)ap::apply_qoder_live(snap, live, newest.ts + 60), 0);
+            expect_true("读盘→盖状态：那一行仍是「答完了」",
+                        snap.agents[0].sessions[0].state == ap::ST_NEEDS_USER);
+            // 收掉夹具，别在 state_dir 里留一棵空树
+            ::remove((run + "/main.log").c_str());
+            ::rmdir(run.c_str());
+            ::rmdir((base + "/Library/Application Support/com.qoder.app.stable/logs").c_str());
+            ::rmdir((base + "/Library/Application Support/com.qoder.app.stable").c_str());
+            ::rmdir((base + "/Library/Application Support").c_str());
+            ::rmdir((base + "/Library").c_str());
+            ::rmdir(base.c_str());
+        }
     }
 
     printf("[自检] 断言 %d 条，通过 %d，不符 %d\n", g_pass + g_fail, g_pass, g_fail);

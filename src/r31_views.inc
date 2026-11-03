@@ -716,16 +716,25 @@ static int R31KindIcon(int k) {
 static bool R31UnseenDone(const UIRow& r) {
     return GroupOf(r.state) == G_DONE && r.unseen;
 }
+/// 只有「90 秒没动静」这一路证据的反推行：照样留在待处理清单里（点得开、详情看得全），
+/// 但这一格写「疑似」并走灰——它不许冒充一条「现在就要你动手」（11-02 拍板）。
+static bool R31Suspect(const UIRow& r) { return GroupOf(r.state) == G_AWAIT && r.inferred; }
+static const char* R31StatusKey(const UIRow& r) {
+    if (R31UnseenDone(r)) return "r_unseen_done";
+    return R31Suspect(r) ? "r_suspect_short" : R31KindWord(R31KindOf(r));
+}
+static ImU32 R31StatusColor(const UIRow& r, int k) {
+    if (R31UnseenDone(r)) return k31Blue;
+    return R31Suspect(r) ? k31Muted : R31KindColor(k);
+}
 static float R31StatusW(const UIRow& r, int loc) {
-    return 11.0f + 4.0f + TextWidth(T(R31UnseenDone(r) ? "r_unseen_done" : R31KindWord(R31KindOf(r)),
-                                      loc), loc, T_S11B);
+    return 11.0f + 4.0f + TextWidth(T(R31StatusKey(r), loc), loc, T_S11B);
 }
 static void R31StatusRight(ImDrawList* dl, float x1, float cy, const UIRow& r, int loc) {
     const int k = R31KindOf(r);
-    const bool unseen = R31UnseenDone(r);
-    const std::string w = T(unseen ? "r_unseen_done" : R31KindWord(k), loc);
+    const std::string w = T(R31StatusKey(r), loc);
     const float tw = TextWidth(w, loc, T_S11B);
-    const ImU32 col = unseen ? k31Blue : R31KindColor(k);
+    const ImU32 col = R31StatusColor(r, k);
     I31(dl, R31KindIcon(k), x1 - tw - 4.0f - 11.0f, cy - 5.5f, 11.0f, col);
     DrawTextRun(dl, x1 - tw, TextMid(cy, T_S11B, loc), w, loc, col, T_S11B);
 }
@@ -750,6 +759,8 @@ static std::vector<const UIRow*> R31Rows(const std::string& src, const std::stri
 }
 /// 「待处理」＝两段，先后固定：
 ///   ① 要你动手的（回答／授权／失败）—— 卡住不动的是它们，排在前；
+///      只有反证的那条（90 秒没动静反推出来的授权）也画在这一段里、照样点得开，
+///      但状态格写「疑似」、整行降灰、不进这一格的数字（11-02 拍板：推断的不催人）；
 ///   ② 今天跑完但还没看过的 —— 只等你扫一眼，双击或点 ⓘ 看过就算处理完。
 /// 段内沿用 RebuildPanel 的「等得最久在前」，段间不混排（信息性的不许插到要动手的前面）。
 /// 第二段必须算进面板的条数，但不进菜单栏那串数字：它不催人。
@@ -758,7 +769,7 @@ static std::vector<const UIRow*> R31Waits() {
     std::vector<const UIRow*> waits, unseen;
     for (const auto* r : all) {
         const int g = GroupOf(r->state);
-        if (g == G_AWAIT || g == G_FAIL) waits.push_back(r);
+        if (DemandsYou(*r) || R31Suspect(*r)) waits.push_back(r);
         else if (g == G_DONE && r->unseen) unseen.push_back(r);
     }
     waits.insert(waits.end(), unseen.begin(), unseen.end());
@@ -1125,7 +1136,8 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
     }
     {
         // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数，
-        // 与下面的卡片同一支过滤（切到某一家就只数那一家）。
+        // 与下面的卡片同一支过滤（2026-11-03：这一支不再跟来源导轨走——导轨筛掉的那张卡
+        // 恰恰是横幅正在催的那张，两处判据必须一致，见 R31Claims 里那条注释）。
         const bool on = (g_view == 9);
         const float x0 = tx;
         const std::string t2 = T("r_claim_tab", loc);
@@ -1135,7 +1147,7 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         tx += tw;
         int ready = 0;
         for (const ap::Claim& c : g_pd.claims)
-            if (c.ready && (g_r31_src == "all" || c.vendor == g_r31_src)) ready++;
+            if (c.ready) ready++;
         if (ready > 0) {
             // 2026-10-30 用户：「这个数字也要醒目点，比如颜色啥的」。原来它和左边 tab 名同灰、
             // 底是 6% 白，一整条读起来没有重点。改走权益卡「现在可领」那颗的同一支蓝：
@@ -1300,7 +1312,8 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
     R31Glass(dl, x, y, w, h, 12.0f, hov, hov > 0.01f ? k31Rim : k31Line);
     const int kind = R31KindOf(r);
     // 完成未看的行用蓝色（与页脚那颗「有没看过的」小点同色），别和灰色完成行混在一起。
-    const ImU32 kc = R31UnseenDone(r) ? k31Blue : R31KindColor(kind);
+    // 反推那条整行降灰：左轨、图标、字数一起走灰，不然琥珀轨配「疑似」二字是自我矛盾。
+    const ImU32 kc = R31StatusColor(r, kind);
     dl->AddRectFilled(ImVec2(x, y + 14.0f), ImVec2(x + 2.0f, y + h - 14.0f), WithA(kc, 199), 2.0f);
     // 整行命中区先注册：芯片/ⓘ 这类行内小按钮后注册，命中判定从后往前扫才能优先命中小件
     AddHit(g_hits, x, y, x + w, y + h, HIT_OPEN, 900 + idx, 0, r, loc, R31RowName(r));
@@ -1775,8 +1788,11 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
         const float hy = cy;
         float hx = R31Mid(dl, x + 21.0f, hy + 8.5f, T("r_needs_you", loc), loc, k31Sec, T_S12B);
         if (!waits.empty()) {
+            // 数字里不含「疑似」那条：这一格是「有几件事现在要你动手」，反证出来的不算一件。
+            int n = 0;
+            for (const auto* r : waits) if (!R31Suspect(*r)) n++;
             char cb[24];
-            snprintf(cb, sizeof cb, "%d", (int)waits.size());
+            snprintf(cb, sizeof cb, "%d", n);
             const float cw2 = TextWidth(cb, loc, T_S11);
             const float bw = std::fmax(18.0f, cw2 + 10.0f);
             dl->AddRectFilled(ImVec2(hx + 5.0f, hy + 1.0f), ImVec2(hx + 5.0f + bw, hy + 17.0f),
@@ -2338,10 +2354,13 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
 static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
     const float L = x + 16.0f, listW = w - 32.0f;
-    // 来源那一排（rail）在这一屏同样生效：选中某家就只留那一家的卡。
+    // 这一屏不吃来源导轨：券是各家磁盘上的事实，和「我在看哪一家的会话」不是一回事。
+    // 2026-11-03 实测的断裂：导轨选到 Qoder 时这里只剩 Qoder 一张卡、badge 也不出现，
+    // 而同一时刻 WorkBuddy 的券横幅照常弹（claims_probe：ready=1／100 Credits／连续 24 天），
+    // 点横幅落进的就是这一屏——它把横幅要他看的那张卡筛掉了。取证对照见
+    // evidence/2026-11-03-claims-rail/{all,qoder}_zh_half.png。
     std::vector<const ap::Claim*> cs;
-    for (const ap::Claim& c : g_pd.claims)
-        if (g_r31_src == "all" || c.vendor == g_r31_src) cs.push_back(&c);
+    for (const ap::Claim& c : g_pd.claims) cs.push_back(&c);
     if (cs.empty())
         return R31Empty(dl, L, y, listW, 180.0f, T("r_claim_unknown", loc), T("r_claim_hint", loc),
                         nullptr, 0, loc);
@@ -2703,8 +2722,7 @@ static float R31ToolsList(ImDrawList* dl, float x, float yTop, float w, int loc)
         for (const auto& r : g_pd.rows) {
             if (r.agent_id != t.id) continue;
             rows++;
-            const int g = GroupOf(r.state);
-            if (g == G_AWAIT || g == G_FAIL) wait++;
+            if (DemandsYou(r)) wait++;
         }
         std::string sub = RFmt(T("r_sessions_n", loc), rows);
         if (wait > 0) sub += " · " + RFmt(T("r_waiting_n", loc), wait);
@@ -2737,8 +2755,8 @@ static void R31DetailHead(ImDrawList* dl, float x, float y, float w, int loc, co
                 ClipToWidth(R31RowName(*r), 368.0f, loc, T_S22), loc, k31Fg, T_S22, -0.5f);
     {
         const int kind = R31KindOf(*r);
-        const std::string word = T(R31KindWord(kind), loc);
-        const ImU32 kc = R31KindColor(kind);
+        const std::string word = T(R31StatusKey(*r), loc);
+        const ImU32 kc = R31StatusColor(*r, kind);
         const float tw = TextWidth(word, loc, T_S11B);
         float mx = x + 24.0f;
         I31(dl, R31KindIcon(kind), mx, y + 164.0f + 2.5f, 11.0f, kc);

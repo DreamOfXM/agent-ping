@@ -214,12 +214,12 @@ std::vector<std::string> load_seen() {
     return out;
 }
 
-bool append_seen(const std::string& key, std::string* err) {
+bool append_seen(const std::string& line, std::string* err) {
     mkdirs(state_dir());
     const std::string p = seen_path();
     std::ofstream f(p, std::ios::binary | std::ios::app);
     if (!f) { if (err) *err = "写不了「" + p + "」"; return false; }
-    f << key << "\n";
+    f << line << "\n";
     f.flush();
     if (!f) { if (err) *err = "写到一半失败（" + p + "）"; return false; }
     return true;

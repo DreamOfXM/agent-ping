@@ -1732,6 +1732,120 @@ Balance read_qoder_balance() {
     return b;
 }
 
+// ── Qoder 桌面 App 的运行状态 ────────────────────────────────────────────────
+/// 一行 control state 长这样（11-02 从他本机 main.log 原样抄的，探针就拿它当夹具）：
+/// `[2026-11-02T08:02:39.892Z] [INFO] [main] [ChatSession] Main ChatSession control state
+///  committed {"sessionId":"d326da19-…","runtimeState":"running","pendingInteractionCount":0,…}`
+bool parse_qoder_control(const std::string& line, std::string& sid, QoderLive& out) {
+    const std::size_t brace = line.find('{');
+    if (brace == std::string::npos) return false;
+    Json rec;
+    if (!json_parse(line.c_str() + brace, line.size() - brace, rec)) return false;
+    const std::string* s = rec.str_at("sessionId");
+    const std::string* rt = rec.str_at("runtimeState");
+    if (!s || s->empty() || !rt || rt->empty()) return false;
+    sid = *s;
+    out.state = *rt;
+    out.ts = parse_bracket_iso(line);
+    const Json* p = rec.at("pendingInteractionCount");
+    out.pending = (p && p->kind == Json::NUM) ? (int)p->num : 0;
+    return true;
+}
+
+struct LiveCache {
+    double mtime = -1, size = -1;
+    std::map<std::string, QoderLive> live;
+};
+std::map<std::string, LiveCache>& live_cache() {
+    static std::map<std::string, LiveCache> m;
+    return m;
+}
+
+/// 只往最新那一次运行目录里读：App 重启后上一轮的 running 那句已经不作数（那一路进程早没了），
+/// 所以这里刻意不回退到旧目录 —— 与 read_qoder_balance「旧目录也可能还写着余额」的取法相反。
+/// main.log 刚轮转过的一瞬可能一条都没有，顺带读一眼 main.1.log 补上还没见过的会话。
+std::map<std::string, QoderLive> read_qoder_live() {
+    std::map<std::string, QoderLive> empty;
+    const std::string root = home() + "/Library/Application Support/com.qoder.app.stable/logs";
+    std::vector<std::pair<double, std::string>> dirs;
+    for (const std::string& n : list_dir(root)) {
+        const std::string p = root + "/" + n;
+        const FStat st = fst(p);
+        if (st.ok && st.dir) dirs.emplace_back(st.mtime, n);
+    }
+    std::sort(dirs.begin(), dirs.end(),
+              [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& c) {
+                  return a.first > c.first;
+              });
+    if (dirs.empty()) return empty;
+    const std::string dir = root + "/" + dirs.front().second;
+    std::map<std::string, QoderLive> out;
+    for (const char* leaf : {"main.log", "main.1.log"}) {
+        const bool primary = leaf[4] == '.';           // main.log 正本；main.1.log 里那个位置是「1」
+        const std::string p = dir + "/" + leaf;
+        const FStat st = fst(p);
+        if (!st.ok) continue;
+        LiveCache& c = live_cache()[p];
+        if (c.mtime != st.mtime || c.size != st.size) {
+            c.mtime = st.mtime;
+            c.size = st.size;
+            c.live.clear();
+            // 一轮 3 秒扫一次，这条 needle 在 4 MB 日志里只出现几十次：cap 2 MB / 16 条足够
+            // 覆盖最近十几轮，代价是每轮最多回扫 2 MB（实测 <2 ms）。
+            for (const std::string& ln : tail_lines(p, "control state committed", 16, 2ull << 20)) {
+                std::string sid;
+                QoderLive q;
+                // tail_lines 是「新在前」返回的，所以每个会话只认第一条：emplace 才是最新，
+                //  plain assign 会留下窗口里最旧的一条。2026-11-02 实测踩过：本轮已经写完
+                //  （最新一条 cold@20:06），窗口里最旧那条 opening@18:29 把状态钉死成「运行中」。
+                if (parse_qoder_control(ln, sid, q) && q.ts > 0) c.live.emplace(sid, q);
+            }
+        }
+        for (const auto& kv : c.live)
+            if (primary) out[kv.first] = kv.second;    // 正本直接占位
+            else out.emplace(kv.first, kv.second);     // 补位：正本这轮还没写过的会话
+    }
+    return out;
+}
+
+/// 盖上几条。判据三条，都能被 main.log 原文反驳：
+/// ① running/opening ＝ 它自己说这一轮还在跑。转轮中每条 tool_use／tool_result 都在写日志
+///    而 runtimeState 不变，所以「这行比日志旧」不构成反驳，只有 20 分钟两头都静才算它过期。
+/// ② waiting-user（或 pendingInteractionCount>0）＝ 真等你点，算正证（inferred_wait 清掉，许响铃）。
+///    这一档要求它不比日志旧：你答完话日志就往前写了，那一句已经作废。
+/// ③ interrupted ＝ 你按了停止，球回到你这边；同样要求不比日志旧。
+/// 异常那条不动：日志报了错的优先，不能被一句旧的 running 抹平。
+int apply_qoder_live(Snapshot& snap, const std::map<std::string, QoderLive>& live, double now) {
+    if (live.empty()) return 0;
+    int n = 0;
+    for (AgentSnap& a : snap.agents) {
+        if (a.id != "qoder") continue;
+        for (Session& s : a.sessions) {
+            auto it = live.find(s.id);
+            if (it == live.end()) continue;         // 这一条桌面 App 没提交过状态（CLI 会话就是这样）
+            const QoderLive& q = it->second;
+            if (now - std::max(q.ts, s.last_activity) > kNeedsUserStale) continue;
+            const bool fresh = q.ts + kHookSkew >= s.last_activity;   // 之后日志又写了东西就以日志为准
+            if ((q.state == "running" || q.state == "opening") && s.state != ST_FAILED) {
+                s.state = ST_WORKING;
+                s.inferred_wait = false;
+            } else if (fresh && (q.state == "waiting-user" || q.pending > 0)) {
+                s.state = ST_AWAIT;
+                s.inferred_wait = false;            // 它亲口说的，不再是反推
+                s.await_since = q.ts;
+            } else if (fresh && q.state == "interrupted" &&
+                       (s.state == ST_AWAIT || s.state == ST_WORKING)) {
+                s.state = ST_NEEDS_USER;
+                s.inferred_wait = false;
+            } else {
+                continue;                            // cold / ready：日志那一侧已经够准，不盖
+            }
+            n++;
+        }
+    }
+    return n;
+}
+
 Snapshot scan_all(double now_epoch) {
     double now = now_epoch > 0 ? now_epoch : (double)time(nullptr);
     double since = window_start(now);
@@ -1781,6 +1895,9 @@ Snapshot scan_all(double now_epoch) {
     for (const AgentSnap& a : snap.agents)
         for (const Session& s : a.sessions)
             if (s.last_activity >= since) { snap.today_tokens += s.tokens; snap.today_credits += s.credits; }
+    // 先盖 App 亲口报的运行状态，再让 hook 收件箱盖它：两家都是「它自己写的」，
+    // 但 hook 那条带问句原文与候选项，落点更具体。
+    snap.live_landed = apply_qoder_live(snap, read_qoder_live(), now);
     apply_hook_signals(snap, now);
     return snap;
 }
@@ -1790,9 +1907,11 @@ std::string snapshot_dump(const Snapshot& s) {
     std::string out;
     snprintf(buf, sizeof buf,
              "scanned_at=%.0f window_start=%.0f today_credits=%.2f today_tokens=%ld "
-             "| yesterday_credits=%.2f yesterday_tokens=%ld | hook 落地%d/有效%d/解析不了%d\n",
+             "| yesterday_credits=%.2f yesterday_tokens=%ld | hook 落地%d/有效%d/解析不了%d "
+             "| App 运行状态落地%d\n",
              s.scanned_at, s.window_start, s.today_credits, s.today_tokens,
-             s.yesterday_credits, s.yesterday_tokens, s.hook_landed, s.hook_live, s.hook_dropped);
+             s.yesterday_credits, s.yesterday_tokens, s.hook_landed, s.hook_live, s.hook_dropped,
+             s.live_landed);
     out += buf;
     for (const AgentSnap& a : s.agents) {
         snprintf(buf, sizeof buf, "[%s] %s available=%d sessions=%zu%s%s\n", a.id.c_str(), a.name.c_str(),
@@ -1824,9 +1943,10 @@ std::string snapshot_dump(const Snapshot& s) {
         }
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
-            snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s\n",
+            snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s%s\n",
                      state_name(x.state), utf8_clip(x.project, 14, "").c_str(), x.last_activity,
                      x.tokens, x.credits, x.turns, x.queue_pos, utf8_clip(x.title, 56, "…").c_str(),
+                     x.inferred_wait ? " (推断)" : "",
                      x.question.empty() ? "" : "  ⟵", x.question.empty() ? "" : utf8_clip(x.question, 40, "…").c_str());
             out += buf;
         }

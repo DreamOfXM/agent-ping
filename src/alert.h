@@ -141,13 +141,14 @@ std::set<std::string> load_alerted();
 /// 每轮重扫都会重发同一批横幅，那是比不响更糟的失效方式。
 bool save_alerted(const std::set<std::string>& ids, std::string* err);
 
-// ── 「看过」按会话记 ─────────────────────────────────────────────────────────
-// 每行一个会话键，追加写。与水位线并存：水位线只管升级前那批存量，新看过的一律进这里。
+// ── 「看过」按会话＋那一轮的完成时刻记 ──────────────────────────────────────
+// 每行「会话键<TAB>完成时刻」，追加写。只记键的话，同一个会话再跑完一轮就永远回不到
+// 待处理（2026-11-02 实测）。与水位线并存：水位线只管升级前那批存量，新看过的一律进这里。
 std::string seen_path();
 std::vector<std::string> load_seen();
-bool append_seen(const std::string& key, std::string* err);
-/// 压缩：内存里只留最近若干键时，整份重写（普通路径只追加，不碰历史行）。
-bool save_seen(const std::vector<std::string>& keys, std::string* err);
+bool append_seen(const std::string& line, std::string* err);
+/// 压缩：内存里只留最近若干条时，整份重写（普通路径只追加，不碰历史行）。
+bool save_seen(const std::vector<std::string>& lines, std::string* err);
 
 /// 读设置；AGENTPING_SOUND / AGENTPING_DND 覆盖（0/1），让「免打扰确实压住了」可机器验证。
 AlertCfg load_alert_cfg();
