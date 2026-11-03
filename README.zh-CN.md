@@ -331,6 +331,11 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 精简容器镜像还得补 `build-essential`（或别的编译器）；`libdbus-1-dev` 决定的是走真
 状态项还是占位实现。
 
+每次推 main，CI 都会在一个 Debian 12 容器里把上面那条安装命令原样跑一遍，接着配置、
+构建、量右缘灯舱的点击穿透（`.github/workflows/linux-build-check.yml`）。包列表是
+从这份 README 里读出来的，没有另抄一份——所以这条命令哪天不好使，会把 CI 跑红，
+而不是悄悄漂移。
+
 装到桌面找得到的地方——应用菜单里一个有名有图标的条目，而不是一个得记住路径的裸二进制：
 
 ```sh

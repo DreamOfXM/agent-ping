@@ -387,6 +387,12 @@ clicks.
 A slim container image needs `build-essential` (or another compiler) as well;
 `libdbus-1-dev` is what selects the real status item over the stub.
 
+CI runs that install line on every push to `main`, inside a Debian 12 container,
+and then configures, builds and measures the dock's click-through
+(`.github/workflows/linux-build-check.yml`). The package list is read out of this
+README rather than kept as a second copy, so a command that stops working here
+turns CI red instead of quietly drifting.
+
 To install it where your desktop can find it — a menu entry with a name and an
 icon, not a binary you have to remember the path of:
 
