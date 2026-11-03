@@ -1,0 +1,126 @@
+name: Linux build check
+
+# 这一支只管一件事：README 里那条 Debian 12 的 apt 命令，装完真能编出来、右缘灯舱真能过点击穿透。
+#
+# 为什么要有它：0.1.8 的源码在 Debian 12 上编译失败（灯舱用了一个 GLFW 3.4 才有的窗口属性，
+# bookworm 的 libglfw3-dev 是 3.3.8），而 README 当时公开写着「Debian 12 实测通过」。
+# 现有的 build-linux 抓不到这种病——它跑在 ubuntu-latest（GLFW 3.4），恰好是那个属性存在的环境。
+# 所以这里钉死 debian:bookworm。
+#
+# 装什么不由这一支自己列：它把中英两个 README 里那条 apt-get install 抠出来原样执行。
+# 抄一份清单在这儿，就是 0.1.8 那次的形状——文档改了、CI 没跟着改，于是两边都「绿」。
+#
+# 判据不是「编过了」就算：CMake 必须念出「已链 x11/xext」，探针与 App 级点击穿透都要退出码 0。
+# 缺库时 CMake 会退到「灯舱不出现」那一档并照样编译成功——那种构建对这条带的主张毫无证明力。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debian-bookworm:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Put git in the image before checkout
+        # debian:bookworm 里没有 git、curl、sudo（2026-11-03 实跑 command -v 三个都空），
+        # 而 actions/checkout 要 git。apt 自己不需要仓库，所以这一步排在 checkout 之前。
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Install the dependencies the READMEs promise
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          for f in README.md README.zh-CN.md; do
+            sed -n '/^sudo apt-get install/,/libx11-dev libxext-dev$/p' "$f" \
+              > "readme_apt_${f%.md}.sh"
+          done
+          if [ ! -s readme_apt_README.sh ] || [ ! -s readme_apt_README.zh-CN.sh ]; then
+            echo "::error::没从 README 里抠出那条 apt 命令——那一行的写法变了，这一支不再验证文档承诺，别把它当过了"
+            exit 1
+          fi
+          if ! diff -q readme_apt_README.sh readme_apt_README.zh-CN.sh >/dev/null; then
+            echo "::error::中英两个 README 的 Linux 包列表不一致"
+            diff -u readme_apt_README.sh readme_apt_README.zh-CN.sh
+            exit 1
+          fi
+          echo "将执行 README 里逐字的那条命令（只去掉 sudo，容器里就是 root）："
+          cat readme_apt_README.sh
+          sed 's/^sudo //' readme_apt_README.sh | bash -e -x
+          # 只有本支要的：pkg-config 找库、build-essential 是真编译器
+          # （README 自己也写了「精简容器镜像还得补 build-essential」）、
+          # libxtst-dev 只被 x11_probe 用来合成点击、xvfb 提供那个真 X 服务器。
+          apt-get install -y -qq --no-install-recommends \
+            pkg-config build-essential libxtst-dev xvfb
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release > cfg.log 2>&1 \
+            || { cat cfg.log; echo "::error::configure 没过（日志在上面）"; exit 1; }
+          cat cfg.log
+          grep -q "已链 x11/xext" cfg.log || {
+            echo "::error::CMake 没找到 x11/xext——右缘灯舱会静默不出现，README 那条主张就没被验证"
+            exit 1
+          }
+
+      - name: Build
+        run: |
+          cmake --build build-linux --parallel > build.log 2>&1 \
+            || { tail -60 build.log; echo "::error::编译没过（上面是末尾）"; exit 1; }
+          grep -i "error" build.log || true
+
+      - name: Both binaries exist
+        # 探针目标只在链得上 Xtst 时才建（CMake 找不到时只印一行 STATUS 就跳过）。
+        # 不在这儿拦住，下一档会因为「找不到文件」而失败，成因反而更难认。
+        run: |
+          for f in build-linux/pin_imgui_shell build-linux/x11_probe; do
+            [ -x "$f" ] || { echo "::error::缺 $f（libxtst-dev 没装上？x11_probe 那一档被 CMake 跳过了）"; exit 1; }
+          done
+
+      - name: Primitive probe (its own assertions)
+        # 探针自带夹具：穿透开/关 × 重叠点/独占点 + 全局指针 + 工作区 + 按键，退出码＝不合判据的项数。
+        #
+        # 不用 xvfb-run：2026-11-03 在同一个镜像里实跑，它回的是 xvfb-run 自己的错
+        # （`xauth command not found`，退出码 3），不是探针的判据数——那种 3 会被读成「三项没过」。
+        # 直接起 Xvfb 和 Tools/linux_edge_clickthrough.sh 同一形状，那条路已实测可用。
+        # 最后一行还要探针真打印过自己的判据行：连不上 X 时它也可能回 0，那种 0 不算证明。
+        run: |
+          Xvfb :90 -screen 0 1400x1100x24 >/dev/null 2>&1 &
+          xv_pid=$!
+          sleep 2
+          DISPLAY=:90 ./build-linux/x11_probe > probe.log 2>&1 && rc=0 || rc=$?
+          cat probe.log
+          kill "$xv_pid" 2>/dev/null || true
+          grep -q "不合判据的项＝" probe.log || {
+            echo "::error::探针没打印判据行——它大概根本没连上 X，这个退出码不能当通过"
+            exit 1
+          }
+          exit $rc
+
+      - name: Right-edge dock passes clicks through (real binary)
+        # 跑的是真 App，不是 shim：灯舱态三敲必须全落到底下那块窗，面板态带内两敲由 App 自己收到。
+        # 两轮的退出码都是「不合判据的项数」，脚本自己收口，这里只认它的退出码。
+        env:
+          BIN: build-linux/pin_imgui_shell
+          PROBE: build-linux/x11_probe
+          OUT: out_ci_click
+        run: |
+          bash Tools/linux_edge_clickthrough.sh > click.log 2>&1 && rc=0 || rc=$?
+          cat click.log
+          grep -q "这条路＝有" out_ci_click/app-dock.log || {
+            echo "::error::灯舱自己判了「这条路＝没有」，那条带不会出现在屏上"
+            exit 1
+          }
+          exit $rc
