@@ -159,6 +159,15 @@ nock() {  # nock <格> <这行里不许出现的子串>：残留的问句/候选
         echo "[不符] $1 不该带「$2」"; echo "        实得：$L"; fail=$((fail+1))
     else echo "[通过] $1 不含「$2」"; fi
 }
+creq() {  # creq <格> <正则>：随墙钟变的数（夹具造好到扫描之间差一两秒）只能用正则，
+          # 子串匹配会把「179 对 180」这种一秒之差判成不符——判据就不该由抖动决定。
+    checks=$((checks+1))
+    local L; L=$(line "$1")
+    if printf '%s\n' "$L" | grep -Eq -- "$2"; then
+        echo "[通过] $1 合正则「$2」"
+    else echo "[不符] $1 不合正则「$2」"; echo "        实得：$L"; fail=$((fail+1))
+    fi
+}
 
 chk zcase1 awaiting "⟵要不要先备份再跑这次迁移？" "⟦tool=AskUserQuestion opt=3"
 nock zcase2 "⟦"
@@ -171,7 +180,8 @@ chk zcase5 awaiting "⟦tool=ExitPlanMode opt=0"
 nock zcase6 "⟦"
 chk zcase6 working
 
-chk wcase1 awaiting "(推断)" "src=log" "wait=18"
+chk wcase1 awaiting "(推断)" "src=log"
+creq wcase1 'wait=1[6-9][0-9]s'
 nock wcase1 "⟵"
 chk wcase2 working
 nock wcase2 "⟦"
