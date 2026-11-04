@@ -5,7 +5,7 @@ class AgentPing < Formula
   # URL 里的标签名跟着 version 走：0.1.7 那次 version/url/sha256 三行各写各的，
   # 版本号一挪就有人只改其中一行，装出来的是上一版的源码。
   url "https://github.com/DreamOfXM/agent-ping/archive/refs/tags/v#{version}.tar.gz"
-  sha256 "1f9b192383ec4c4957647e11cf2cc6ddb12961a57ab5754991ac6dcdf3836427"
+  sha256 "84d717c81168330e24da55ce9be3ac5d3c03aa3b04cb0314c893254a17b45060"
   license "Apache-2.0"
 
   depends_on macos: :ventura
