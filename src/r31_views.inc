@@ -762,7 +762,9 @@ static std::vector<const UIRow*> R31Rows(const std::string& src, const std::stri
 ///      只有反证的那条（90 秒没动静反推出来的授权）也画在这一段里、照样点得开，
 ///      但状态格写「疑似」、整行降灰、不进这一格的数字（11-02 拍板：推断的不催人）；
 ///   ② 今天跑完但还没看过的 —— 只等你扫一眼，双击或点 ⓘ 看过就算处理完。
-/// 段内沿用 RebuildPanel 的「等得最久在前」，段间不混排（信息性的不许插到要动手的前面）。
+/// 段内各自按「等得最久在前」：RebuildPanel 排的是 age 升序（最新的在前，稿子 done 组就那样），
+/// 这一格表头写的是「等待最久优先」，所以两段各自翻过来——右缘预览卡也是这么做的。
+/// 段间不混排（信息性的不许插到要动手的前面）。
 /// 第二段必须算进面板的条数，但不进菜单栏那串数字：它不催人。
 static std::vector<const UIRow*> R31Waits() {
     const std::vector<const UIRow*> all = R31Rows(g_r31_src, g_r31_query);
@@ -772,6 +774,8 @@ static std::vector<const UIRow*> R31Waits() {
         if (DemandsYou(*r) || R31Suspect(*r)) waits.push_back(r);
         else if (g == G_DONE && r->unseen) unseen.push_back(r);
     }
+    std::reverse(waits.begin(), waits.end());
+    std::reverse(unseen.begin(), unseen.end());
     waits.insert(waits.end(), unseen.begin(), unseen.end());
     return waits;
 }
