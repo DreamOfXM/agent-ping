@@ -201,10 +201,10 @@ hook 只做一件事：把 CLI 给的 JSON 抄进收件箱。它从不替你回�
 Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别的工具，面板会说出
 来并且不动那个文件。ZCode、WorkBuddy、OpenCode 没有 hook 通道，也就没有东西替我们写。
 ZCode 的等待改读它自己的会话库：回合没完、且有一颗 `AskUserQuestion` / `ExitPlanMode`
-的 part 仍停在 `running`——它的详情屏于是带上问题原文与候选，来源那一格念「会话库 ·
-本机」。WorkBuddy 与 OpenCode 的库里没有这种挂起的问题：WorkBuddy 只可能由「工具调用
-90 秒没回执」反推出疑似等待（来源念「会话日志 · 本机」，而且永远不响铃），OpenCode
-没有等待这一档。
+的 part 仍停在 `running`——它的会话详情屏于是带上问题原文与候选，授权屏的「来源」
+那一格念「会话库 · 本机」。WorkBuddy 与 OpenCode 的库里没有这种挂起的问题：
+WorkBuddy 只可能由「工具调用 90 秒没回执」反推出疑似等待（「来源」念「会话日志 ·
+本机」，而且永远不响铃），OpenCode 没有等待这一档。
 
 ## 依赖
 
@@ -412,8 +412,9 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 - **资源重置卡不实现。** 没有任何本地日志带它，所以这个字段不建、那一块也不画。
 - **hook 安装覆盖两个 CLI。** Claude Code 与 Qoder CLI 能从面板或 `Tools/install_hook.sh`
   接上；Codex 的 `notify` 槽只检测不写。ZCode、WorkBuddy、OpenCode 根本没有 hook 通道。
-  ZCode 的「等待确认」是从它自己的会话库读出来的，问题原文与候选都是 CLI 亲手落的那份
-  JSON，不是递给我们的载荷；WorkBuddy 与 OpenCode 的详情屏没有问题原文——WorkBuddy
+  ZCode 的「等待确认」是从它自己的会话库读出来的，会话详情屏上的问题原文与候选都
+  是 CLI 亲手落的那份 JSON，不是递给我们的载荷；WorkBuddy 与 OpenCode 的屏上没有
+  问题原文——WorkBuddy
   那一档是「90 秒没回执」反推的疑似等待，不响铃。
 - **六个来源，不是「所有 agent」。** Qoder CLI、Claude Code、Codex、ZCode、WorkBuddy、
   OpenCode。后三个要带 SQLite3 的构建。别的一律不在面板里。

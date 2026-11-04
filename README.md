@@ -236,11 +236,11 @@ another tool, the panel says so and does not touch the file. ZCode, WorkBuddy
 and OpenCode have no hook channel, so nothing is written on their behalf. ZCode's
 awaiting state comes from its own session store instead — a `part` row still
 `running` on `AskUserQuestion` / `ExitPlanMode` inside a turn that has not
-completed — and its detail screen then carries the verbatim question and options,
-with Source reading "session store · local". WorkBuddy's and OpenCode's stores
-keep no such suspended question: WorkBuddy can only be inferred as waiting from a
-tool call unanswered for 90 s (Source "session log · local", and it never rings),
-OpenCode has no awaiting state at all.
+completed — and its session detail then carries that question and its options,
+while the Permission screen's Source cell reads "session store · local".
+WorkBuddy's and OpenCode's stores keep no such suspended question: WorkBuddy can
+only be inferred as waiting from a tool call unanswered for 90 s (Source "session
+log · local", and it never rings), OpenCode has no awaiting state at all.
 
 ## Requirements
 
@@ -495,10 +495,10 @@ mystery.
 - **Hook install covers two CLIs.** Claude Code and Qoder CLI can be wired from the
   panel or `Tools/install_hook.sh`; Codex's `notify` slot is detected but never
   written. ZCode, WorkBuddy and OpenCode have no hook channel at all. ZCode's
-  "awaiting you" is read out of its own session store, so the question text and
-  options are the CLI's own JSON, not a payload handed to us; WorkBuddy's and
-  OpenCode's detail screens carry no question text — WorkBuddy's awaiting row is
-  an inference from a 90-second unanswered tool call and never rings.
+  "awaiting you" is read out of its own session store, so the question and options
+  on its session detail screen are the CLI's own JSON, not a payload handed to us;
+  WorkBuddy's and OpenCode's screens carry no question text — WorkBuddy's awaiting
+  row is an inference from a 90-second unanswered tool call and never rings.
 - **Six sources, not "every agent".** Qoder CLI, Claude Code, Codex, ZCode,
   WorkBuddy and OpenCode. The last three need a build with SQLite3. Anything else
   is simply absent from the panel.
