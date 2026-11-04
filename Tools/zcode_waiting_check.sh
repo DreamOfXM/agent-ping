@@ -14,7 +14,7 @@
 #
 # 附带量 WorkBuddy 的来源标注（它没有 hook，也没有问句原文，「等待确认」是从日志尾部
 # 反推的）：那一格必须念「会话日志」而不是「会话库」，且未stalled的同一形状仍判 working。
-#   7 正证 工具调用 180s 没回执                → awaiting (推断)，src=log，且没有问题原文
+#   7 正证 工具调用 180s 没回执                → awaiting (推断)，src=log、wait≈180s，且没有问题原文
 #   8 反例 工具调用 30s 没回执                 → working，不挂 ⟦…⟧（跑着的东西不能算等你）
 #
 # 用法（仓库根）：bash Tools/zcode_waiting_check.sh
@@ -171,7 +171,7 @@ chk zcase5 awaiting "⟦tool=ExitPlanMode opt=0"
 nock zcase6 "⟦"
 chk zcase6 working
 
-chk wcase1 awaiting "(推断)" "src=log"
+chk wcase1 awaiting "(推断)" "src=log" "wait=18"
 nock wcase1 "⟵"
 chk wcase2 working
 nock wcase2 "⟦"

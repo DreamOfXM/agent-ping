@@ -1200,7 +1200,7 @@ bool workbuddy_judge(const std::vector<Json>& tail, double now, Session& s) {
     if (type && *type == "function_call" && !open_calls.empty()) {
         // 这一档的等待证据是日志尾部的 stalled tool_use，不是库里的会话行；不改来源
         // 标注，详情屏就会把「反推出来的」念成「会话库 · 本机」。
-        if (age >= kStalledToolUse) { s.state = ST_AWAIT; s.inferred_wait = true; s.await_src = QS_LOG; }
+        if (age >= kStalledToolUse) { s.state = ST_AWAIT; s.inferred_wait = true; s.await_src = QS_LOG; s.await_since = stamp; }
         else s.state = ST_WORKING;
         return true;
     }
