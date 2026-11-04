@@ -7898,7 +7898,7 @@ int main(int argc, char** argv) {
             if (getenv("AGENTPING_HITS") && !g_hits.empty()) {
                 static const char* prev = nullptr;
                 std::string dump;
-                char line[256];
+                char line[1024];        // 折叠账最长 255，加上前缀与浮点数不会截（GCC 会报 -Wformat-truncation）
                 // row 位对会话行是行号，对入口是 kFoldRow＋组号（80=介入…84=今日已结束，85=返回总览）：
                 // 光看文案分不出两组都收 3 条时点的是哪一条，坐标钉法要靠这个数。
                 for (const auto& h : g_hits) {

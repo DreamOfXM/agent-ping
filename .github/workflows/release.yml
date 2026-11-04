@@ -131,13 +131,21 @@ jobs:
       - name: Install build dependencies
         # libxext-dev 不能省：右缘灯舱的 X11 原语缺了它不会让构建失败，只会让 CMake 安静地
         # 退到「灯舱不出现」那一档——发出去的 Linux 构建于是带着一条永远不会出现的带。
+        #
+        # libxrandr-dev 也不能省，但成因是另一条：--no-install-recommends 会把它筛掉，而
+        # Ubuntu 26.04 的 libglfw3-dev（3.4-4）只把它挂在 Recommends 上。灯舱那三个文件里的
+        # <GLFW/glfw3native.h> 在 3.4 无条件 include X11/extensions/Xrandr.h，于是
+        # cursor_posix.cpp 直接 fatal error（2026-11-04 v0.1.10 的 build-linux 就是这么红的，
+        # 在 ubuntu:26.04 容器里逐字复刻过这一串 apt 参数：装上前后 RC 1 → 0）。
+        # Debian 12 走 README 那条不带 --no-install-recommends 的命令，包自己会进来，
+        # 所以文档里那行不用改——改的只有这一支自己。
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build build-essential pkg-config \
             libglfw3-dev libfreetype6-dev libsqlite3-dev \
             libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev libxtst-dev \
-            desktop-file-utils xvfb
+            libxrandr-dev desktop-file-utils xvfb
 
       - name: Build
         # 同一条判据在 linux-build-check.yml 里也有一份，但那一支不发包：

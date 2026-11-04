@@ -2807,7 +2807,7 @@ static float R31DetailBody(ImDrawList* dl, float x, float yTop, float w, int loc
         for (size_t i = 0; i < r.options.size(); i++) {
             const float oy = cy;
             R31Glass(dl, L, oy, RW2, 40.0f, 9.0f);
-            char nb[4];
+            char nb[24];                 // 放得下任意 size_t 的十进制，snprintf 不可能截断
             snprintf(nb, sizeof nb, "%zu", i + 1);
             const bool hasDesc = i < r.option_desc.size() && !r.option_desc[i].empty();
             DrawTextRun(dl, L + 12.0f, TextMid(oy + (hasDesc ? 14.0f : 20.0f), T_S9, loc), nb, loc,
