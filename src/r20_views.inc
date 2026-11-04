@@ -516,7 +516,7 @@ static float RSessionView(ImDrawList* dl, float L, float R, float y, int loc, do
     y += 1.0f;
     y += RKv(dl, L, R, y, "det_session", r->native_id.empty() ? r->key : r->native_id, loc);
     y += RKv(dl, L, R, y, "det_wait", Dur(r->age, loc), loc);
-    y += RKv(dl, L, R, y, "src_signal", T("det_source_val", loc), loc);
+    y += RKv(dl, L, R, y, "src_signal", T(SourceKeyOf(*r), loc), loc);
     y += 12.0f;
     y += RHint(dl, L, R, y, RI_INFO, RFmt(T("det_hint_q", loc), r->agent.c_str()), loc);
     return y;
@@ -563,7 +563,7 @@ static float RPermView(ImDrawList* dl, float L, float R, float y, int loc, doubl
         y += RKv(dl, L, R, y, "perm_tool", r->tool.empty() ? std::string("—") : r->tool, loc);
     y += RKv(dl, L, R, y, "det_wait", Dur(r->age, loc), loc);
     y += RKv(dl, L, R, y, "perm_project", r->project.empty() ? r->agent : r->project, loc);
-    y += RKv(dl, L, R, y, "det_source", T("det_source_val", loc), loc);
+    y += RKv(dl, L, R, y, "det_source", T(SourceKeyOf(*r), loc), loc);
     y += 12.0f;
     y += RHint(dl, L, R, y, RI_SHIELD, T("perm_hint", loc), loc);
 

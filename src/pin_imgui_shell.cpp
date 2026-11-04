@@ -293,6 +293,10 @@ static const Key kStr[] = {
     {"det_session",    {"会话", "Session", "Sitzung", "Sessione", "セッション", "세션"}},
     {"det_source_val", {"hook 收件箱 · 本机", "hook inbox · local", "Hook-Postfach · lokal",
                         "casella hook · locale", "hook 受信箱 · ローカル", "훅 수신함 · 로컬"}},
+    {"det_source_val_db", {"会话库 · 本机", "session store · local", "Sitzungsspeicher · lokal",
+                           "archivio sessioni · locale", "セッションストア · ローカル", "세션 스토어 · 로컬"}},
+    {"det_source_val_log", {"会话日志 · 本机", "session log · local", "Sitzungsprotokoll · lokal",
+                            "log sessioni · locale", "セッションログ · ローカル", "세션 로그 · 로컬"}},
     {"det_sess_n",     {"%d 会话", "%d sessions", "%d Sitzungen", "%d sessioni",
                         "%d セッション", "%d 세션"}},
     {"det_opt_count",  {"%d 个选项", "%d options", "%d Optionen", "%d opzioni",
@@ -1722,6 +1726,8 @@ struct UIRow {
     std::string last_cmd;
     /// 授权详情「触发说明」：hook 原文；空＝退回「工具」那一行。
     std::string trigger;
+    /// 这一行的「等你」证据出自哪条通道（ap::AwaitSrc）：详情屏「来源」那一格按它选措辞。
+    int await_src = ap::QS_LOG;
     /// R31 每行那一小截用量：只摆来源真给了的字段。Qoder 的 JSONL 没有 token
     /// 明细（全 0），所以 has_tokens 为假时整行不画——不拿 0 冒充读数。
     long tokens = 0;
@@ -1747,6 +1753,14 @@ struct UIRow {
 /// 详情路由、自动选行、状态胶囊都走这一个判据，三处不许各判一套。
 static bool RowAsksQuestion(const UIRow& r) {
     return !r.options.empty() || r.tool == "AskUserQuestion";
+}
+/// 详情屏「来源」那一格的措辞：三条通道各有各的字，不许一律念 hook ——
+/// ZCode/WorkBuddy/OpenCode 实测没有 hook 通道（--hook-status supported=0），
+/// 把它们的问题说成「hook 收件箱」就是界面在编一个本机不存在的文件。
+static const char* SourceKeyOf(const UIRow& r) {
+    return r.await_src == ap::QS_HOOK ? "det_source_val"
+         : r.await_src == ap::QS_DB   ? "det_source_val_db"
+                                      : "det_source_val_log";
 }
 struct Chip { std::string name, initial; int n; ImU32 hue; };
 /// 设置屏「监听工具」一行的数据源：本轮 scan 真返回的采集器，一个不多一个不少。
@@ -4670,7 +4684,7 @@ static float drawDetail(ImDrawList* dl, float L, float R, float maxBot, int loc,
     cy += KvRow(dl, L, R, cy, "det_session",
                 r->native_id.empty() ? r->key : r->native_id, loc, true);
     cy += KvRow(dl, L, R, cy, "det_wait", Ago(r->age, loc), loc, false);
-    cy += KvRow(dl, L, R, cy, "det_source", T("det_source_val", loc), loc, false);
+    cy += KvRow(dl, L, R, cy, "det_source", T(SourceKeyOf(*r), loc), loc, false);
     cy += 8.0f;
 
     for (const auto& ln : WrapLines(T("det_no_submit", loc), R - L, loc, T_SM, 2)) {
@@ -4713,7 +4727,7 @@ static float drawPermission(ImDrawList* dl, float L, float R, float maxBot, int 
     cy += KvRow(dl, L, R, cy, "perm_tool", tool, loc, true);
     cy += KvRow(dl, L, R, cy, "det_wait", Ago(r->age, loc), loc, false);
     cy += KvRow(dl, L, R, cy, "perm_project", r->project, loc, false);
-    cy += KvRow(dl, L, R, cy, "det_source", T("det_source_val", loc), loc, false);
+    cy += KvRow(dl, L, R, cy, "det_source", T(SourceKeyOf(*r), loc), loc, false);
     cy += 8.0f;
 
     for (const auto& ln : WrapLines(T("perm_hint", loc), R - L, loc, T_SM, 3)) {
@@ -5198,6 +5212,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.options = se.options;
             row.option_desc = se.option_desc;
             row.tool = se.tool;
+            row.await_src = se.await_src;
             // 采集层已经保证 first_activity 落在今天之内；这里再扣一次「最后有动静」，
             // 时长不为负。没有命令原文就留空，`.live` 那一行整行不画。
             row.span_sec = (se.first_activity > 0 && se.last_activity > se.first_activity)
@@ -6666,6 +6681,9 @@ static void LoadProbeFixture() {
         r.age = age;
         r.turns = turns;
         r.inferred = false;
+        // 样例数据里的「等你」行都是按 hook 契约摆的（带 trigger/question），来源那一格
+        // 就念 hook；真数据的通道归属由采集层给，见 SourceKeyOf。
+        r.await_src = st == ap::ST_AWAIT ? ap::QS_HOOK : ap::QS_LOG;
         pd.rows.push_back(std::move(r));
         return &pd.rows.back();
     };

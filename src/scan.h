@@ -10,6 +10,9 @@ namespace ap {
 
 enum State { ST_WORKING, ST_NEEDS_USER, ST_AWAIT, ST_QUEUED, ST_FAILED, ST_RESTING };
 
+/// 一行会话的「等你」证据出自哪条通道（详情屏「来源」那一格按它选措辞）。
+enum AwaitSrc { QS_LOG = 0, QS_DB, QS_HOOK };
+
 /// 用量四档。各家字段名不同，进这一层前必须已经归一到同一个加法口径：
 /// 总用量 = 输入 + 输出 + 缓存读取 + 缓存写入。Codex 的 input 自带 cached，做差后才能放进来。
 struct UsageParts {
@@ -90,15 +93,21 @@ struct Session {
     int turns = 0;
     /// 队列实时深度，0 = 没有实时队列。只有 Claude 的 queue-operation 会给出非零值。
     int queue_pos = 0;
-    /// CLI 亲口问的原话（Notification hook 正文）。空 = 这一行只有状态、没有问题块。
+    /// CLI 亲口问的原话（hook 正文，或 ZCode 会话库里那颗挂起的提问工具）。
+    /// 空 = 这一行只有状态、没有问题块。
     std::string question;
     std::vector<std::string> options;
     /// 与 options 一一对应的候选说明（AskUserQuestion 的 options[].description）。
     /// 长度可能短于 options：缺口那头当「没有说明」，界面不画第二行。
     std::vector<std::string> option_desc;
     std::string tool;             // 停在「允许吗」上的工具名
-    /// 这一次「等你」从哪一刻开始：hook 信号落地的时刻。0 = 不是 hook 说的（或只是推断），
-    /// 界面退回用 last_activity 算等待时长。没有它，今天刚落的授权会显示成日志最后一条的年纪。
+    /// 问题块从哪条通道拿到的，只决定详情屏「来源」那一行念哪一句，不参与判态与响铃。
+    /// ZCode/WorkBuddy/OpenCode 没有 hook 通道（--hook-status 实测 supported=0），
+    /// 会话库是它们唯一的来源；hook 盖上来的时候改 QS_HOOK。
+    AwaitSrc await_src = QS_LOG;
+    /// 这一次「等你」从哪一刻开始：hook 信号落地的时刻，或 ZCode 那颗提问工具落地的时刻。
+    /// 0 = 采集层没给（或只是推断），界面退回用 last_activity 算等待时长。
+    /// 没有它，今天刚落的授权会显示成日志最后一条的年纪。
     double await_since = 0;
     /// 活跃度迷你柱（稿子 Sparkline 的输入）：会话尾部 24 格 × 15 分钟的 assistant 记录数。
     /// 长度 <2 ＝ 这一路没有可画的形状，界面整块不画。

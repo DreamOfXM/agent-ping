@@ -103,7 +103,7 @@ CJK 不是后贴的补丁。
 | Qoder CLI | `~/.qoder/projects/**/*.jsonl` | 会话 id、标题、cwd、时间戳、`message.usage` 的 token/credits 字段、user 记录条数 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | 同上，减去 credits（那边没有这个字段） |
 | Codex | `~/.codex/sessions/**` | `session_meta`（cwd、会话 id）、`token_count` 记录、结果、`rate_limits` 事件 |
-| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录（只读） |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录，外加回合未完时那颗仍停在 `running` 的 `AskUserQuestion` / `ExitPlanMode` part——没有 hook 通道，「等待确认」与问题原文就出自这里（只读） |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`、`~/.workbuddy/projects` | 会话行、`providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db`（认 `$XDG_DATA_HOME`） | `session` 的标题/cwd/`time_updated`、`part` 的 `step-finish` token 之和与 `tool.state.status`（只读） |
 | 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/v2/logs/<日期>.log` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 的 `billing/balance` 响应——本期计划、`grant_units` 面值与作废时刻，由 ZCode 自己的 App 落盘，CLI 侧没有 |
@@ -199,8 +199,12 @@ hook 只做一件事：把 CLI 给的 JSON 抄进收件箱。它从不替你回�
 不进去也退 0——CLI 会把 hook 的退出码读成一个决定。
 
 Codex 是只读检测：如果 `~/.codex/config.toml` 里的 `notify` 属于别的工具，面板会说出
-来并且不动那个文件。ZCode、WorkBuddy、OpenCode 没有 hook 通道，状态只从它们自己的
-本地库来，所以详情屏里问题原文与选项对它们为空。
+来并且不动那个文件。ZCode、WorkBuddy、OpenCode 没有 hook 通道，也就没有东西替我们写。
+ZCode 的等待改读它自己的会话库：回合没完、且有一颗 `AskUserQuestion` / `ExitPlanMode`
+的 part 仍停在 `running`——它的详情屏于是带上问题原文与候选，来源那一格念「会话库 ·
+本机」。WorkBuddy 与 OpenCode 的库里没有这种挂起的问题：WorkBuddy 只可能由「工具调用
+90 秒没回执」反推出疑似等待（来源念「会话日志 · 本机」，而且永远不响铃），OpenCode
+没有等待这一档。
 
 ## 依赖
 
@@ -407,8 +411,10 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 - **设置、接线、授权三屏还是上一版版面。** 其余屏已按新稿重做，这三屏会跟上。
 - **资源重置卡不实现。** 没有任何本地日志带它，所以这个字段不建、那一块也不画。
 - **hook 安装覆盖两个 CLI。** Claude Code 与 Qoder CLI 能从面板或 `Tools/install_hook.sh`
-  接上；Codex 的 `notify` 槽只检测不写；ZCode、WorkBuddy、OpenCode 没有 hook 通道，
-  它们的详情屏没有问题原文与选项。
+  接上；Codex 的 `notify` 槽只检测不写。ZCode、WorkBuddy、OpenCode 根本没有 hook 通道。
+  ZCode 的「等待确认」是从它自己的会话库读出来的，问题原文与候选都是 CLI 亲手落的那份
+  JSON，不是递给我们的载荷；WorkBuddy 与 OpenCode 的详情屏没有问题原文——WorkBuddy
+  那一档是「90 秒没回执」反推的疑似等待，不响铃。
 - **六个来源，不是「所有 agent」。** Qoder CLI、Claude Code、Codex、ZCode、WorkBuddy、
   OpenCode。后三个要带 SQLite3 的构建。别的一律不在面板里。
 - **深底托盘图标对比度弱。** 深色托盘上只有 19–24% 的亮像素过 WCAG 3:1；浅色托盘 39%。

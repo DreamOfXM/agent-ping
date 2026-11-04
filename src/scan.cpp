@@ -861,6 +861,59 @@ std::string col_text(sqlite3_stmt* st, int i) {
     return p ? std::string(p) : std::string();
 }
 
+/// 问句必须单行：一行里塞进三段换行会把 340pt 宽的弹层顶开。
+std::string hook_one_line(const std::string& s, std::size_t max_cp) {
+    std::string out, cur;
+    std::vector<std::string> lines;
+    for (char c : s) {
+        if (c == '\n' || c == '\r') { lines.push_back(cur); cur.clear(); }
+        else cur += c;
+    }
+    lines.push_back(cur);
+    for (const std::string& ln : lines) {
+        std::string t = trim(ln);
+        if (t.empty()) continue;
+        if (!out.empty()) out += " ";
+        out += t;
+    }
+    return utf8_clip(out, max_cp, "");
+}
+
+/// 「CLI 亲口问的那一句」的公共形状：
+///   {questions:[{question, header, multiSelect, options:[{label, description}]}]}
+/// hook 信号把它挂在 details.input 下、ZCode 把它挂在 part.state.input 下，input 实测见过
+/// 字典也见过写成 JSON 字符串，两种都接。返回 false = 这一份里没有 questions，
+/// 调用方退回用自己的提示原文。
+bool parse_question_block(const Json& box, const std::string* fallback, std::string& q,
+                          std::vector<std::string>& opts, std::vector<std::string>& desc) {
+    const Json* input = box.at("input");
+    Json parsed;
+    if (input && input->kind == Json::STR) {
+        if (json_parse(input->str.c_str(), input->str.size(), parsed)) input = &parsed;
+        else input = nullptr;
+    } else if (input && input->kind != Json::OBJ) {
+        input = nullptr;
+    }
+    const Json* qs = input ? input->at("questions") : nullptr;
+    if (!qs || qs->kind != Json::ARR || qs->arr.empty()) {
+        if (fallback) q = hook_one_line(*fallback, 160);
+        return false;
+    }
+    const Json& first = qs->arr.front();
+    if (const std::string* fq = first.str_at("question")) q = hook_one_line(*fq, 160);
+    if (q.empty() && fallback) q = hook_one_line(*fallback, 160);
+    const Json* os = first.at("options");
+    if (os && os->kind == Json::ARR)
+        for (std::size_t i = 0; i < os->arr.size() && opts.size() < 3; i++) {
+            const std::string* lb = os->arr[i].str_at("label");
+            if (!lb || lb->empty()) continue;
+            opts.push_back(hook_one_line(*lb, 48));
+            const std::string* ds = os->arr[i].str_at("description");
+            desc.push_back(ds ? hook_one_line(*ds, 120) : std::string());
+        }
+    return true;
+}
+
 AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double now, double since) {
     AgentSnap snap;
     snap.id = "zcode";
@@ -948,6 +1001,19 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
         return snap;
     }
     const double cutoff_ms = (now - kDaysBack * 86400) * 1000;
+    // 过窗作废要连同问句与候选一起撤：面板那排按钮只看「有没有候选」，
+    // 留着就等于在一行「静置」底下摆出一排还能点的选项。
+    auto stale_off = [&](Session& s) {
+        if (now - s.last_activity <= kNeedsUserStale) return;
+        if (s.state == ST_AWAIT) {
+            s.question.clear(); s.options.clear(); s.option_desc.clear();
+            s.tool.clear(); s.await_since = 0;
+        }
+        s.state = ST_RESTING;
+    };
+    // 回合未完的会话（snap.sessions 下标 + 未加前缀的 sid）：留到第二段去 part 表查
+    // 「有没有一颗阻断工具正挂着」。
+    std::vector<std::pair<std::size_t, std::string>> open_rows;
     while (sqlite3_step(st) == SQLITE_ROW) {
         std::string sid = col_text(st, 0);
         std::string title = col_text(st, 1);
@@ -959,6 +1025,7 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
 
         Session s;
         s.id = "zcode-" + sid;
+        s.await_src = QS_DB;
         s.title = title;
         s.turns = turns.count(sid) ? turns[sid] : 0;
         // 没绑项目的会话落在 ~/.zcode/workspace/default，取末级目录只会印出 "default"。
@@ -993,10 +1060,65 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
             else if (completed && completed->kind == Json::NUM && completed->num > 0) s.state = ST_NEEDS_USER;
             else s.state = ST_WORKING;
         }
-        if (now - s.last_activity > kNeedsUserStale) s.state = ST_RESTING;
+        stale_off(s);
+        // 回合未完的那些要再去 part 表查一颗（下面第二段）：那是「等待确认」唯一的正证。
+        if (s.state == ST_WORKING) open_rows.emplace_back(snap.sessions.size(), sid);
         snap.sessions.push_back(std::move(s));
     }
     sqlite3_finalize(st);
+
+    // 回合没完不等于「还在跑」：AskUserQuestion / ExitPlanMode 挂起时那颗 part 的
+    // state.status 停在 running，而回合的 assistant_response 还没有 time.completed ——
+    // 只看回合就把这一格读成「还在跑」，ZCode 侧栏写着「等待确认」我们却不响
+    // （2026-11-04 用户实拍：真库里那条 10:28:38 落地的问题，面板判成 working）。
+    // 归 ST_AWAIT 与 hook 那一路同判据（apply_hook_signals）：只有这一档才画引用块与候选项，
+    // 界面把它念成「等待确认」，正好是 ZCode 侧栏那几个字。
+    // 阻断工具按 ZCode 自己的分法取两类（AskUserQuestion / ExitPlanMode，后者在 zcode.cjs 里
+    // 标了 needsApproval）；Bash 之类「在跑」与「等授权」在盘上同为 running，分不出来，
+    // 所以不碰 —— 宁可少判，不拿不确定的形状去响铃。
+    // 分两段而不是在主查询里挂相关子查询：后者 60 条会话实测 0.357s（冷扫 0.17s→0.45s），
+    // 而这一刻回合未完的通常只有 0~2 条，按 IN 列表查同一张索引实测 10ms/1 条、0 条不查。
+    if (!open_rows.empty()) {
+        std::ostringstream pq;
+        pq << "select session_id, time_created, data from part "
+              "where json_extract(data,'$.type') = 'tool' "
+              "and json_extract(data,'$.state.status') = 'running' "
+              "and json_extract(data,'$.tool') in ('AskUserQuestion','ExitPlanMode') "
+              "and session_id in (";
+        for (std::size_t i = 0; i < open_rows.size(); i++) pq << (i ? ",?" : "?");
+        pq << ") order by session_id, time_created desc;";
+        sqlite3_stmt* pst = nullptr;
+        if (sqlite3_prepare_v2(db, pq.str().c_str(), -1, &pst, nullptr) == SQLITE_OK) {
+            for (std::size_t i = 0; i < open_rows.size(); i++)
+                sqlite3_bind_text(pst, (int)i + 1, open_rows[i].second.c_str(), -1, SQLITE_TRANSIENT);
+            std::set<std::string> seen;   // 每个会话只取最新那颗（order 已把最新排在前面）
+            while (sqlite3_step(pst) == SQLITE_ROW) {
+                const std::string sid2 = col_text(pst, 0);
+                if (!seen.insert(sid2).second) continue;
+                std::size_t idx = 0;
+                bool hit = false;
+                for (const auto& pr : open_rows)
+                    if (pr.second == sid2) { idx = pr.first; hit = true; break; }
+                if (!hit) continue;
+                Session& s = snap.sessions[idx];
+                Json part;
+                const std::string data2 = col_text(pst, 2);
+                if (!json_parse(data2.data(), data2.size(), part)) continue;
+                const std::string* tn = part.str_at("tool");
+                s.tool = tn ? *tn : std::string();
+                const Json* st = part.at("state");
+                if (st && st->kind == Json::OBJ)
+                    parse_question_block(*st, nullptr, s.question, s.options, s.option_desc);
+                s.await_since = sqlite3_column_int64(pst, 1) / 1000.0;
+                s.state = ST_AWAIT;
+                // 等待起点比会话行最后写入更晚时以它为准：stale_off 量的是 last_activity，
+                // 用问题落地这一刻才不会刚问出口就判陈旧。
+                if (s.await_since > s.last_activity) s.last_activity = s.await_since;
+                stale_off(s);
+            }
+            sqlite3_finalize(pst);
+        }
+    }
 
     // 子代理对话（subagent_child）：主任务派出去的调研员/执行者，挂在 parent 下。
     // 上面主列表把它们滤掉了（单独列会占满面板），这里按归属收回——每个父会话最多
@@ -1076,7 +1198,9 @@ bool workbuddy_judge(const std::vector<Json>& tail, double now, Session& s) {
     const Json* err = last.at("error");
     if (err && !err->is_null()) { s.state = ST_FAILED; s.error_text = brief_error(*err); return true; }
     if (type && *type == "function_call" && !open_calls.empty()) {
-        if (age >= kStalledToolUse) { s.state = ST_AWAIT; s.inferred_wait = true; }
+        // 这一档的等待证据是日志尾部的 stalled tool_use，不是库里的会话行；不改来源
+        // 标注，详情屏就会把「反推出来的」念成「会话库 · 本机」。
+        if (age >= kStalledToolUse) { s.state = ST_AWAIT; s.inferred_wait = true; s.await_src = QS_LOG; }
         else s.state = ST_WORKING;
         return true;
     }
@@ -1144,6 +1268,7 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
 
         Session s;
         s.id = "workbuddy-" + sid;
+        s.await_src = QS_DB;
         s.cwd = cwd;
         // 工作目录名就是项目名；但「未绑定项目」那类是它自己按时间戳建的临时空间，
         // 把时间戳摆在行上等于没说话，所以这类只报父目录。
@@ -1309,6 +1434,7 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
 
         Session s;
         s.id = "opencode-" + sid;
+        s.await_src = QS_DB;
         s.title = title;
         s.project = basename_last(dir);
         if (s.project.empty()) s.project = "未绑定项目";
@@ -1422,28 +1548,10 @@ double hook_stamp(const std::string& name) {
     return (double)strtoll(parts[parts.size() - 2].c_str(), nullptr, 10);
 }
 
-/// 问句必须单行：一行里塞进三段换行会把 340pt 宽的弹层顶开。
-std::string hook_one_line(const std::string& s, std::size_t max_cp) {
-    std::string out, cur;
-    std::vector<std::string> lines;
-    for (char c : s) {
-        if (c == '\n' || c == '\r') { lines.push_back(cur); cur.clear(); }
-        else cur += c;
-    }
-    lines.push_back(cur);
-    for (const std::string& ln : lines) {
-        std::string t = trim(ln);
-        if (t.empty()) continue;
-        if (!out.empty()) out += " ";
-        out += t;
-    }
-    return utf8_clip(out, max_cp, "");
-}
-
 /// 问句与候选项。实测形状：
 ///   details.message            —— 「Allow Bash to run: …」这类短提示
-///   details.input.questions[]  —— AskUserQuestion：{question, header, options[{label,description}]}
-/// input 实测见过字典、也见过写成字符串，两种都接。
+///   details.input.questions[]  —— AskUserQuestion
+/// 没有 details 的对象只剩顶层 message。解析本体与 ZCode 共用 parse_question_block。
 void hook_question(const Json& obj, std::string& q, std::vector<std::string>& opts,
                    std::vector<std::string>& desc) {
     const Json* det = obj.at("details");
@@ -1452,35 +1560,8 @@ void hook_question(const Json& obj, std::string& q, std::vector<std::string>& op
         if (top_msg) q = hook_one_line(*top_msg, 160);
         return;
     }
-    Json parsed;
-    const Json* input = det->at("input");
-    if (input && input->kind == Json::STR) {
-        if (json_parse(input->str.c_str(), input->str.size(), parsed)) input = &parsed;
-        else input = nullptr;
-    } else if (!input || input->kind != Json::OBJ) {
-        input = nullptr;
-    }
     const std::string* det_msg = det->str_at("message");
-    const std::string* fallback = det_msg ? det_msg : top_msg;
-
-    const Json* qs = input ? input->at("questions") : nullptr;
-    if (!qs || qs->kind != Json::ARR || qs->arr.empty()) {
-        if (fallback) q = hook_one_line(*fallback, 160);
-        return;
-    }
-    const Json& first = qs->arr.front();
-    const std::string* fq = first.str_at("question");
-    if (fq) q = hook_one_line(*fq, 160);
-    else if (fallback) q = hook_one_line(*fallback, 160);
-    const Json* os = first.at("options");
-    if (os && os->kind == Json::ARR)
-        for (std::size_t i = 0; i < os->arr.size() && opts.size() < 3; i++) {
-            const std::string* lb = os->arr[i].str_at("label");
-            if (!lb || lb->empty()) continue;
-            opts.push_back(hook_one_line(*lb, 48));
-            const std::string* ds = os->arr[i].str_at("description");
-            desc.push_back(ds ? hook_one_line(*ds, 120) : std::string());
-        }
+    parse_question_block(*det, det_msg ? det_msg : top_msg, q, opts, desc);
 }
 
 struct HookSig {
@@ -1572,7 +1653,7 @@ void apply_hook_signals(Snapshot& snap, double now) {
         // 「今日已结束」，问题原文和选项在屏上却没有一条能点进去的详情。
         const bool asks = g.needs_approval || !g.question.empty() || !g.options.empty();
         s.state = asks ? ST_AWAIT : ST_NEEDS_USER;
-        if (asks) s.await_since = g.at;
+        if (asks) { s.await_since = g.at; s.await_src = QS_HOOK; }
         s.inferred_wait = false;              // CLI 亲口说的，就不再是推断
         if (!g.question.empty()) s.question = g.question;
         if (!g.options.empty()) { s.options = g.options; s.option_desc = g.option_desc; }
@@ -1943,12 +2024,25 @@ std::string snapshot_dump(const Snapshot& s) {
         }
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
-            snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s%s\n",
+            snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s%s",
                      state_name(x.state), utf8_clip(x.project, 14, "").c_str(), x.last_activity,
                      x.tokens, x.credits, x.turns, x.queue_pos, utf8_clip(x.title, 56, "…").c_str(),
                      x.inferred_wait ? " (推断)" : "",
                      x.question.empty() ? "" : "  ⟵", x.question.empty() ? "" : utf8_clip(x.question, 40, "…").c_str());
             out += buf;
+            // 面板上那句问话底下还有候选项和「是哪个工具在问」，这两个数 + 等待起点 + 证据
+            // 出自哪条通道，不写进对账行的话，「面板显示了候选」就成了屏幕上信不过的一主张。
+            // src 还是详情屏「来源」那一格的唯一依据：ZCode 这类没有 hook 通道的，念「hook
+            // 收件箱」就是界面在编一个本机不存在的文件。
+            // 每条「等待确认」都必须带来源，包括 WorkBuddy 那种没有问句、只有反推的：
+            // 详情屏那一格对整档都渲染，对账行里没有 src 就等于这一格没被测过。
+            if (!x.tool.empty() || !x.options.empty() || x.state == ST_AWAIT) {
+                snprintf(buf, sizeof buf, "  ⟦tool=%s opt=%zu wait=%.0fs src=%s⟧", x.tool.c_str(),
+                         x.options.size(), x.await_since > 0 ? s.scanned_at - x.await_since : 0.0,
+                         x.await_src == QS_HOOK ? "hook" : x.await_src == QS_DB ? "db" : "log");
+                out += buf;
+            }
+            out += "\n";
         }
     }
     return out;

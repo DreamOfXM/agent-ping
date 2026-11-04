@@ -124,7 +124,7 @@ files are touched only when **you** install a hook (the Connect button or
 | Qoder CLI | `~/.qoder/projects/**/*.jsonl` | session id, title, cwd, timestamps, `message.usage` token/credit fields, user-record count |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | same, minus credits (the field does not exist there) |
 | Codex | `~/.codex/sessions/**` | `session_meta` (cwd, session id), `token_count` records, outcome, `rate_limits` events |
-| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows (read-only) |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows, and the newest `part` row still `running` on `AskUserQuestion` / `ExitPlanMode` inside a turn without `time.completed` — with no hook channel, that is where "awaiting you" and its verbatim question come from (read-only) |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`, `~/.workbuddy/projects` | session rows, `providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (honours `$XDG_DATA_HOME`) | `session` title/cwd/`time_updated`, `part` `step-finish` token sums and `tool.state.status` (read-only) |
 | Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/v2/logs/<date>.log` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; ZCode's `billing/balance` response — this period's plan, its `grant_units` face value and expiry, written by ZCode's own app, not by its CLI |
@@ -233,8 +233,14 @@ read as a decision by the CLI.
 
 Codex is detected read-only: if `notify` in `~/.codex/config.toml` belongs to
 another tool, the panel says so and does not touch the file. ZCode, WorkBuddy
-and OpenCode have no hook channel; their states come from their local databases
-only, so questions and options stay empty for them.
+and OpenCode have no hook channel, so nothing is written on their behalf. ZCode's
+awaiting state comes from its own session store instead — a `part` row still
+`running` on `AskUserQuestion` / `ExitPlanMode` inside a turn that has not
+completed — and its detail screen then carries the verbatim question and options,
+with Source reading "session store · local". WorkBuddy's and OpenCode's stores
+keep no such suspended question: WorkBuddy can only be inferred as waiting from a
+tool call unanswered for 90 s (Source "session log · local", and it never rings),
+OpenCode has no awaiting state at all.
 
 ## Requirements
 
@@ -488,8 +494,11 @@ mystery.
   field does not exist and the block is not drawn.
 - **Hook install covers two CLIs.** Claude Code and Qoder CLI can be wired from the
   panel or `Tools/install_hook.sh`; Codex's `notify` slot is detected but never
-  written; ZCode, WorkBuddy and OpenCode have no hook channel, so their detail
-  screens show no question text or options.
+  written. ZCode, WorkBuddy and OpenCode have no hook channel at all. ZCode's
+  "awaiting you" is read out of its own session store, so the question text and
+  options are the CLI's own JSON, not a payload handed to us; WorkBuddy's and
+  OpenCode's detail screens carry no question text — WorkBuddy's awaiting row is
+  an inference from a 90-second unanswered tool call and never rings.
 - **Six sources, not "every agent".** Qoder CLI, Claude Code, Codex, ZCode,
   WorkBuddy and OpenCode. The last three need a build with SQLite3. Anything else
   is simply absent from the panel.
