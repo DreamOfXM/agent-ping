@@ -372,11 +372,6 @@ static ImU64 MarkTex(const std::string& agent) {
            : agent == "zcode" ? g_markTexZCode
            : agent == "claude" ? g_markTexClaude : 0;
 }
-/// 稿子 AGENTS 表里那三个尺寸（21.5／26.2／22）：按实测墨量反解，为的是「一列看起来同一
-/// 重量」——ZCode 那个 Z 比 WorkBuddy 的鲸鱼细，同一号画出来就轻四成。
-static float MarkPx(const std::string& agent) {
-    return agent == "qoder" ? 21.5f : agent == "workbuddy" ? 26.2f : 22.0f;
-}
 /// 一枚剪影，居中画在 (cx,cy)；没有位图的那家退回同墨的首字母，不许画成别的形状。
 static void MarkGlyph(ImDrawList* dl, float cx, float cy, const std::string& agent,
                       const std::string& initial, int loc, float px, ImU32 ink) {
