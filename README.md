@@ -21,8 +21,8 @@ makes no network calls (checked with `nm -u`, see
 
 ![01 · One screen to see who is waiting for you: overview on the left, session detail on the right; the numbered markers match the legend](docs/fig-01-queue-en.png)
 
-*All three figures in this README are rendered offscreen by the binary this repo
-builds (`AGENTPING_FIXTURE=1`), not staged. The **Sample data** pill in the header is
+*All four figures in this README are rendered by the binary this repo builds from
+fixture data (`AGENTPING_FIXTURE=1`), not staged. The **Sample data** pill in the header is
 the product's own label: those numbers do not come from any real machine.*
 
 ## What it is, and what it deliberately is not
@@ -64,6 +64,29 @@ into one row.
 source file was last written, and the footer's scan time. When they disagree, "we did
 not refresh" and "that vendor wrote nothing" become two distinguishable answers.*
 
+## The right-edge column
+
+When the panel is away, a 44pt column stays resident at the screen's right edge: who is
+waiting for you and who just finished, named without moving your eyes off the work.
+
+![04 · Right-edge column: resident on the left, the peek card that opens the moment the pointer arrives on the right](docs/fig-04-edge-en.png)
+
+- **Two counts, drawn only when nonzero.** Amber on top is *waiting for you* (count +
+  longest wait); steel below is *unseen finishes* (count + how long ago the newest one
+  landed). A zero count draws no row.
+- **Identity by silhouette.** One mark per agent, ordered by how much it is waiting; the
+  corner badge says how many rows that agent has. When one agent is both waiting and
+  running, the badge, the steel dot and the mint ring coexist without covering each other.
+- **Running is a ring of light.** While any agent runs, the column takes a slowly breathing
+  mint rim and the running agent's mark carries a rotating arc; under Reduced Motion the
+  arc pins to the top quadrant and the glow holds steady.
+- **Hover opens the card immediately.** Waiting rows sort longest-first, unseen finishes
+  newest-first, three of each; a run strip chips the live sessions. Clicking a preview row
+  jumps back to the session and clears that unseen finish on the spot; clicking a mark or
+  a chip only jumps.
+- **Idle fades to a hairline.** With nothing waiting and nothing running, the column
+  shrinks to a 3pt line and stays out of the way.
+
 ## Cross-platform
 
 Both platforms are built and run in CI-by-hand on every release; the split is a
@@ -74,7 +97,7 @@ judgement are one code path.
 |---|---|---|
 | Window | borderless, transparent, follows the menu-bar item | same, via GLFW/X11 |
 | Status item | `NSStatusItem` with a three-number label | StatusNotifierItem over D-Bus (needs `libdbus-1-dev`; otherwise a stub with no tray icon) |
-| Right-edge dock | click-through strip at the screen edge, grows on proximity | same, via X11 `ShapeInput` + `XQueryPointer`; stays off on a display where either one cannot be verified |
+| Right-edge column | 44pt resident strip at the screen edge; clicks pass through outside it, hover opens the peek instantly (section above) | same, via X11 `ShapeInput` + `XQueryPointer`; stays off on a display where either one cannot be verified |
 | Banner | `UNUserNotificationCenter` | shells out to `notify-send` (from `libnotify-bin`) |
 | Sound | `afplay` on a system sound | `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`, picked by what is installed and what the file format allows (`aplay` takes only `.wav`, `paplay` not) |
 | Autostart | a plist under `~/Library/LaunchAgents` | an entry under `$XDG_CONFIG_HOME/autostart` |
@@ -248,8 +271,8 @@ log · local", and it never rings), OpenCode has no awaiting state at all.
 - GLFW3, FreeType 2, OpenGL 3.3 core
 - optional SQLite3 (without it, ZCode, WorkBuddy and OpenCode are skipped and the build warns)
 - optional libdbus-1 (Linux status item; without it the build falls back to a stub with no tray icon)
-- optional libx11 + libxext (Linux right-edge dock: input-shape passthrough and the
-  global pointer query; without them the dock stays off and CMake says so)
+- optional libx11 + libxext (Linux right-edge column: input-shape passthrough and the
+  global pointer query; without them the column stays off and CMake says so)
 - macOS 13+ **or** Linux with X11; `notify-send` for banners and any of
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` for sound
 
@@ -372,7 +395,7 @@ sh Tools/make_bundle.sh
 
 Linux (Debian 12 package names; installed, built, and run from a clean Debian 12
 container on 2026-11-03 — the UI rendered, the tray item registered on the session
-bus, and the right-edge dock was measured passing clicks through to the window
+bus, and the right-edge column was measured passing clicks through to the window
 underneath it):
 
 ```sh
@@ -383,10 +406,10 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 #   libnotify-bin (banners), sound-theme-freedesktop (sound)
 ```
 
-`libx11-dev` and `libxext-dev` are what the right-edge dock needs: Debian 12's
-GLFW is 3.3, which has no mouse-passthrough attribute, so the dock supplies it
+`libx11-dev` and `libxext-dev` are what the right-edge column needs: Debian 12's
+GLFW is 3.3, which has no mouse-passthrough attribute, so the column supplies it
 with X11's `ShapeInput` and reads the pointer position with `XQueryPointer`.
-Missing either, the build still succeeds and CMake prints that the dock is off —
+Missing either, the build still succeeds and CMake prints that the column is off —
 the strip never appears rather than appearing as a transparent block that eats
 clicks.
 
@@ -394,7 +417,7 @@ A slim container image needs `build-essential` (or another compiler) as well;
 `libdbus-1-dev` is what selects the real status item over the stub.
 
 CI runs that install line on every push to `main`, inside a Debian 12 container,
-and then configures, builds and measures the dock's click-through
+and then configures, builds and measures the column's click-through
 (`.github/workflows/linux-build-check.yml`). The package list is read out of this
 README rather than kept as a second copy, so a command that stops working here
 turns CI red instead of quietly drifting.

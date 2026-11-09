@@ -17,7 +17,7 @@
 
 ![01 · 一屏看清谁在等你：左边总览，右边会话详情，圈里的编号对应图例](docs/fig-01-queue-zh.png)
 
-*本文三张组图都由本仓库编译出的二进制离屏渲出来（`AGENTPING_FIXTURE=1`），不是摆拍。
+*本文四张组图都由本仓库编译出的二进制从夹具数据渲出来（`AGENTPING_FIXTURE=1`），不是摆拍。
 表头那颗「样例数据」是产品自己挂的标签：图里的数字不来自任何一台真机。*
 
 ## 它是什么，以及它故意不做什么
@@ -52,6 +52,23 @@
 *一张权益卡上有三层不同的时刻：读数时刻、源文件最后写入的时刻、页脚这次扫描的时刻。它们
 对不上时，「我们没刷」和「那家没写」是可以分开看的两个答案。*
 
+## 右缘窄柱
+
+面板收起来的时候，屏幕右缘留一根 44pt 的常驻窄柱：谁在等你、谁刚做完，不用挪开视线就能点名。
+
+![04 · 右缘窄柱：左边常驻态，右边指针落上去立即展开的预览卡](docs/fig-04-edge-zh.png)
+
+- **双计数，非零才画。** 顶行琥珀是「待处理」（数＋最久等了多久），次行钢蓝是「待查看」
+  （数＋最新完成是多久前）；哪类是 0，哪行就不出现。
+- **剪影点名。** 每家一枚剪影，按等待量排序，右上角徽标念出它各有几条。同一家既有等待
+  又有在跑时，徽标、钢蓝小点与薄荷环共存，互不遮挡。
+- **在跑是一圈光。** 有 agent 在跑时柱体镀薄荷边光并缓慢呼吸，在跑那家的剪影带旋转弧；
+  「减弱动效」下弧钉在顶象限、呼吸恒亮。
+- **悬停即开卡。** 指针落到柱上立即展开预览卡：待处理按等待最久优先、待查看按最新完成
+  优先，各预览三条；底部跑条把在跑的会话做成 chip。点预览行跳回会话，待查看的那条当场
+  消掉；点剪影或 chip 只跳不消。
+- **空闲退成细线。** 没有任何等待与在跑时，窄柱退成 3pt 细线，不占视觉。
+
 ## 跨平台
 
 两个平台每次发版都真编真跑。平台差异全在 `src/platform/` 里，藏在 C 头文件后面，
@@ -61,7 +78,7 @@
 |---|---|---|
 | 窗口 | 无边框、透明、跟着菜单栏项落位 | 同，走 GLFW/X11 |
 | 状态项 | `NSStatusItem`，标签是三个数 | D-Bus 上的 StatusNotifierItem（要 `libdbus-1-dev`，没有就退成无托盘的占位实现） |
-| 右缘灯舱 | 点得穿的竖条贴在屏幕右缘，指针推近才长开 | 同，走 X11 的 `ShapeInput` + `XQueryPointer`；哪一样验不过，整条带就不出现 |
+| 右缘窄柱 | 44pt 常驻柱贴在屏幕右缘，柱外点击穿透，悬停即开预览卡（见上节） | 同，走 X11 的 `ShapeInput` + `XQueryPointer`；哪一样验不过，整条带就不出现 |
 | 横幅 | `UNUserNotificationCenter` | 起子进程跑 `notify-send`（来自 `libnotify-bin`） |
 | 提示音 | `afplay` 播系统音 | 按安装情况依次试 `paplay` → `pw-play` → `ffplay` → `canberra-gtk-play` → `aplay` → `cxplay`，并匹配文件格式（`aplay` 只吃 `.wav`，`paplay` 就不试 wav） |
 | 登录时启动 | `~/Library/LaunchAgents` 下的 plist | `$XDG_CONFIG_HOME/autostart` 下的条目 |
@@ -212,7 +229,7 @@ WorkBuddy 只可能由「工具调用 90 秒没回执」反推出疑似等待（
 - GLFW3、FreeType 2、OpenGL 3.3 core
 - 可选 SQLite3（没有它，ZCode、WorkBuddy、OpenCode 三路被跳过，构建会警告）
 - 可选 libdbus-1（Linux 状态项；没有它构建退成无托盘图标的占位实现）
-- 可选 libx11 + libxext（Linux 右缘灯舱：输入形状穿透与全局指针；没有它灯舱关着，CMake 会明说）
+- 可选 libx11 + libxext（Linux 右缘窄柱：输入形状穿透与全局指针；没有它窄柱关着，CMake 会明说）
 - macOS 13+ **或** 带 X11 的 Linux；横幅要 `notify-send`，出声要
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` 里任意一个
 
@@ -318,7 +335,7 @@ sh Tools/make_bundle.sh
 ```
 
 Linux（Debian 12 包名；2026-11-03 在全新 Debian 12 容器里照下面几行装成、构建、跑起来：
-界面截到了、托盘项挂上了会话总线、右缘灯舱量到了「点击穿到它下面那块窗」）：
+界面截到了、托盘项挂上了会话总线、右缘窄柱量到了「点击穿到它下面那块窗」）：
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
@@ -327,16 +344,16 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 # 提醒层要真行为还需两个包：libnotify-bin（横幅）、sound-theme-freedesktop（出声）
 ```
 
-`libx11-dev`、`libxext-dev` 是右缘灯舱要的：Debian 12 的 GLFW 停在 3.3，没有鼠标穿透这个
-窗口属性，灯舱于是自己用 X11 的 `ShapeInput` 补上，指针位置也只能问 `XQueryPointer`。
-少这两个包构建照样过，CMake 会明说灯舱关着——那条带不出现，而不是出现成一根吃掉点击的
+`libx11-dev`、`libxext-dev` 是右缘窄柱要的：Debian 12 的 GLFW 停在 3.3，没有鼠标穿透这个
+窗口属性，窄柱于是自己用 X11 的 `ShapeInput` 补上，指针位置也只能问 `XQueryPointer`。
+少这两个包构建照样过，CMake 会明说窄柱关着——那条带不出现，而不是出现成一根吃掉点击的
 透明柱子。
 
 精简容器镜像还得补 `build-essential`（或别的编译器）；`libdbus-1-dev` 决定的是走真
 状态项还是占位实现。
 
 每次推 main，CI 都会在一个 Debian 12 容器里把上面那条安装命令原样跑一遍，接着配置、
-构建、量右缘灯舱的点击穿透（`.github/workflows/linux-build-check.yml`）。包列表是
+构建、量右缘窄柱的点击穿透（`.github/workflows/linux-build-check.yml`）。包列表是
 从这份 README 里读出来的，没有另抄一份——所以这条命令哪天不好使，会把 CI 跑红，
 而不是悄悄漂移。
 
