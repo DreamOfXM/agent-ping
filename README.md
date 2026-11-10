@@ -7,33 +7,135 @@
 
 [中文](README.zh-CN.md) · [Product page](https://dreamofxm.github.io/agent-ping/en/)
 
+[Install](#install) · [Screens](#screens) · [Privacy](#privacy--exactly-what-it-reads) · [Known limitations](#known-limitations)
+
 When Qoder, Claude Code, Codex, ZCode, WorkBuddy and OpenCode are all open at once,
 what you are missing is not another dashboard — it is "which one is my turn". Agent
 Ping is a menu-bar panel: it reads the logs and local databases those tools already
 write on your machine, works out who is running, who is queued, who stopped with an
 error, who is sitting there waiting for an answer, and who just put up a claimable
 reward; then it alerts you while you are not looking, and puts the session — or the
-rewards screen — in front of you. No server, no account, no telemetry: the binary
-makes no network calls (checked with `nm -u`, see
+rewards screen — in front of you; when the panel is away, the resident column at the
+screen's right edge keeps naming names. No server, no account, no telemetry: the
+binary makes no network calls (checked with `nm -u`, see
 [Privacy](#privacy--exactly-what-it-reads)).
 
 ![Agent Ping in motion: the needs-you queue, a session's verbatim question, and the jump back](docs/agent-ping-teaser.gif)
 
-![01 · One screen to see who is waiting for you: overview on the left, session detail on the right; the numbered markers match the legend](docs/fig-01-queue-en.png)
+## Install
 
-*All four figures in this README are rendered by the binary this repo builds from
-fixture data (`AGENTPING_FIXTURE=1`), not staged. The **Sample data** pill in the header is
-the product's own label: those numbers do not come from any real machine.*
+Which door to use, in one line: **macOS 13+** → the two paths in this section;
+**Linux with X11** → [Build](#build) only, there is no formula for it;
+**Windows** → not supported, `src/platform/` ships only macOS and POSIX shims.
+
+On macOS it is the same app either way. The only real difference is **whether it
+lands in your Applications folder**. If you want the double-clickable one, take the
+first path.
+
+**Recommended: the cask (prebuilt, goes into `/Applications`)**
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping          # third-party tap, needed once
+brew install --cask agent-ping
+```
+
+Both Apple silicon and Intel get a prebuilt bundle (~26 MB each) and the cask
+picks the right one for the machine, so an Intel Mac never pulls the arm64 zip.
+Afterwards `Agent Ping.app` sits in `/Applications` and shows up in Launchpad and
+Finder.
+
+The bundle is self-contained: glfw and freetype are linked statically into the
+executable, so you do **not** need those dependencies installed first — they are
+only needed by the source build.
+
+> The cask pins a version and a SHA-256 per architecture, and downloads from a
+> versioned URL — so `brew update && brew upgrade --cask agent-ping` really does
+> fetch the new bundle instead of replaying Homebrew's cached copy of the old one.
+
+> **About the "cannot verify the developer" dialog**: since v0.1.3 both prebuilt
+> bundles are signed with a Developer ID certificate, notarized by Apple, and
+> stapled. `spctl -a` reports `accepted` from `Notarized Developer ID`; a browser
+> download and a cask install both still tag it quarantined, and it passes anyway.
+>
+> A normal install should never show that dialog. If it does, suspect an old
+> bundle first — the tap is a git checkout, so an outdated one keeps pointing at
+> the previous release: run `brew update && brew upgrade --cask agent-ping`. A
+> swapped upstream binary looks the same way, so **check the signature before you
+> allow it**:
+>
+> ```sh
+> codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
+> # expect: Developer ID Application: Xiaoming Guo (448JJF25MY)
+> ```
+>
+> If the Team ID matches and you do need to allow it once:
+>
+> - System Settings → Privacy & Security, scroll down to the line saying *Agent
+>   Ping was blocked*, and press **Open Anyway**.
+> - Or from a shell: `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
+
+**Alternative: the formula (built from source, stays out of `/Applications`)**
+
+Use this if you would rather not run a prebuilt binary, want to compile it
+yourself, or simply cannot pull 26 MB. It builds from the tagged source pinned
+in [`Formula/agent-ping.rb`](https://github.com/DreamOfXM/agent-ping/blob/main/Formula/agent-ping.rb),
+so the first install needs the Xcode command line tools and takes about a
+minute on an Apple-silicon Mac.
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping
+brew install agent-ping
+agent-ping
+```
+
+> If `brew install` stops with `Error: Xcode alone is not sufficient on …` or
+> `Your Command Line Tools are too outdated`, that is Homebrew's gate on *source
+> builds*, not this project's requirement: it wants a current toolchain before it
+> will compile anything from any tap. `xcode-select --install` only helps when the
+> tools are missing outright — when they are present but old, update them instead:
+> System Settings → General → Software Update, or `softwareupdate --list` followed
+> by `sudo softwareupdate -i "Command Line Tools for Xcode <version>"`. Or skip
+> the compiler entirely with the cask above. If you would rather not pull any of
+> that down, the [Build](#build) section compiles the same source with the clang
+> that ships inside Xcode; the app is not picky about its age — a 2025-vintage
+> command line toolchain builds it on macOS 27 on the first try.
+
+`agent-ping` is a one-line launcher for the app in Homebrew's `opt` directory
+(`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It does **not** go into
+`/Applications` because Homebrew runs builds inside a sandbox that cannot write
+there — for that copy, use the cask. To start it with the session, turn on
+**Launch at login** in the app's settings; that writes a LaunchAgent pointing at
+the `opt` path, so the login item keeps working across `brew upgrade`.
+
+**Looking for it after install?** There is no Dock icon and Spotlight will not
+find it either — by design, since `LSUIElement` is set. The whole UI is the menu
+bar: once it runs, the oval icon with a star appears at the right end of the bar,
+next to the clock. The first launch opens the panel itself, so you get a window
+to look at; close it and the icon stays behind.
+
+**Upgrade and uninstall**
+
+```sh
+brew update                               # the tap is a git checkout
+brew upgrade --cask agent-ping            # cask
+brew upgrade agent-ping                   # formula
+
+brew uninstall --cask agent-ping
+brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
+```
+
+If you installed both, you get two icons in the menu bar — keep one.
 
 ## What it is, and what it deliberately is not
 
 **Is**: a live state monitor, an alert layer, and a way back into the session that
 pinged you. The unit of value is one row — one session, one state, one jump target.
-Since v0.1 it also shows per-account quota and token usage, because "how much of my
-5-hour window is left" is a *right now* question, not an accounting question. Since
-October it also puts the reward-claim state three vendors write to their own disks on
-screen — read-only, never claiming: clicking a card only brings that vendor's app to
-the front.
+It also shows per-account quota and token usage, because "how much of my
+5-hour window is left" is a *right now* question, not an accounting question; the
+reward-claim state three vendors write to their own disks is on screen too —
+read-only.
 
 **Is not**: a cost dashboard, and not an auto-claimer. It never converts anything into
 a currency amount, never calls a billing API, never shows a quota it could not read
@@ -57,6 +159,12 @@ into one row.
 | **History** | completed sessions, newest first, 12 per page, more pages load as you scroll |
 | **Tools** | which collectors are present on this machine and what each one yielded |
 | Settings / Connect / Permission | toggles, hook wiring, and the Accessibility prompt |
+
+![01 · One screen to see who is waiting for you: overview on the left, session detail on the right; the numbered markers match the legend](docs/fig-01-queue-en.png)
+
+*All four figures in this README are rendered by the binary this repo builds from
+fixture data (`AGENTPING_FIXTURE=1`), not staged. The **Sample data** pill in the header is
+the product's own label: those numbers do not come from any real machine.*
 
 ![02 · Quota, usage, rewards: usage & limits on the left, rewards on the right](docs/fig-02-quota-en.png)
 
@@ -147,7 +255,7 @@ files are touched only when **you** install a hook (the Connect button or
 | Qoder CLI | `~/.qoder/projects/**/*.jsonl` | session id, title, cwd, timestamps, `message.usage` token/credit fields, user-record count |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | same, minus credits (the field does not exist there) |
 | Codex | `~/.codex/sessions/**` | `session_meta` (cwd, session id), `token_count` records, outcome, `rate_limits` events |
-| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows, and the newest `part` row still `running` on `AskUserQuestion` / `ExitPlanMode` inside a turn without `time.completed` — with no hook channel, that is where "awaiting you" and its verbatim question come from (read-only) |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + last message per session, `tokens.input` sum, sub-agent rows, and the newest `part` row still `running` on `AskUserQuestion` / `ExitPlanMode` inside a turn without `time.completed` (read-only; how "awaiting you" is judged is in [Connecting a CLI](#connecting-a-cli-optional)) |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`, `~/.workbuddy/projects` | session rows, `providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (honours `$XDG_DATA_HOME`) | `session` title/cwd/`time_updated`, `part` `step-finish` token sums and `tool.state.status` (read-only) |
 | Rewards | `~/.workbuddy/logs/main.log`, `~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`, `~/.zcode/v2/logs/<date>.log` | WorkBuddy's `[Checkin]` result; Qoder's `[Campaign]` claimable state and its server-side list; ZCode's `billing/balance` response — this period's plan, its `grant_units` face value and expiry, written by ZCode's own app, not by its CLI |
@@ -276,115 +384,9 @@ log · local", and it never rings), OpenCode has no awaiting state at all.
 - macOS 13+ **or** Linux with X11; `notify-send` for banners and any of
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` for sound
 
-Which door to use, in one line: **macOS 13+** → Homebrew below, or
-[Build](#build); **Linux with X11** → [Build](#build) only, there is no formula
-for it; **Windows** → not supported, `src/platform/` ships only macOS and POSIX
-shims.
-
-## Install with Homebrew (macOS 13+)
-
-Same app either way. The only real difference is **whether it lands in your
-Applications folder**. If you want the double-clickable one, take the first path.
-
-**Recommended: the cask (prebuilt, goes into `/Applications`)**
-
-```sh
-brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
-brew trust dreamofxm/agent-ping          # third-party tap, needed once
-brew install --cask agent-ping
-```
-
-Both Apple silicon and Intel get a prebuilt bundle (~26 MB each) and the cask
-picks the right one for the machine, so an Intel Mac never pulls the arm64 zip.
-Afterwards `Agent Ping.app` sits in `/Applications` and shows up in Launchpad and
-Finder.
-
-The bundle is self-contained: glfw and freetype are linked statically into the
-executable, so you do **not** need those dependencies installed first — they are
-only needed by the source build.
-
-> The cask pins a version and a SHA-256 per architecture, and downloads from a
-> versioned URL — so `brew update && brew upgrade --cask agent-ping` really does
-> fetch the new bundle instead of replaying Homebrew's cached copy of the old one.
-
-> **About the "cannot verify the developer" dialog**: since v0.1.3 both prebuilt
-> bundles are signed with a Developer ID certificate, notarized by Apple, and
-> stapled. `spctl -a` reports `accepted` from `Notarized Developer ID`; a browser
-> download and a cask install both still tag it quarantined, and it passes anyway.
->
-> A normal install should never show that dialog. If it does, suspect an old
-> bundle first — the tap is a git checkout, so an outdated one keeps pointing at
-> the previous release: run `brew update && brew upgrade --cask agent-ping`. A
-> swapped upstream binary looks the same way, so **check the signature before you
-> allow it**:
->
-> ```sh
-> codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
-> # expect: Developer ID Application: Xiaoming Guo (448JJF25MY)
-> ```
->
-> If the Team ID matches and you do need to allow it once:
->
-> - System Settings → Privacy & Security, scroll down to the line saying *Agent
->   Ping was blocked*, and press **Open Anyway**.
-> - Or from a shell: `xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
-
-**Alternative: the formula (built from source, stays out of `/Applications`)**
-
-Use this if you would rather not run a prebuilt binary, want to compile it
-yourself, or simply cannot pull 26 MB. It builds from the tagged source pinned
-in [`Formula/agent-ping.rb`](https://github.com/DreamOfXM/agent-ping/blob/main/Formula/agent-ping.rb),
-so the first install needs the Xcode command line tools and takes about a
-minute on an Apple-silicon Mac.
-
-```sh
-brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
-brew trust dreamofxm/agent-ping
-brew install agent-ping
-agent-ping
-```
-
-> If `brew install` stops with `Error: Xcode alone is not sufficient on …` or
-> `Your Command Line Tools are too outdated`, that is Homebrew's gate on *source
-> builds*, not this project's requirement: it wants a current toolchain before it
-> will compile anything from any tap. `xcode-select --install` only helps when the
-> tools are missing outright — when they are present but old, update them instead:
-> System Settings → General → Software Update, or `softwareupdate --list` followed
-> by `sudo softwareupdate -i "Command Line Tools for Xcode <version>"`. Or skip
-> the compiler entirely with the cask above. If you would rather not pull any of
-> that down, the [Build](#build) section compiles the same source with the clang
-> that ships inside Xcode; the app is not picky about its age — a 2025-vintage
-> command line toolchain builds it on macOS 27 on the first try.
-
-`agent-ping` is a one-line launcher for the app in Homebrew's `opt` directory
-(`$(brew --prefix)/opt/agent-ping/Agent Ping.app`). It does **not** go into
-`/Applications` because Homebrew runs builds inside a sandbox that cannot write
-there — for that copy, use the cask. To start it with the session, turn on
-**Launch at login** in the app's settings; that writes a LaunchAgent pointing at
-the `opt` path, so the login item keeps working across `brew upgrade`.
-
-**Looking for it after install?** There is no Dock icon and Spotlight will not
-find it either — by design, since `LSUIElement` is set. The whole UI is the menu
-bar: once it runs, the oval icon with a star appears at the right end of the bar,
-next to the clock. The first launch opens the panel itself, so you get a window
-to look at; close it and the icon stays behind.
-
-**Upgrade and uninstall**
-
-```sh
-brew update                               # the tap is a git checkout
-brew upgrade --cask agent-ping            # cask
-brew upgrade agent-ping                   # formula
-
-brew uninstall --cask agent-ping
-brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
-```
-
-If you installed both, you get two icons in the menu bar — keep one.
-
 ## Build
 
-macOS (last run 2026-10-28, produces `build/AgentPing-cpp.app` — about 40 MB of
+macOS (last run 2026-11-10, produces `build/AgentPing-cpp.app` — about 40 MB of
 which is the copied `fonts/`, so the size moves with the fonts, not the code):
 
 ```sh
@@ -439,7 +441,7 @@ in `<prefix>/share`. On a distro where `/usr/local` is not on `XDG_DATA_DIRS`
 
 ```sh
 ./build/pin_imgui_shell --dump            # one scan round as text, no window
-D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 56 assertions, offline
+D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 129 assertions, offline
 ./build/alert_probe --channel             # is the banner channel alive? 0/1/2
 ./build/alert_probe --post                # one synthetic alert, end to end
 ./build/pin_imgui_shell --hook-status     # per-CLI wiring state as text
@@ -517,11 +519,10 @@ mystery.
   field does not exist and the block is not drawn.
 - **Hook install covers two CLIs.** Claude Code and Qoder CLI can be wired from the
   panel or `Tools/install_hook.sh`; Codex's `notify` slot is detected but never
-  written. ZCode, WorkBuddy and OpenCode have no hook channel at all. ZCode's
-  "awaiting you" is read out of its own session store, so the question and options
-  on its session detail screen are the CLI's own JSON, not a payload handed to us;
-  WorkBuddy's and OpenCode's screens carry no question text — WorkBuddy's awaiting
-  row is an inference from a 90-second unanswered tool call and never rings.
+  written. ZCode, WorkBuddy and OpenCode have no hook channel at all — ZCode's
+  awaiting state is read from its session store, WorkBuddy's is an inference from a
+  90-second unanswered tool call; both mechanisms are in
+  [Connecting a CLI](#connecting-a-cli-optional).
 - **Six sources, not "every agent".** Qoder CLI, Claude Code, Codex, ZCode,
   WorkBuddy and OpenCode. The last three need a build with SQLite3. Anything else
   is simply absent from the panel.

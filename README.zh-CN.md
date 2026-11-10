@@ -7,25 +7,113 @@
 
 [English](README.md) · [产品页](https://dreamofxm.github.io/agent-ping/)
 
+[安装](#安装) · [界面](#界面) · [隐私](#隐私它到底读什么) · [已知限制](#已知限制)
+
 同时开着 Qoder、Claude Code、Codex、ZCode、WorkBuddy、OpenCode 的时候，你缺的不是又一块
 看板，而是「现在轮到哪一条」。Agent Ping 是一个菜单栏面板：它读这些工具已经写在你机器上
 的日志与本地库，算出谁在跑、谁在排队、谁报错停了、谁正等着你回答、谁家又出了一张可领的券；
-然后在你没看屏幕的时候提醒你，并把对应的会话或权益屏递到你面前。没有服务端、没有账号、
-没有埋点：二进制里没有任何网络调用（用 `nm -u` 核过，见[隐私](#隐私它到底读什么)）。
+然后在你没看屏幕的时候提醒你，并把对应的会话或权益屏递到你面前；面板收起时，屏幕右缘的
+常驻窄柱接着点名。没有服务端、没有账号、没有埋点：二进制里没有任何网络调用
+（用 `nm -u` 核过，见[隐私](#隐私它到底读什么)）。
 
 ![Agent Ping 动起来：等你队列、会话的原话提问、以及跳回会话](docs/agent-ping-teaser.gif)
 
-![01 · 一屏看清谁在等你：左边总览，右边会话详情，圈里的编号对应图例](docs/fig-01-queue-zh.png)
+## 安装
 
-*本文四张组图都由本仓库编译出的二进制从夹具数据渲出来（`AGENTPING_FIXTURE=1`），不是摆拍。
-表头那颗「样例数据」是产品自己挂的标签：图里的数字不来自任何一台真机。*
+该走哪扇门，一行说完：**macOS 13+** → 本节两条路；**带 X11 的 Linux** → 只有[构建](#构建)
+一条路，没有对应的 formula；**Windows** → 暂不支持，`src/platform/` 只带了 macOS 与
+POSIX 两套垫片。
+
+macOS 装的是同一个 App，两条路只差一件事：**它落不落在「应用程序」文件夹里**。想要双击就能打开
+的那种，走第一条。
+
+**推荐：cask（预编译，进 `/Applications`）**
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping          # 第三方 tap，只需要跑一次
+brew install --cask agent-ping
+```
+
+Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自己挑，不会把 Apple 芯片的包
+装到 Intel 机器上。装完 `/Applications/Agent Ping.app` 里就有它，启动台和访达都看得到。
+
+包是自包含的：glfw 与 freetype 静态链在可执行文件里，**不需要**你先装这两个依赖 ——
+那两个是编译版（formula）才需要的。
+
+> cask 钉死了版本号和两个架构各自的 SHA-256，下载 URL 也带版本号，所以
+> `brew update && brew upgrade --cask agent-ping` 拉到的确实是新包，
+> 不会被 Homebrew 以 URL 为键的下载缓存挡回上一次那份旧件。
+
+> **关于「无法验证开发者」这个弹窗**：从 v0.1.3 起，两份预编译包都用 Developer ID
+> 证书签名、送 Apple 公证并已完成 staple。`spctl -a` 判 `accepted`，来源是
+> `Notarized Developer ID`；浏览器下载和 cask 安装都会打隔离标记，但带隔离标记照样能过。
+>
+> 所以正常安装不该弹这个窗。真弹了，先怀疑拿到的是旧包——tap 本身是个 git 检出，
+> 停在旧提交上就还会指向上一版，跑一次 `brew update && brew upgrade --cask agent-ping`。
+> 上游二进制被中间层换过也会这样，此时**先核对签名再放行**：
+>
+> ```sh
+> codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
+> # 应当看到 Developer ID Application: Xiaoming Guo (448JJF25MY)
+> ```
+>
+> Team ID 对得上、又确实要放行一次，走这两条之一：
+>
+> - 系统设置 → 隐私与安全性，滚到下面写着「Agent Ping 已被阻止」的那一行，按**仍要打开**。
+> - 或者在终端里：`xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
+
+**备选：formula（从源码编译，不进 `/Applications`）**
+
+不想用预编译二进制、想自己编一份，或者 26 MB 实在下不动的时候用这条。它从
+[`Formula/agent-ping.rb`](https://github.com/DreamOfXM/agent-ping/blob/main/Formula/agent-ping.rb)
+里钉住的那个标签的源码现场编译，第一次装需要 Xcode 命令行工具，Apple 芯片上大约一分钟。
+
+```sh
+brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
+brew trust dreamofxm/agent-ping
+brew install agent-ping
+agent-ping
+```
+
+> 如果 `brew install` 停在 `Error: Xcode alone is not sufficient on …` 或
+> `Your Command Line Tools are too outdated`：那是 Homebrew 对**源码构建**的准入检查，
+> 不是本项目的要求 —— 它要先确认系统里有一份够新的工具链，才肯编译任何 tap 里的 formula。
+> `xcode-select --install` 只在工具完全没装时管用；装了但太旧的时候，去更新它：系统设置 →
+> 通用 → 软件更新，或者先 `softwareupdate --list`，再
+> `sudo softwareupdate -i "Command Line Tools for Xcode <版本>"`。再不然直接用上面的
+> cask，全程不碰编译器。这些都不想看，下面「构建」一节用 Xcode 自带的 clang 也能编出同样的
+> 东西 —— app 本身不挑编译器年龄：macOS 27 配一份 2025 年的命令行工具，一次就编过了。
+
+`agent-ping` 是一行启动器，打开的是 Homebrew `opt` 目录里的 App
+（`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它**不会**进 `/Applications`：
+Homebrew 的构建跑在沙箱里，写不了那里 —— 想要应用程序文件夹里那一份，用 cask。要开机自启，
+在面板里打开**登录时启动**；它写的 LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade`
+之后登录项仍然有效。
+
+**装完之后找不到它？** 它没有 Dock 图标，聚焦也搜不到——这是设计使然（`LSUIElement`）。
+全部 UI 就是菜单栏：跑起来之后，菜单栏右端、时钟左边会出现那个「椭圆里一颗星」的图标；
+第一次启动它会把面板自己弹出来，所以你能看到东西，关掉之后图标留在那儿。
+
+**升级与卸载**
+
+```sh
+brew update                               # tap 本身是个 git 检出
+brew upgrade --cask agent-ping            # cask
+brew upgrade agent-ping                   # formula
+
+brew uninstall --cask agent-ping
+brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
+```
+
+两种都装过的话，菜单栏会同时出现两个图标——留一个就好。
 
 ## 它是什么，以及它故意不做什么
 
 **是**：一个实时状态监视器 + 一层提醒 + 一条回到那条会话的路。价值的单位是「一行」——
-一个会话、一个状态、一个跳转目标。从 v0.1 起它也显示账户额度与 token 用量，因为
-「我这 5 小时的窗口还剩多少」是一个*此刻*的问题，不是一个记账问题。十月起它还把三家写在自己
-磁盘上的权益领取状态摆上屏——只读、不代领，点了只会把那家 App 带到前台。
+一个会话、一个状态、一个跳转目标。它也显示账户额度与 token 用量，因为
+「我这 5 小时的窗口还剩多少」是一个*此刻*的问题，不是一个记账问题；三家写在自己
+磁盘上的权益领取状态也摆上屏——只读。
 
 **不是**：成本看板，也不是自动领取器。它从不把任何东西换算成金额、从不调账单接口、从不显示
 一个没从本地日志里读到的额度、从不替你点「领取」。某个来源没有那个字段，界面就不画那一格，
@@ -46,6 +134,11 @@
 | **历史** | 完成记录，新的在前，一页 12 条，滚到底自动续页 |
 | **工具** | 这台机器上有哪些采集器在，各自扫出了什么 |
 | 设置 / 接线 / 授权 | 开关、hook 接线状态、辅助功能授权提示 |
+
+![01 · 一屏看清谁在等你：左边总览，右边会话详情，圈里的编号对应图例](docs/fig-01-queue-zh.png)
+
+*本文四张组图都由本仓库编译出的二进制从夹具数据渲出来（`AGENTPING_FIXTURE=1`），不是摆拍。
+表头那颗「样例数据」是产品自己挂的标签：图里的数字不来自任何一台真机。*
 
 ![02 · 额度、用量、权益：左边用量与额度，右边权益](docs/fig-02-quota-zh.png)
 
@@ -120,7 +213,7 @@ CJK 不是后贴的补丁。
 | Qoder CLI | `~/.qoder/projects/**/*.jsonl` | 会话 id、标题、cwd、时间戳、`message.usage` 的 token/credits 字段、user 记录条数 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | 同上，减去 credits（那边没有这个字段） |
 | Codex | `~/.codex/sessions/**` | `session_meta`（cwd、会话 id）、`token_count` 记录、结果、`rate_limits` 事件 |
-| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录，外加回合未完时那颗仍停在 `running` 的 `AskUserQuestion` / `ExitPlanMode` part——没有 hook 通道，「等待确认」与问题原文就出自这里（只读） |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | `chat_sessions` + 每条会话最后一句、`tokens.input` 之和、子代理记录，外加回合未完时那颗仍停在 `running` 的 `AskUserQuestion` / `ExitPlanMode` part（只读；「等待确认」的判法见[接线](#接线可选)） |
 | WorkBuddy | `~/.workbuddy/workbuddy.db`、`~/.workbuddy/projects` | 会话行、`providerData.usage.inputTokens` |
 | OpenCode | `~/.local/share/opencode/opencode.db`（认 `$XDG_DATA_HOME`） | `session` 的标题/cwd/`time_updated`、`part` 的 `step-finish` token 之和与 `tool.state.status`（只读） |
 | 权益领取 | `~/.workbuddy/logs/main.log`、`~/Library/Application Support/com.qoder.app.stable/logs/*/main.log`、`~/.zcode/v2/logs/<日期>.log` | WorkBuddy 的 `[Checkin]` 签到结果；Qoder 的 `[Campaign]` 可领状态与服务端清单；ZCode 的 `billing/balance` 响应——本期计划、`grant_units` 面值与作废时刻，由 ZCode 自己的 App 落盘，CLI 侧没有 |
@@ -233,99 +326,9 @@ WorkBuddy 只可能由「工具调用 90 秒没回执」反推出疑似等待（
 - macOS 13+ **或** 带 X11 的 Linux；横幅要 `notify-send`，出声要
   `paplay`/`pw-play`/`ffplay`/`canberra-gtk-play`/`aplay`/`cxplay` 里任意一个
 
-该走哪扇门，一行说完：**macOS 13+** → 下面的 Homebrew，或者「构建」一节；
-**带 X11 的 Linux** → 只有「构建」一条路，没有对应的 formula；
-**Windows** → 暂不支持，`src/platform/` 只带了 macOS 与 POSIX 两套垫片。
-
-## 用 Homebrew 安装（macOS 13+）
-
-装的是同一个 App，两条路只差一件事：**它落不落在「应用程序」文件夹里**。想要双击就能打开
-的那种，走第一条。
-
-**推荐：cask（预编译，进 `/Applications`）**
-
-```sh
-brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
-brew trust dreamofxm/agent-ping          # 第三方 tap，只需要跑一次
-brew install --cask agent-ping
-```
-
-Apple 芯片和 Intel 各有预编译包（各约 26 MB），cask 按机型自己挑，不会把 Apple 芯片的包
-装到 Intel 机器上。装完 `/Applications/Agent Ping.app` 里就有它，启动台和访达都看得到。
-
-包是自包含的：glfw 与 freetype 静态链在可执行文件里，**不需要**你先装这两个依赖 ——
-那两个是编译版（formula）才需要的。
-
-> cask 钉死了版本号和两个架构各自的 SHA-256，下载 URL 也带版本号，所以
-> `brew update && brew upgrade --cask agent-ping` 拉到的确实是新包，
-> 不会被 Homebrew 以 URL 为键的下载缓存挡回上一次那份旧件。
-
-> **关于「无法验证开发者」这个弹窗**：从 v0.1.3 起，两份预编译包都用 Developer ID
-> 证书签名、送 Apple 公证并已完成 staple。`spctl -a` 判 `accepted`，来源是
-> `Notarized Developer ID`；浏览器下载和 cask 安装都会打隔离标记，但带隔离标记照样能过。
->
-> 所以正常安装不该弹这个窗。真弹了，先怀疑拿到的是旧包——tap 本身是个 git 检出，
-> 停在旧提交上就还会指向上一版，跑一次 `brew update && brew upgrade --cask agent-ping`。
-> 上游二进制被中间层换过也会这样，此时**先核对签名再放行**：
->
-> ```sh
-> codesign -dv --verbose=4 "/Applications/Agent Ping.app" | grep -E 'Authority|TeamIdentifier'
-> # 应当看到 Developer ID Application: Xiaoming Guo (448JJF25MY)
-> ```
->
-> Team ID 对得上、又确实要放行一次，走这两条之一：
->
-> - 系统设置 → 隐私与安全性，滚到下面写着「Agent Ping 已被阻止」的那一行，按**仍要打开**。
-> - 或者在终端里：`xattr -dr com.apple.quarantine "/Applications/Agent Ping.app"`
-
-**备选：formula（从源码编译，不进 `/Applications`）**
-
-不想用预编译二进制、想自己编一份，或者 26 MB 实在下不动的时候用这条。它从
-[`Formula/agent-ping.rb`](https://github.com/DreamOfXM/agent-ping/blob/main/Formula/agent-ping.rb)
-里钉住的那个标签的源码现场编译，第一次装需要 Xcode 命令行工具，Apple 芯片上大约一分钟。
-
-```sh
-brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
-brew trust dreamofxm/agent-ping
-brew install agent-ping
-agent-ping
-```
-
-> 如果 `brew install` 停在 `Error: Xcode alone is not sufficient on …` 或
-> `Your Command Line Tools are too outdated`：那是 Homebrew 对**源码构建**的准入检查，
-> 不是本项目的要求 —— 它要先确认系统里有一份够新的工具链，才肯编译任何 tap 里的 formula。
-> `xcode-select --install` 只在工具完全没装时管用；装了但太旧的时候，去更新它：系统设置 →
-> 通用 → 软件更新，或者先 `softwareupdate --list`，再
-> `sudo softwareupdate -i "Command Line Tools for Xcode <版本>"`。再不然直接用上面的
-> cask，全程不碰编译器。这些都不想看，下面「构建」一节用 Xcode 自带的 clang 也能编出同样的
-> 东西 —— app 本身不挑编译器年龄：macOS 27 配一份 2025 年的命令行工具，一次就编过了。
-
-`agent-ping` 是一行启动器，打开的是 Homebrew `opt` 目录里的 App
-（`$(brew --prefix)/opt/agent-ping/Agent Ping.app`）。它**不会**进 `/Applications`：
-Homebrew 的构建跑在沙箱里，写不了那里 —— 想要应用程序文件夹里那一份，用 cask。要开机自启，
-在面板里打开**登录时启动**；它写的 LaunchAgent 指向 `opt` 这条路径，所以 `brew upgrade`
-之后登录项仍然有效。
-
-**装完之后找不到它？** 它没有 Dock 图标，聚焦也搜不到——这是设计使然（`LSUIElement`）。
-全部 UI 就是菜单栏：跑起来之后，菜单栏右端、时钟左边会出现那个「椭圆里一颗星」的图标；
-第一次启动它会把面板自己弹出来，所以你能看到东西，关掉之后图标留在那儿。
-
-**升级与卸载**
-
-```sh
-brew update                               # tap 本身是个 git 检出
-brew upgrade --cask agent-ping            # cask
-brew upgrade agent-ping                   # formula
-
-brew uninstall --cask agent-ping
-brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
-```
-
-两种都装过的话，菜单栏会同时出现两个图标——留一个就好。
-
 ## 构建
 
-macOS（最近一次实跑 2026-10-28，产出 `build/AgentPing-cpp.app`；其中约 40 MB 是随包
+macOS（最近一次实跑 2026-11-10，产出 `build/AgentPing-cpp.app`；其中约 40 MB 是随包
 的 `fonts/`，所以体积随字体变，不随代码变）：
 
 ```sh
@@ -372,7 +375,7 @@ agent-ping                                  # 或者在应用菜单里点「Agen
 
 ```sh
 ./build/pin_imgui_shell --dump            # 一轮扫描按文本输出，不开窗口
-D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 56 条断言，离线
+D=$(mktemp -d); AGENTPING_STATE_DIR=$D ./build/alert_probe --selftest   # 129 条断言，离线
 ./build/alert_probe --channel             # 横幅通道活着吗？0/1/2
 ./build/alert_probe --post                # 一条合成提醒，端到端
 ./build/pin_imgui_shell --hook-status     # 每个 CLI 的接线状态，按文本
@@ -428,11 +431,8 @@ AGENTPING_FIXTURE=1 AGENTPING_VIEW=0 ./build/pin_imgui_shell fonts /tmp/panel.pp
 - **设置、接线、授权三屏还是上一版版面。** 其余屏已按新稿重做，这三屏会跟上。
 - **资源重置卡不实现。** 没有任何本地日志带它，所以这个字段不建、那一块也不画。
 - **hook 安装覆盖两个 CLI。** Claude Code 与 Qoder CLI 能从面板或 `Tools/install_hook.sh`
-  接上；Codex 的 `notify` 槽只检测不写。ZCode、WorkBuddy、OpenCode 根本没有 hook 通道。
-  ZCode 的「等待确认」是从它自己的会话库读出来的，会话详情屏上的问题原文与候选都
-  是 CLI 亲手落的那份 JSON，不是递给我们的载荷；WorkBuddy 与 OpenCode 的屏上没有
-  问题原文——WorkBuddy
-  那一档是「90 秒没回执」反推的疑似等待，不响铃。
+  接上；Codex 的 `notify` 槽只检测不写。ZCode、WorkBuddy、OpenCode 根本没有 hook 通道——
+  ZCode 的等待态改读会话库、WorkBuddy 的疑似等待是 90 秒没回执反推的，判法都见[接线](#接线可选)。
 - **六个来源，不是「所有 agent」。** Qoder CLI、Claude Code、Codex、ZCode、WorkBuddy、
   OpenCode。后三个要带 SQLite3 的构建。别的一律不在面板里。
 - **深底托盘图标对比度弱。** 深色托盘上只有 19–24% 的亮像素过 WCAG 3:1；浅色托盘 39%。
