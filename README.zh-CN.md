@@ -15,8 +15,11 @@
 
 ## 安装
 
-按平台选：**macOS 13+** → 本节两条路；**带 X11 的 Linux** → 只有[构建](#构建)一条路；
-**Windows** → 暂不支持。
+按平台选：
+
+- **macOS 13+** → 本节两条路
+- **带 X11 的 Linux** → 只有[构建](#构建)一条路
+- **Windows** → 暂不支持
 
 **推荐：cask（预编译，进「应用程序」文件夹）**
 
@@ -67,7 +70,7 @@ brew uninstall agent-ping && brew untap DreamOfXM/agent-ping   # formula 装的
 
 - **总览屏**把等你授权、等你回答、出错结束的会话排成「待处理」队列。双击一行，跳回那条会话。
 - **用量与额度屏**看各家的余额和今日用量。**权益屏**看各家自己记的可领状态。
-- **面板收起后**，屏幕右缘留一根 44pt 窄柱：谁在等、谁刚完成，不切窗口就知道。
+- **右缘窄柱**：面板收起后留一根 44pt 窄柱，谁在等、谁刚完成，不切窗口就知道。
 - **提醒**按会话去重，只发一次。横幅发不出去改用声音。「免打扰」只暂停发送。
 - **界面**内置中／英／德／意／日／韩六种语言，设置屏直接切换。
 
@@ -123,7 +126,9 @@ Linux 上 Agent Ping 自己的路径在 `$XDG_CONFIG_HOME` 和 `$XDG_DATA_HOME` 
 
 ## 构建
 
-要 C++17、CMake ≥ 3.20、Ninja、GLFW3、FreeType 2、OpenGL 3.3 core，macOS 13+ 或带 X11 的 Linux。可选依赖缺了会怎样，CMake 都会明说：SQLite3 缺了，跳过 ZCode、WorkBuddy、OpenCode 三路；Linux 上 libdbus-1 缺了没有托盘图标，libx11 + libxext缺了窄柱关着。命令都在仓库根目录跑。
+硬要求：C++17、CMake ≥ 3.20、Ninja、GLFW3、FreeType 2、OpenGL 3.3 core，macOS 13+ 或带 X11 的 Linux。
+
+可选依赖缺了会怎样，CMake 都会明说：SQLite3 缺了，跳过 ZCode、WorkBuddy、OpenCode 三路；Linux 上 libdbus-1 缺了没有托盘图标，libx11 + libxext缺了窄柱关着。命令都在仓库根目录跑。
 
 macOS（产出 `build/AgentPing-cpp.app`）：
 

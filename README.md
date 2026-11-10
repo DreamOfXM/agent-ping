@@ -18,8 +18,11 @@ glance; double-click to jump back to that session.
 
 ## Install
 
-Pick by platform: **macOS 13+** → the two paths below; **Linux with X11** →
-[Build](#build) only; **Windows** → not supported.
+Pick by platform:
+
+- **macOS 13+** → the two paths below
+- **Linux with X11** → [Build](#build) only
+- **Windows** → not supported
 
 **Recommended: cask (prebuilt, lands in /Applications)**
 
@@ -83,8 +86,8 @@ Installed both ways and you get two menu-bar icons — keep one.
   session.
 - The **Usage & Limits** screen shows each tool's balance and today's usage. The
   **Rewards** screen shows the claim states each vendor records itself.
-- **When the panel is away**, a 44pt column stays on the right screen edge: who
-  is waiting, who just finished — no window switching.
+- **Right-edge column**: when the panel is away, a 44pt column stays on the
+  screen's right edge — who is waiting, who just finished, no window switching.
 - **Reminders** dedupe per session; each fires once. If the banner can't send, it
   falls back to sound. "Do not disturb" only pauses sending.
 - **Six UI languages** built in (zh / en / de / it / ja / ko), switched in
@@ -170,9 +173,10 @@ Read this before filing an issue; every item has a reason:
 
 ## Build
 
-Needs C++17, CMake ≥ 3.20, Ninja, GLFW3, FreeType 2, OpenGL 3.3 core, and macOS
-13+ or Linux with X11. CMake says plainly what a missing optional dependency
-costs: without SQLite3 the ZCode, WorkBuddy and OpenCode sources are skipped; on
+Hard requirements: C++17, CMake ≥ 3.20, Ninja, GLFW3, FreeType 2, OpenGL 3.3
+core, and macOS 13+ or Linux with X11.
+
+CMake says plainly what a missing optional dependency costs: without SQLite3 the ZCode, WorkBuddy and OpenCode sources are skipped; on
 Linux, without libdbus-1 there is no tray icon, and without libx11 + libxext the
 edge column is off. All commands run from the repo root.
 
