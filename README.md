@@ -7,24 +7,19 @@
 
 [中文](README.zh-CN.md) · [Product page](https://dreamofxm.github.io/agent-ping/en/)
 
-[Install](#install) · [How to use](#how-to-use) · [Privacy](#privacy--exactly-what-it-reads) · [Known limitations](#known-limitations)
+[Install](#install) · [Usage](#usage) · [Privacy](#privacy) · [Limitations](#limitations)
 
 When several agent tools run at once, it is easy to miss which one finished and
-which one is waiting for your approval. Agent Ping is a menu-bar panel that reads
-the local logs those tools already write on your machine. See who is waiting at a
-glance; double-click to jump back to that session.
+which one is waiting for your approval. Agent Ping reads the local logs those
+tools already write, puts what needs you on the screen's right edge, and takes
+you back to the session on a double-click.
 
 [![Agent Ping in motion: the needs-you queue, a session's verbatim question, and the jump back (click for full size)](docs/agent-ping-teaser.gif)](docs/agent-ping-teaser.gif)
 
 ## Install
 
-Pick by platform:
-
-- **macOS 13+** → the two paths below
-- **Linux with X11** → [Build](#build) only
-- **Windows** → not supported
-
-**Recommended: cask (prebuilt, lands in /Applications)**
+On macOS 13 or later, install the prebuilt app. On Linux with X11, build from
+source. Windows is not supported.
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
@@ -32,64 +27,71 @@ brew trust dreamofxm/agent-ping          # third-party tap, run once
 brew install --cask agent-ping
 ```
 
-After install it is at `/Applications/Agent Ping.app`, visible in Launchpad and
-Finder. The package already includes glfw and freetype — no extra dependencies.
-Since v0.1.3 every build is signed and notarized by Apple, so a normal install
-won't trigger the "cannot verify developer" prompt. If it does, don't bypass it —
-say so in [Issues](https://github.com/DreamOfXM/agent-ping/issues).
+The bundle carries its own glfw and freetype, so nothing else has to be installed
+first. The download is signed with a Developer ID and notarized by Apple, so macOS
+won't refuse it as an unidentified developer. If it warns anyway, don't bypass the
+warning — report it in [Issues](https://github.com/DreamOfXM/agent-ping/issues).
 
-**Alternative: formula (built from source, not in /Applications)**
-
-Use this if you want to compile it yourself, or can't download 26 MB. Needs Xcode
-Command Line Tools; about a minute on Apple silicon.
+To compile it yourself, or when 26 MB won't come down, the formula from the same
+tap builds it locally; it needs Xcode Command Line Tools and takes about a minute
+on Apple silicon:
 
 ```sh
 brew tap DreamOfXM/agent-ping https://github.com/DreamOfXM/agent-ping
 brew trust dreamofxm/agent-ping
-brew install agent-ping
-agent-ping
+brew install agent-ping && agent-ping
 ```
 
 <details>
 <summary>brew stops at Homebrew's Xcode admission check</summary>
 
 `Error: Xcode alone is not sufficient…` is Homebrew's requirement for source
-builds, not this project's. If your Command Line Tools are too old, update them in
-System Settings → Software Update. Or just use the cask above — it never touches a
+builds, not this project's; if your Command Line Tools are too old, update them in
+System Settings → Software Update. Or take the cask above — it never touches a
 compiler.
 
 </details>
 
-**Can't find it after install?** No Dock icon, and Spotlight won't show it — by
-design. Once it runs, a "star in an ellipse" icon appears at the right end of the
-menu bar. The panel opens automatically on first launch.
-
-Upgrade and uninstall follow whichever path you installed by:
+Upgrade and uninstall follow the path you installed by:
 
 ```sh
-brew update                               # refresh the tap first
-brew upgrade --cask agent-ping            # if installed by cask
-brew upgrade agent-ping                   # if installed by formula
+# refresh the tap first
+brew update
+
+# installed by cask
+brew upgrade --cask agent-ping
+
+# installed by formula
+brew upgrade agent-ping
 ```
 
 ```sh
-brew uninstall --cask agent-ping          # if installed by cask
-brew uninstall agent-ping && brew untap DreamOfXM/agent-ping   # if installed by formula
+# installed by cask
+brew uninstall --cask agent-ping
+
+# installed by formula
+brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
 ```
 
 Installed both ways and you get two menu-bar icons — keep one.
 
-## How to use
+## Usage
 
-- The **Overview** screen queues sessions waiting for approval, waiting for an
-  answer, or stopped with an error. Double-click a row to jump back to that
-  session.
-- The **Usage & Limits** screen shows each tool's balance and today's usage. The
-  **Rewards** screen shows the claim states each vendor records itself.
-- **Right-edge column**: when the panel is away, a 44pt column stays on the
-  screen's right edge — who is waiting, who just finished, no window switching.
-- **Reminders** dedupe per session; each fires once. If the banner can't send, it
-  falls back to sound. "Do not disturb" only pauses sending.
+Today the answer to "who is waiting" costs switching windows and reading the last
+line of each terminal. Here it is one list on the screen edge, and one
+double-click back into the session that asked.
+
+- **Menu bar only.** Open it once from Launchpad: there is no Dock icon and no
+  window to switch back to, only a star-in-an-ellipse icon at the right end of the
+  menu bar, next to the clock. The panel opens on the first launch.
+- **Overview** queues the sessions waiting for approval, waiting for an answer, or
+  stopped with an error. Double-click a row to jump back to that session.
+- **Usage & limits** and **Rewards** show each tool's balance, today's usage, and
+  the claim state the vendor records itself.
+- **Right-edge column.** With the panel away, a 44pt column stays on the screen's
+  right edge: who is waiting, who just finished, no window switching.
+- **Reminders** dedupe per session and fire once. If the banner can't be sent,
+  sound replaces it. "Do not disturb" only pauses sending.
 - **Six UI languages** built in (zh / en / de / it / ja / ko), switched in
   Settings.
 
@@ -100,17 +102,17 @@ Installed both ways and you get two menu-bar icons — keep one.
 
 [![04 · Right-edge column: resident on the left, the peek card that opens the moment the pointer arrives on the right (click for full size)](docs/fig-04-edge-en.png)](docs/fig-04-edge-en.png)
 
-**Where do the numbers come from?** All from the local logs each tool writes
-itself. No billing APIs, no conversion to money. If the log doesn't carry it, the
-cell doesn't show. The per-screen tour and the full definition of every number are
-on the [product page](https://dreamofxm.github.io/agent-ping/en/).
+**Where do the numbers come from?** Every number is read off the local logs each
+tool writes itself, with no billing API and no conversion to money; a cell stays
+empty when the log doesn't carry it. The per-screen tour and the full definition
+of each number are on the [product page](https://dreamofxm.github.io/agent-ping/en/).
 
 **Want the verbatim question and its options?** Reading logs alone isn't enough —
-you need the hook. For Claude Code and Qoder CLI, one click on the panel's
+you need the hook: for Claude Code and Qoder CLI, one click on the panel's
 **Wiring** screen installs it. The hook only copies the question into a local
 inbox; it never answers for you.
 
-## Privacy — exactly what it reads
+## Privacy
 
 [![03 · Six sources and what each one found: all tools on the left, completed today on the right (click for full size)](docs/fig-03-sources-en.png)](docs/fig-03-sources-en.png)
 
@@ -141,7 +143,7 @@ temp log on Linux when a notification fails.
 Session titles appear on screen and reminders quote them — keep this in mind when
 sharing screenshots.
 
-## Known limitations
+## Limitations
 
 Read this before filing an issue; every item has a reason:
 
@@ -170,6 +172,8 @@ Read this before filing an issue; every item has a reason:
   rest have been redone; these three will follow.
 - **The resource-reset card is not implemented.** No local log carries it, so the
   block doesn't show.
+- **One tool, one window.** If you never switch between agents, the panel mostly
+  repeats what is already in front of you.
 
 ## Build
 
@@ -209,13 +213,13 @@ sudo cmake --install build-linux            # prefix defaults to /usr/local
 
 If it doesn't appear in the menu, reinstall with `--prefix /usr`.
 
-## Docs & feedback
+## Docs
 
 - [Product page](https://dreamofxm.github.io/agent-ping/en/) — the guided tour,
-  comparisons and FAQ live there.
+  category comparison and FAQ live there.
 - [Issues](https://github.com/DreamOfXM/agent-ping/issues) — bugs and tools you
   want supported; Chinese or English. Read
-  [Known limitations](#known-limitations) first.
+  [Limitations](#limitations) first.
 
 ## License
 
