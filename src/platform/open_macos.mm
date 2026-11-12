@@ -835,6 +835,25 @@ static NSString *EscAS(NSString *s) {
 // osascript 子进程 + 超时杀掉：iTerm2 的自动化在授权框没人点/接口卡住时会永久挂起，
 // NSAppleScript 同步跑会把调用线程一起拖死（2026-11-12 实拍）。osascript 走独立进程，
 // 超时即 terminate 退下一级；首次会弹一次 TCC 授权框，点一次允许就永久生效。
+// 带输出捕获的 osascript（超时同 RunOSC 语义）；*ok 回执行成败，返回 stdout。
+static NSString *RunOSOut(NSString *src, NSTimeInterval secs, BOOL *ok) {
+    @try {
+        NSTask *t = [[NSTask alloc] init];
+        t.launchPath = @"/usr/bin/osascript";
+        t.arguments = @[ @"-e", src ];
+        NSPipe *out = [NSPipe pipe];
+        t.standardOutput = out;
+        t.standardError = [NSPipe pipe];
+        [t launch];
+        NSDate *dl = [NSDate dateWithTimeIntervalSinceNow:secs];
+        while ([t isRunning] && [dl timeIntervalSinceNow] > 0)
+            [NSThread sleepForTimeInterval:0.05];
+        if ([t isRunning]) { [t terminate]; if (ok) *ok = NO; return @""; }
+        if (ok) *ok = (t.terminationStatus == 0);
+        NSData *d = [out.fileHandleForReading readDataToEndOfFile];
+        return [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+    } @catch (...) { if (ok) *ok = NO; return @""; }
+}
 static BOOL RunOSC(NSString *src, NSTimeInterval secs) {
     @try {
         NSTask *t = [[NSTask alloc] init];
@@ -868,18 +887,26 @@ static NSString *ShQ(NSString *s) {
 // sh /tmp/xxx.sh，uuid/中文路径/引号都没有被打乱的面（2026-11-12：之前把整条命令
 // 内插进 do script，uuid 被打烂成 I'⁺^A 卡在 zsh 续行提示上，实拍）。
 // iTerm2 永远优先（在跑或装了都试，activate 顺手拉起），它的 AS 报错才退 Terminal。
-static BOOL RunInTerminal(NSString *scriptPath) {
-    // iTerm2 优先：osascript 子进程 + 3s 超时（首次会弹 TCC 授权，点了永久生效；
-    // 卡住/被拒都不拖死面板，退可靠的 Terminal.do script）
-    NSString *itTab = [NSString stringWithFormat:
-        @"tell application \"iTerm2\"\nactivate\n"
-         "if (count of windows) = 0 then\n create window with default profile\n"
-         "else\n tell current window to create tab with default profile\n end if\n"
-         "tell current session of current window to write text \"sh %@\"\nend tell", scriptPath];
-    if (RunOSC(itTab, 3.0)) return YES;
-    NSString *teScr = [NSString stringWithFormat:
-        @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", scriptPath];
-    return RunOSA(teScr);
+// 终端新开窗口跑一段命令体：ObjC 直写临时脚本（引号/中文/uuid 都不过 AS 字符串层），
+// AppleScript 只看到 sh <纯ASCII路径>。iTerm2 新窗口（create window 无既有 tab 竞态），
+// 失败退 Terminal.do script。2026-11-12：两处调用方曾把内插命令串当「路径」传进来，
+// 又被本函数加 sh 前缀——uuid 打烂成 I'⁺^A 的实拍根因。现在语义唯一：传命令体。
+static BOOL RunInTerminal(NSString *cmdBody) {
+    char pathp[64];
+    snprintf(pathp, sizeof pathp, "/tmp/ap-run-%lld.sh", (long long)time(nil));
+    FILE *f = fopen(pathp, "w");
+    if (!f) return NO;
+    fprintf(f, "%s\n", cmdBody.UTF8String ?: "");
+    fclose(f);
+    chmod(pathp, 0755);
+    NSString *path = [NSString stringWithUTF8String:pathp];
+    NSString *it = [NSString stringWithFormat:
+        @"tell application \"iTerm2\"\nactivate\ncreate window with default profile\n"
+         "tell current session of current window to write text \"sh %@\"\nend tell", path];
+    if (RunOSC(it, 3.0)) return YES;
+    NSString *te = [NSString stringWithFormat:
+        @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", path];
+    return RunOSA(te);
 }
 // 活终端切前台：iTerm2 在跑切 iTerm2，否则 Terminal 在跑切 Terminal；都没有 NO。
 static BOOL WakeTerminalFront(void) {
@@ -895,28 +922,15 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
                                   char* reason, int out_len, int* layer) {
     const Target* t = Find(agent_id);
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
-    // 命令本体写进临时脚本（ObjC 直写文件），终端只收到 sh <路径>——
-    // uuid/中文 cwd 的引号都不再经过 AppleScript 字符串层。
-    char pathp[64];
-    snprintf(pathp, sizeof pathp, "/tmp/ap-resume-%lld.sh", (long long)time(nil));
-    FILE *f = fopen(pathp, "w");
-    if (!f) { Say(reason, out_len, @"写 resume 脚本失败（/tmp 不可写）"); return 1; }
-    fprintf(f, "#!/bin/sh\n");
-    if (cwd && *cwd) {
-        // 单引号 POSIX 转义：' → '\''
-        fprintf(f, "cd '");
-        for (const char *c = cwd; *c; c++)
-            if (*c == '\'') fprintf(f, "'\\''"); else fputc(*c, f);
-        fprintf(f, "'\n");
-    }
-    fprintf(f, "exec ");
-    fprintf(f, t->cli_fmt, session_id ? session_id : "");
-    fprintf(f, "\n");
-    fclose(f);
-    chmod(pathp, 0755);
+    // 命令体：cd '<cwd 转义>' + exec <resume 命令>。会话 id 是 uuid（无 shell 元字符），
+    // 裸传；cwd 含中文/空格，用 POSIX 单引号包住并转义内嵌单引号。
+    NSString *body = (cwd && *cwd)
+        ? [NSString stringWithFormat:@"cd %@ && exec %@",
+           ShQ(@(cwd)), [NSString stringWithFormat:@(t->cli_fmt), @(session_id ? session_id : "")]]
+        : [NSString stringWithFormat:@"exec %@",
+           [NSString stringWithFormat:@(t->cli_fmt), @(session_id ? session_id : "")]];
     if (layer) *layer = 4;
-    NSString *path = [NSString stringWithUTF8String:pathp];
-    if (RunInTerminal(path)) {
+    if (RunInTerminal(body)) {
         Say(reason, out_len, @"已在新终端窗口续上这条会话");
         return 0;
     }
@@ -995,17 +1009,32 @@ extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_i
     NSString *fmt = @(t->cli_fmt);
     NSString *cli = [[fmt componentsSeparatedByString:@" "] firstObject] ?: @"";
     char tty[32] = {0};
-    if (!CliTTYForCwd(cli.UTF8String, cwd, tty, (int)sizeof tty) || !tty[0]) {
-        Say(reason, out_len, @"终端里没有找到这条会话的活进程");
-        if (layer) *layer = 6;
-        return 1;
+    if (CliTTYForCwd(cli.UTF8String, cwd, tty, (int)sizeof tty) && tty[0]) {
+        if (SelectTabByTTY(@(tty))) {
+            Say(reason, out_len, [NSString stringWithFormat:@"已定位到终端里的标签（%@）", @(tty)]);
+            if (layer) *layer = 5;
+            return 0;
+        }
     }
-    if (SelectTabByTTY(@(tty))) {
-        Say(reason, out_len, [NSString stringWithFormat:@"已定位到终端里的标签（%@）", @(tty)]);
-        if (layer) *layer = 5;
-        return 0;
+    // 活进程没找到（这条会话可能已经退出）——但标签还留着的场合照样切过去：
+    // 按标签/窗口名含 cli 首词（claude/pi）匹配，中就选，不中再谈新开。
+    {
+        NSString *it = [NSString stringWithFormat:
+            @"tell application \"iTerm2\"\n"
+             "repeat with W in windows\n repeat with T in tabs of W\n"
+             "repeat with S in sessions of T\n"
+             "if ((name of S) contains \"%@\") or ((name of T) contains \"%@\") then\n"
+             " tell T to select\n tell S to select\n return \"selected\"\n end if\n"
+             "end repeat\n end repeat\n end repeat\n return \"nomatch\"\nend tell", cli, cli];
+        BOOL ok = NO;
+        NSString *outp = RunOSOut(it, 3.0, &ok);
+        if (ok && [outp containsString:@"selected"]) {
+            Say(reason, out_len, @"已切到留着这条会话的标签（进程已退）");
+            if (layer) *layer = 5;
+            return 0;
+        }
     }
-    Say(reason, out_len, @"终端里有这个 tty，但标签没选成");
+    Say(reason, out_len, @"终端里没有找到这条会话的活进程，也没有留着的标签");
     if (layer) *layer = 6;
     return 1;
 }
@@ -1023,11 +1052,12 @@ extern "C" int ap_open3(const char* agent_id, const char* session_id, const char
     //    真正「回到那一条会话」，比开一堆文件夹诚实；活会话的「只切前台」在面板侧判断。
     if (t->cli_fmt[0]) {
         NSString* cli = [NSString stringWithFormat:@(t->cli_fmt),
-                         ShQ(session_id ? @(session_id) : @"")];
-        NSString* full = (cwd && *cwd)
-            ? [NSString stringWithFormat:@"cd %@ && %@", ShQ(@(cwd)), cli] : cli;
+                         (session_id ? @(session_id) : @"")];
+        NSString* body = (cwd && *cwd)
+            ? [NSString stringWithFormat:@"cd %@ && exec %@", ShQ(@(cwd)), cli]
+            : [NSString stringWithFormat:@"exec %@", cli];
         if (layer) *layer = 4;
-        if (RunInTerminal(full)) {
+        if (RunInTerminal(body)) {
             Say(reason, out_len, @"已在新终端窗口续上这条会话");
             return 0;
         }

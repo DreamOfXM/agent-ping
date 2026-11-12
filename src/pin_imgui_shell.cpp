@@ -3326,43 +3326,39 @@ static Landing JumpTo(const Hit& h) {
     char key[512], lad[512];
     key[0] = lad[0] = 0;
     const bool titled = !h.title.empty();
-    // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。
-    // 活着（在跑/等你/排队）＝只把终端切到前台，别新开；不活＝iTerm2›Terminal 新窗口
-    // resume 那一条（ap_open3 的 cli 分支，layer=4）。
+    // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。定位不分死活：
+    // ① 活进程按 tty 精确定位到那个标签；② 进程退了但标签还留着 → 按标题（含 cli 首词）
+    // 选中新开；都没中 ③ iTerm2›Terminal 新窗口跑 resume——真正回到那一条会话。
     if (h.agent_id == "claude" || h.agent_id == "pi") {
-        const UIRow* row = RowByKey(h.key);
-        const bool live = row && (row->state == ap::ST_WORKING ||
-                                  row->state == ap::ST_NEEDS_USER ||
-                                  row->state == ap::ST_QUEUED);
-        if (live && !g_shot_to) {
-            // ① 精确定位：找这条会话活进程的 tty，在 iTerm2›Terminal 里选中那个标签。
-            char lad[512] = {0};
-            int lloc = -1;
-            if (ap_locate_cli_session(h.agent_id.c_str(), h.native_id.c_str(),
-                                      h.cwd.c_str(), lad, (int)sizeof lad, &lloc) == 0 &&
-                lloc == 5) {
-                out.level = L_TERMLIVE;
-                out.why = lad;
-                ShowPanel();
-                fprintf(stderr, "[落点] %s/%s → 标签定位 ok ｜ %s\n", h.agent_id.c_str(),
-                        h.native_id.c_str(), lad);
-                fflush(stderr);
-                return out;
-            }
-            // ② 标签没找到（终端开着但不是这个 tab）：把终端切到前台也行——
-            //    但若终端压根没跑，切不出来就走 spawn。
-            char lad2[256] = {0};
-            if (ap_wake_cli_term(lad2, (int)sizeof lad2) == 0) {
-                out.level = L_TERMLIVE;
-                out.why = lad2;
-                ShowPanel();
-                fprintf(stderr, "[落点] %s/%s → 终端切前台（标签没定位到）\n",
-                        h.agent_id.c_str(), h.native_id.c_str());
-                fflush(stderr);
-                return out;
-            }
-            // ③ 终端没在跑：掉下去走新窗口 resume（ap_open3 的 cli 分支）。
+        char lad[512] = {0};
+        int lloc = -1;
+        if (ap_locate_cli_session(h.agent_id.c_str(), h.native_id.c_str(),
+                                  h.cwd.c_str(), lad, (int)sizeof lad, &lloc) == 0) {
+            out.level = (lloc == 5) ? L_TERMLIVE : L_TERM;
+            out.why = lad;
+            if (out.level == L_TERM) HidePanel();
+            fprintf(stderr, "[落点] %s/%s → 定位 ok（layer %d）｜ %s\n", h.agent_id.c_str(),
+                    h.native_id.c_str(), lloc, lad);
+            fflush(stderr);
+            return out;
         }
+        // 都没定位到：新窗口 resume（ap_open3 的 cli 分支，layer=4）。
+        if (ap_open_cli_resume(h.agent_id.c_str(), h.native_id.c_str(), h.cwd.c_str(),
+                               lad, (int)sizeof lad, &lloc) == 0) {
+            out.level = L_TERM;
+            out.why = lad;
+            HidePanel();
+            fprintf(stderr, "[落点] %s/%s → 新窗口 resume ｜ %s\n", h.agent_id.c_str(),
+                    h.native_id.c_str(), lad);
+            fflush(stderr);
+            return out;
+        }
+        out.level = L_NONE;
+        out.why = lad;
+        ShowPanel();
+        fprintf(stderr, "[落点] %s/%s → 落空 ｜ %s\n", h.agent_id.c_str(), h.native_id.c_str(), lad);
+        fflush(stderr);
+        return out;
     }
     if (h.agent_id == "opencode") {
         // opencode 的会话都活在终端里（ClientTagOf 恒 CLI）：唤桌面客户端是打开另一种
