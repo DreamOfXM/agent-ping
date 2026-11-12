@@ -672,7 +672,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
         double last_ts = 0, first_ts = 0;
         State outcome = ST_RESTING;
         bool have_outcome = false, failed = false;
-        std::string project = "Codex", title, err, last_cmd;
+        std::string project = "Codex", title, err, last_cmd, client;
         long tokens = 0;
         long prev_total = 0;
         UsageParts prev_parts, total_parts;
@@ -693,6 +693,9 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
             if (rtype && *rtype == "session_meta") {
                 if (const std::string* c = p->str_at("cwd")) if (!c->empty()) project = basename_last(*c);
                 if (const std::string* s = p->str_at("session_id")) if (!s->empty()) sid = *s;
+                // 来源标签：桌面 App 把自己标成 vscode（实测），CLI 标 cli；缺省也按 CLI。
+                if (const std::string* sc = p->str_at("source"))
+                    client = (*sc == "cli" || sc->empty()) ? "CLI" : "App";
                 continue;
             }
             const std::string* pt = p->str_at("type");
@@ -848,6 +851,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
 
         Session s;
         s.id = "codex-" + sid;
+        s.client = client;
         s.project = project;
         s.title = title.empty() ? project : title;
         s.last_activity = last_ts;
@@ -2244,9 +2248,10 @@ std::string snapshot_dump(const Snapshot& s) {
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
             snprintf(buf, sizeof buf,
-                     "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d loop=%d  %s%s%s%s%s",
+                     "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d loop=%d cl=%-4s %s%s%s%s%s",
                      state_name(x.state), utf8_clip(x.project, 14, "").c_str(), x.last_activity,
                      x.tokens, x.credits, x.turns, x.queue_pos, x.loop_count,
+                     x.client.empty() ? "-" : x.client.c_str(),
                      utf8_clip(x.title, 56, "…").c_str(),
                      x.inferred_wait ? " (推断)" : "", x.proc_dead ? " (进程已死)" : "",
                      x.question.empty() ? "" : "  ⟵", x.question.empty() ? "" : utf8_clip(x.question, 40, "…").c_str());

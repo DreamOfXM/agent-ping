@@ -3322,6 +3322,8 @@ static void ShowPanel() {
 /// 上一版复用同一个 why，ap_open 一把盖掉了「未授权辅助功能」那句，屏幕上就只剩「打开了文件夹」。
 static const UIRow* RowByKey(const std::string& key);
 static Landing JumpTo(const Hit& h) {
+    const UIRow* jrow = RowByKey(h.key);
+    const bool row_client_is_app = jrow && jrow->client == "App";
     Landing out;
     char key[512], lad[512];
     key[0] = lad[0] = 0;
@@ -3329,6 +3331,28 @@ static Landing JumpTo(const Hit& h) {
     // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。定位不分死活：
     // ① 活进程按 tty 精确定位到那个标签；② 进程退了但标签还留着 → 按标题（含 cli 首词）
     // 选中新开；都没中 ③ iTerm2›Terminal 新窗口跑 resume——真正回到那一条会话。
+    // codex 桌面端会话（client=App）：唤起桌面 App（com.openai.codex），不走终端。
+    if (h.agent_id == "codex" && row_client_is_app) {
+        char lad[256] = {0};
+        int rc = -1;
+        if (!g_shot_to)
+            rc = ap_activate_app("com.openai.codex", lad, (int)sizeof lad) == 0 ? 0 : 1;
+        if (rc == 0) {
+            out.level = L_APP;
+            out.why = "已唤起 Codex 桌面端";
+            ShowPanel();
+            fprintf(stderr, "[落点] codex/%s → 桌面端已唤起\n", h.native_id.c_str());
+            fflush(stderr);
+            return out;
+        }
+        // 桌面端没应答：落空并明说，不猜。
+        out.level = L_NONE;
+        out.why = "Codex 桌面端没应答";
+        ShowPanel();
+        fprintf(stderr, "[落点] codex/%s → 桌面端唤起失败\n", h.native_id.c_str());
+        fflush(stderr);
+        return out;
+    }
     if (h.agent_id == "claude" || h.agent_id == "pi" ||
         h.agent_id == "codex" || h.agent_id == "opencode") {
         char lad[512] = {0};
@@ -5690,7 +5714,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.project = se.project;
             row.agent = ag.name;
             row.agent_id = ag.id;
-            row.client = ClientTagOf(ag.id, se.app_indexed);
+            row.client = se.client.empty() ? ClientTagOf(ag.id, se.app_indexed) : se.client;
             row.key = ag.id + "/" + se.id;
             row.native_id = NativeId(ag.id, se.id);   // 前缀摘掉，规则与横幅点击同一份
             row.acked = g_ack.count(row.key) > 0;

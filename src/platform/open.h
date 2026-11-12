@@ -47,6 +47,10 @@ int ap_open_cli_resume(const char* agent_id, const char* session_id, const char*
    别给我新开一个，切过去就行」的场合。 */
 int ap_wake_cli_term(char* reason, int out_len);
 
+/* 按 bundle id 把一个 App 激活到前台（osascript activate，2s 超时）。
+   codex 桌面端会话的落点用它（com.openai.codex）。返回 0 成功 / 1 失败（reason 写明）。 */
+int ap_activate_app(const char* bundle_id, char* reason, int out_len);
+
 /* 会话在终端里活着时的精确定位：找该 CLI 活进程的 tty（cwd 与会话目录一致的进程），
    再在 iTerm2（优先）→ Terminal 里按 tty 找到那个标签/会话并选中切过去。
    找到＝layer 5 且选中；终端开着但没找到对应标签＝layer 6（调用方退新开或切前台）；

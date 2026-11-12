@@ -101,6 +101,9 @@ struct Session {
     /// 长度可能短于 options：缺口那头当「没有说明」，界面不画第二行。
     std::vector<std::string> option_desc;
     std::string tool;             // 停在「允许吗」上的工具名
+    /// 会话来源标签（codex 专属：session_meta.source）。"CLI"＝终端；"App"＝桌面端
+    ///（其 App 把自己标成 vscode）。空＝这一路不区分（其他路走 ClientTagOf）。
+    std::string client;
     /// 问题块从哪条通道拿到的，只决定详情屏「来源」那一行念哪一句，不参与判态与响铃。
     /// ZCode/WorkBuddy/OpenCode 没有 hook 通道（--hook-status 实测 supported=0），
     /// 会话库是它们唯一的来源；hook 盖上来的时候改 QS_HOOK。

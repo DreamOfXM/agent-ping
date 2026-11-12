@@ -983,6 +983,14 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
     if (layer) *layer = 0;
     return 1;
 }
+extern "C" int ap_activate_app(const char* bundle_id, char* reason, int out_len) {
+    if (!bundle_id || !*bundle_id) { Say(reason, out_len, @"bundle id 为空"); return 1; }
+    NSString *sc = [NSString stringWithFormat:
+        @"tell application id \"%@\" to activate", @(bundle_id)];
+    if (RunOSC(sc, 2.0)) { Say(reason, out_len, @"已激活"); return 0; }
+    Say(reason, out_len, [NSString stringWithFormat:@"激活失败：%@", g_lastOscErr]);
+    return 1;
+}
 extern "C" int ap_wake_cli_term(char* reason, int out_len) {
     if (WakeTerminalFront()) { Say(reason, out_len, @"终端已切到前台"); return 0; }
     Say(reason, out_len, @"没有在跑的终端可切");
