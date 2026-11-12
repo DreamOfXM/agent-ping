@@ -47,6 +47,20 @@ int ap_open_cli_resume(const char* agent_id, const char* session_id, const char*
    别给我新开一个，切过去就行」的场合。 */
 int ap_wake_cli_term(char* reason, int out_len);
 
+/* 会话在终端里活着时的精确定位：找该 CLI 活进程的 tty（cwd 与会话目录一致的进程），
+   再在 iTerm2（优先）→ Terminal 里按 tty 找到那个标签/会话并选中切过去。
+   找到＝layer 5 且选中；终端开着但没找到对应标签＝layer 6（调用方退新开或切前台）；
+   没有终端在跑＝layer 6。返回 0 已选中。 */
+int ap_locate_cli_session(const char* agent_id, const char* session_id, const char* cwd,
+                          char* reason, int out_len, int* layer);
+
+/* 会话在终端里活着时的精确定位：找该 CLI 活进程的 tty（cwd 与会话目录一致的进程），
+   再在 iTerm2（优先）→ Terminal 里按 tty 找到那个标签/会话并选中切过去。
+   找到＝layer 5 且选中；终端开着但没找到对应标签＝layer 6（调用方退新开）；
+   没有终端在跑＝layer 6（同上，spawn 会拉起优先的终端）。返回 0 已选中。 */
+int ap_locate_cli_session(const char* agent_id, const char* session_id, const char* cwd,
+                          char* reason, int out_len, int* layer);
+
 /* ZCode 专用：会话级落点。ZCode 没有会话级 URL（10-29 在 app.asar 里逐条核过，
    只认领 oauth/callback 与 workspace/open?path=），能落到「那一条对话」的只有它自己的界面：
    ① 先读侧栏「任务列表」的行（Chromium 要先置 AXManualAccessibility 才建这棵树），

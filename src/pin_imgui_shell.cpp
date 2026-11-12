@@ -3335,17 +3335,33 @@ static Landing JumpTo(const Hit& h) {
                                   row->state == ap::ST_NEEDS_USER ||
                                   row->state == ap::ST_QUEUED);
         if (live && !g_shot_to) {
-            char lad[256] = {0};
-            if (ap_wake_cli_term(lad, (int)sizeof lad) == 0) {
+            // ① 精确定位：找这条会话活进程的 tty，在 iTerm2›Terminal 里选中那个标签。
+            char lad[512] = {0};
+            int lloc = -1;
+            if (ap_locate_cli_session(h.agent_id.c_str(), h.native_id.c_str(),
+                                      h.cwd.c_str(), lad, (int)sizeof lad, &lloc) == 0 &&
+                lloc == 5) {
                 out.level = L_TERMLIVE;
                 out.why = lad;
                 ShowPanel();
-                fprintf(stderr, "[落点] %s/%s → 终端在跑，切前台\n", h.agent_id.c_str(),
-                        h.native_id.c_str());
+                fprintf(stderr, "[落点] %s/%s → 标签定位 ok ｜ %s\n", h.agent_id.c_str(),
+                        h.native_id.c_str(), lad);
                 fflush(stderr);
                 return out;
             }
-            // 没有在跑的终端可切：掉下去走新窗口 resume。
+            // ② 标签没找到（终端开着但不是这个 tab）：把终端切到前台也行——
+            //    但若终端压根没跑，切不出来就走 spawn。
+            char lad2[256] = {0};
+            if (ap_wake_cli_term(lad2, (int)sizeof lad2) == 0) {
+                out.level = L_TERMLIVE;
+                out.why = lad2;
+                ShowPanel();
+                fprintf(stderr, "[落点] %s/%s → 终端切前台（标签没定位到）\n",
+                        h.agent_id.c_str(), h.native_id.c_str());
+                fflush(stderr);
+                return out;
+            }
+            // ③ 终端没在跑：掉下去走新窗口 resume（ap_open3 的 cli 分支）。
         }
     }
     if (h.agent_id == "opencode") {
