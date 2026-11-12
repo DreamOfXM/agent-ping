@@ -908,14 +908,15 @@ static BOOL RunInTerminal(NSString *cmdBody) {
         @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", path];
     return RunOSA(te);
 }
-// 活终端切前台：iTerm2 在跑切 iTerm2，否则 Terminal 在跑切 Terminal；都没有 NO。
+// 活终端切前台：osascript activate。NSRunningApplication.activateWithOptions: 自 macOS 14
+// 起废弃成「无效果」（2026-11-12 实拍：返回成功但窗口纹丝不动，toast 谎报已切）。
 static BOOL WakeTerminalFront(void) {
     NSRunningApplication *it = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
         @"com.googlecode.iterm2"] firstObject];
-    if (it) return [it activateWithOptions:0];
+    if (it) return RunOSC(@"tell application \"iTerm2\" to activate", 2.0);
     NSRunningApplication *te = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
         @"com.apple.Terminal"] firstObject];
-    if (te) return [te activateWithOptions:0];
+    if (te) return RunOSC(@"tell application \"Terminal\" to activate", 2.0);
     return NO;
 }
 extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, const char* cwd,
@@ -946,95 +947,50 @@ extern "C" int ap_wake_cli_term(char* reason, int out_len) {
 
 // 活 CLI 进程的 tty：pgrep -f <cli> 逐 pid 比对 cwd（lsof），命中后取 ps tty。
 // 返回 YES 且 ttyOut 带上（如 ttys003）。
-static BOOL CliTTYForCwd(const char* cli, const char* cwd, char* ttyOut, int outLen) {
-    char cmd[512];
-    snprintf(cmd, sizeof cmd, "pgrep -f \"%s\"", cli);
-    FILE *pg = popen(cmd, "r");
-    if (!pg) return NO;
-    char line[64];
-    BOOL found = NO;
-    while (fgets(line, sizeof line, pg) && !found) {
-        const long pid = strtol(line, nullptr, 10);
-        if (pid <= 1) continue;
-        char lc[512];
-        snprintf(lc, sizeof lc, "lsof -a -p %ld -d cwd -Fn 2>/dev/null", pid);
-        FILE *lp = popen(lc, "r");
-        if (!lp) continue;
-        char fl[1200];
-        while (fgets(fl, sizeof fl, lp) && !found) {
-            if (fl[0] != 'n') continue;              // lsof -F n 输出：n<路径>
-            fl[strcspn(fl, "\n")] = 0;
-            if (strcmp(fl + 1, cwd) != 0) continue;
-            char pc[96];
-            snprintf(pc, sizeof pc, "ps -o tty= -p %ld", pid);
-            FILE *tp = popen(pc, "r");
-            if (tp) {
-                if (fgets(ttyOut, (size_t)outLen, tp)) {
-                    ttyOut[strcspn(ttyOut, "\n")] = 0;
-                    found = (strncmp(ttyOut, "??", 2) != 0);   // ??＝没有控制终端的进程
-                }
-                pclose(tp);
-            }
-            break;
-        }
-        pclose(lp);
-    }
-    pclose(pg);
-    return found;
-}
 
 // 按 tty 在 iTerm2（先）→ Terminal 里定位标签/会话并选中切过去。
-static BOOL SelectTabByTTY(NSString *tty) {
+// 按标签名选中：tab 级遍历实测 9ms 安全；「sessions of T」遍历在本机必挂（>20s，
+// 2026-11-12 实测两次），任何定位代码都不许再碰 sessions 树。tty 匹配需要 session 级
+// 信息，这条路彻底放弃——tab 标题默认就是跑着的进程名（claude/pi），按它匹配足够。
+static BOOL SelectTabByName(NSString *needle) {
     NSString *it = [NSString stringWithFormat:
-        @"tell application \"iTerm2\"\n"
+        @"tell application \"iTerm2\"\nactivate\n"
          "repeat with W in windows\n repeat with T in tabs of W\n"
-         "repeat with S in sessions of T\n"
-         "if tty of S is \"%@\" then\n tell T to select\n"
-         "tell S to select\n return \"selected\"\n end if\n"
-         "end repeat\n end repeat\n end repeat\n end tell", tty];
-    if (RunOSC(it, 3.0)) return YES;
+         "if ((name of T) contains \"%@\") or ((name of T) contains \"%@\") then\n"
+         " tell T to select\n select W\n return \"selected\"\n end if\n"
+         "end repeat\n end repeat\n return \"nomatch\"\nend tell", needle, needle];
+    BOOL ok = NO;
+    NSString *o = RunOSOut(it, 3.0, &ok);
+    if (ok && [o containsString:@"selected"]) return YES;
     NSString *te = [NSString stringWithFormat:
         @"tell application \"Terminal\"\nactivate\n"
          "repeat with W in windows\n repeat with T in tabs of W\n"
-         "if tty of T is \"%@\" then\n set current tab of W to T\n"
-         "return \"selected\"\n end if\n end repeat\n end repeat\nend tell", tty];
-    return RunOSC(te, 4.0);
+         "if ((name of T) contains \"%@\") then\n set current tab of W to T\n"
+         "set frontmost of W to true\n return \"selected\"\n end if\n"
+         "end repeat\n end repeat\n return \"nomatch\"\nend tell", needle];
+    o = RunOSOut(te, 3.0, &ok);
+    return ok && [o containsString:@"selected"];
 }
 
 extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_id,
                                      const char* cwd, char* reason, int out_len, int* layer) {
     const Target* t = Find(agent_id);
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
-    // cli_fmt 首个空格前就是进程名（claude --resume … → claude）
     NSString *fmt = @(t->cli_fmt);
     NSString *cli = [[fmt componentsSeparatedByString:@" "] firstObject] ?: @"";
-    char tty[32] = {0};
-    if (CliTTYForCwd(cli.UTF8String, cwd, tty, (int)sizeof tty) && tty[0]) {
-        if (SelectTabByTTY(@(tty))) {
-            Say(reason, out_len, [NSString stringWithFormat:@"已定位到终端里的标签（%@）", @(tty)]);
-            if (layer) *layer = 5;
-            return 0;
-        }
+    // 标签名匹配（tab 级安全；needle 优先 cwd 末级——标签名常带目录名，其次 cli 名）。
+    NSString *needle = cli;
+    if (cwd && *cwd) {
+        const char *slash = strrchr(cwd, '/');
+        if (slash && slash[1]) needle = [NSString stringWithUTF8String:slash + 1];
     }
-    // 活进程没找到（这条会话可能已经退出）——但标签还留着的场合照样切过去：
-    // 按标签/窗口名含 cli 首词（claude/pi）匹配，中就选，不中再谈新开。
-    {
-        NSString *it = [NSString stringWithFormat:
-            @"tell application \"iTerm2\"\n"
-             "repeat with W in windows\n repeat with T in tabs of W\n"
-             "repeat with S in sessions of T\n"
-             "if ((name of S) contains \"%@\") or ((name of T) contains \"%@\") then\n"
-             " tell T to select\n tell S to select\n return \"selected\"\n end if\n"
-             "end repeat\n end repeat\n end repeat\n return \"nomatch\"\nend tell", cli, cli];
-        BOOL ok = NO;
-        NSString *outp = RunOSOut(it, 3.0, &ok);
-        if (ok && [outp containsString:@"selected"]) {
-            Say(reason, out_len, @"已切到留着这条会话的标签（进程已退）");
-            if (layer) *layer = 5;
-            return 0;
-        }
+    if (SelectTabByName(needle)) {
+        Say(reason, out_len, [NSString stringWithFormat:
+            @"已切到跑着这条会话的标签（匹配「%@」）", needle]);
+        if (layer) *layer = 5;
+        return 0;
     }
-    Say(reason, out_len, @"终端里没有找到这条会话的活进程，也没有留着的标签");
+    Say(reason, out_len, @"没有找到跑着这条会话的标签");
     if (layer) *layer = 6;
     return 1;
 }
