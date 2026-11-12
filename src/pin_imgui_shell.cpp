@@ -2257,7 +2257,7 @@ static ImU64 g_brandTex36 = 0, g_brandTex68 = 0;
 static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
 /// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
 static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
-static ImU64 g_agent31TexQwenWork = 0, g_agent31TexPi = 0;
+static ImU64 g_agent31TexQwenWork = 0, g_agent31TexPi = 0, g_agent31TexCodex = 0;
 /// 右缘窄柱那几枚剪影（edge_marks.h，白底＋形状覆盖度当 alpha）：稿子的
 /// `.cv-a .g i{background-color:…;mask:url(...)}` 只有贴纹理才认，画的时候乘墨色。
 static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0;

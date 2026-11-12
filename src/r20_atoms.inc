@@ -339,6 +339,7 @@ static void BrandUpload() {
     g_agent31TexOpenCode = RMakeTex(kAgent31N, kAgent31HexOpenCode31);
     g_agent31TexQwenWork = RMakeTex(kAgent31N, kAgent31HexQwenWork31);
     g_agent31TexPi = RMakeTex(kAgent31N, kAgent31HexPi31);
+    g_agent31TexCodex = RMakeTex(kAgent31N, kAgent31HexCodex31);
 }
 static void BrandMark(ImDrawList* dl, float x, float y, float s) {
     const ImU64 tex = (s > 24.0f) ? g_brandTex68 : g_brandTex36;
@@ -401,7 +402,8 @@ static void RAgentTile(ImDrawList* dl, float x, float y, float s, float r, ImU32
                     : (agent == "workbuddy") ? g_agent31TexWorkBuddy
                     : (agent == "opencode") ? g_agent31TexOpenCode
                     : (agent == "qwenworkcn") ? g_agent31TexQwenWork
-                    : (agent == "pi") ? g_agent31TexPi : 0;
+                    : (agent == "pi") ? g_agent31TexPi
+                    : (agent == "codex") ? g_agent31TexCodex : 0;
     if (tex) {
         dl->AddImageRounded((ImTextureID)tex, ImVec2(x, y), ImVec2(x + s, y + s),
                             ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, tintA), r);

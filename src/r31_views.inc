@@ -640,7 +640,7 @@ static std::string R31Client(const std::string& id) {
 static void Brand31(ImDrawList* dl, float x, float y, float s, const std::string& id, int loc) {
     const bool textured = (id == "qoder" || id == "claude" || id == "zcode" ||
                            id == "workbuddy" || id == "opencode" ||
-                           id == "qwenworkcn" || id == "pi");
+                           id == "qwenworkcn" || id == "pi" || id == "codex");
     if (textured) {
         const Tool* t = R31ToolOf(id);
         const ImU32 hue = t ? t->hue : IM_COL32(160, 170, 185, 255);
