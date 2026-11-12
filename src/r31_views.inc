@@ -2032,17 +2032,14 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
         // M9：今天/昨天/本周/本月 四颗筛选。昨天有整轮快照；周/月来自 daily.txt 日聚合
         //（第一天上线只有今天一行——不回填，不编）。
         struct Seg { const char* key; long tokens; bool has; };
-        // 周/月的数字来自 daily.txt 日聚合：上线第一天只有今天一行，周=月=今天，
-        // 点过去数字纹丝不动，看着像坏了。行数不足 2 时这两颗置灰不可点——不装有多天。
-        const bool hist = g_pd.daily.size() >= 2;
+        // 四段全部可点（2026-11-12 用户拍板）：没有记录的段也如实切过去显示 0——
+        // 「点不动」比「显示 0」更让人以为坏了。周/月来自 daily.txt，第一天=今天属真实数学。
         const Seg segs[4] = {
             {"r_today", (long)g_pd.today_tokens, g_pd.has_today_tokens},
-            {"r_useg_yest", g_pd.yday_tokens, g_pd.yday_tokens > 0},
-            {"r_useg_week", g_pd.week_tokens, hist && g_pd.week_tokens > 0},
-            {"r_useg_month", g_pd.month_tokens, hist && g_pd.month_tokens > 0},
+            {"r_useg_yest", g_pd.yday_tokens, true},
+            {"r_useg_week", g_pd.week_tokens, true},
+            {"r_useg_month", g_pd.month_tokens, true},
         };
-        // 自愈：当前段数据没了（比如昨天滚出窗）就回落到今天，高亮与数字永远一致。
-        if (g_r31_useg != 0 && !segs[g_r31_useg].has) g_r31_useg = 0;
         {
             float fx = hx;
             for (int i = 0; i < 4; i++) {
@@ -2056,11 +2053,9 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 if (on) dl->AddRect(ImVec2(fx + 0.5f, cy + 2.5f), ImVec2(fx + tw + 17.5f, cy + 21.5f),
                                     k31Line, 8.0f, 0, 1.0f);
                 DrawTextRun(dl, fx + 9.0f, TextMid(cy + 12.0f, T_S10, loc), lab, loc,
-                            on ? k31Fg : (segs[i].has ? k31Sec : k31Faint), T_S10);
-                // 没数据的段不注册命中区：置灰的点了弹回，看着像死按钮。
-                if (segs[i].has || on)
-                    AddHit(g_hits, fx, cy + 2.0f, fx + tw + 18.0f, cy + 22.0f, HIT_USEG, 2300 + i,
-                           i, loc, lab, i);
+                            on ? k31Fg : k31Sec, T_S10);
+                AddHit(g_hits, fx, cy + 2.0f, fx + tw + 18.0f, cy + 22.0f, HIT_USEG, 2300 + i, i,
+                       loc, lab, i);
                 fx += tw + 18.0f + 7.0f;
             }
         }
@@ -2104,8 +2099,8 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 std::string c2 = R31Compact((double)up.output);  snprintf(b2, sizeof b2, "%s", c2.c_str());
                 std::string c3 = R31Compact((double)up.cache_read); snprintf(b3, sizeof b3, "%s", c3.c_str());
                 const std::string br = RFmt(T("r_usage_break", loc), b1, b2, b3);
-                DrawTextRun(dl, L + 7.0f, TextTop(cy - 10.0f, 14.0f, T_S9, loc), br, loc,
-                            k31Faint, T_S9);
+                DrawTextRun(dl, L + 7.0f, TextTop(cy - 10.0f, 15.0f, T_S10, loc), br, loc,
+                            k31Faint, T_S10);
                 cy += 12.0f;
             }
         }
@@ -2120,7 +2115,7 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             R31Compact((double)peak).copy(pk, 31); pk[31] = 0;
             R31Mid(dl, L + 14.0f, cy + 14.0f, T("r_useg_last7", loc), loc, k31Sec, T_S11B);
             const std::string pk2 = RFmt(T("r_useg_peak", loc), pk);
-            DrawTextRight(dl, L + listW - 14.0f, TextMid(cy + 14.0f, T_S9, loc), pk2, loc, k31Muted, T_S9);
+            DrawTextRight(dl, L + listW - 14.0f, TextMid(cy + 14.0f, T_S10, loc), pk2, loc, k31Muted, T_S10);
             std::map<long, long> byday;
             for (const auto& d : g_pd.daily) byday[d.day] = d.tokens;
             const float gap = 7.0f, bw2 = (listW - 28.0f - gap * 6.0f) / 7.0f;
@@ -2145,13 +2140,13 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 }
                 if (isToday) {
                     const std::string tl = T("r_today", loc);
-                    DrawTextRun(dl, bx + (bw2 - TextWidth(tl, loc, T_S8)) * 0.5f, cy + 66.5f,
-                                tl, loc, has ? k31Sec : k31Faint, T_S8);
+                    DrawTextRun(dl, bx + (bw2 - TextWidth(tl, loc, T_S9)) * 0.5f, cy + 66.5f,
+                                tl, loc, has ? k31Sec : k31Faint, T_S9);
                 } else {
                     char db[8];
                     snprintf(db, sizeof db, "%02d", tvd.tm_mday);
-                    DrawTextRun(dl, bx + (bw2 - TextWidth(db, loc, T_S8)) * 0.5f, cy + 66.5f,
-                                db, loc, has ? k31Faint : WithA(k31Faint, 130), T_S8);
+                    DrawTextRun(dl, bx + (bw2 - TextWidth(db, loc, T_S9)) * 0.5f, cy + 66.5f,
+                                db, loc, has ? k31Faint : WithA(k31Faint, 130), T_S9);
                 }
             }
             cy += bh + 10.0f;
@@ -2327,8 +2322,8 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             for (size_t i = 0; i < hs.size(); i++) {
                 const Tool& t = *hs[i];
                 R31Mid(dl, L + 14.0f, ry + 12.0f, R31Agent(t.id, loc), loc, k31Fg, T_S11B);
-                R31Mid(dl, L + 14.0f, ry + 28.0f, R31Compact((double)t.usage.total()) + " tokens",
-                       loc, k31Muted, T_S9);
+                R31Mid(dl, L + 14.0f, ry + 29.0f, R31Compact((double)t.usage.total()) + " tokens",
+                       loc, k31Muted, T_S10);
                 const long denom = t.usage.input + t.usage.cache_read;
                 const int pct = (int)std::lround((double)t.usage.cache_read / (double)denom * 100.0);
                 const float bw3 = 110.0f;
@@ -2345,7 +2340,7 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 ry += 42.0f;
             }
             R31DrawWrap(dl, T("r_hitrate_note", loc), L + 14.0f, ry + 2.0f, listW - 28.0f, loc,
-                        T_S9, 14.5f, k31Muted, 2);
+                        T_S10, 16.0f, k31Muted, 2);
             cy = listY + listH;
         }
     }
