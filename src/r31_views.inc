@@ -161,7 +161,12 @@ static std::string R31Num(double v) {
     return neg ? "-" + s : s;
 }
 /// 稿子 compact()：≥1M 用 M、≥1K 用 K，其余原样（带千分位）。
+/// 当前渲染语言（drawPanel 进入时回填）：R31Compact 的「亿」档按它选写法。
+/// zh/ja/ko 有 1e8 专用单位（亿/億/억），欧美语没有——保持 100M 计法，不硬造「0.1B」。
+static int g_fmt_loc = 0;
 static std::string R31Compact(double v) {
+    if (v >= 100000000.0 && (g_fmt_loc == 0 || g_fmt_loc == 4 || g_fmt_loc == 5))
+        return R31Num(v / 100000000.0) + (g_fmt_loc == 0 ? "亿" : g_fmt_loc == 4 ? "億" : "억");
     if (v >= 1000000.0) return R31Num(v / 1000000.0) + "M";
     if (v >= 1000.0) return R31Num(v / 1000.0) + "K";
     return R31Num(v);

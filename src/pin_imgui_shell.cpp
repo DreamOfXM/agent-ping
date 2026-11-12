@@ -7805,6 +7805,7 @@ int main(int argc, char** argv) {
     }
 
     auto drawPanel = [&](float x, float y, float w, int loc, int view) {
+        g_fmt_loc = loc;   // R31Compact 的「亿/億/억」档按当前渲染语言选写法
         ImGui::SetNextWindowPos(ImVec2(x, y));
         // r20 是固定 640 高的浮层：宽度恒 340，内容超出走屏内滚动，窗口不跟着内容收放。
         ImGui::SetNextWindowSize(ImVec2(w, (float)WantedWindowH()));
