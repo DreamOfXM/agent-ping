@@ -955,6 +955,55 @@ extern "C" int ap_wake_cli_term(char* reason, int out_len) {
 // 返回 YES 且 ttyOut 带上（如 ttys003）。
 
 // 按 tty 在 iTerm2（先）→ Terminal 里定位标签/会话并选中切过去。
+// 活 CLI 进程的 tty：ps 全表扫一行（tty + 命令），命令含 cli 词且 tty 形如 ttysNNN。
+// 2026-11-12 实测：「ps -axo tty=,command=」一行就能看到「ttys000 claude」。
+static NSString *LiveCliTTY(const char* cli) {
+    char cmd[128];
+    snprintf(cmd, sizeof cmd, "ps -axo tty=,command=");
+    FILE *pp = popen(cmd, "r");
+    if (!pp) return nil;
+    char line[1024];
+    NSString *hit = nil;
+    while (fgets(line, sizeof line, pp)) {
+        if (strncmp(line, "ttys", 4) != 0) continue;
+        char *sp = line + 4;
+        while (*sp && *sp != ' ') sp++;
+        if (*sp != ' ') continue;
+        *sp = 0;
+        // 命令体：词元含 cli 名（claude/pi）。login/AgentPing 自身不误中：不含该词。
+        if (strstr(sp + 1, cli) && !strstr(sp + 1, "AgentPing")) {
+            hit = [NSString stringWithFormat:@"/dev/%s", line];
+            break;
+        }
+    }
+    pclose(pp);
+    return hit;
+}
+// 按 tty 选 tab（2026-11-12 实测 selected）：窗口→标签→「tty of first session of T」
+// 单会话定点访问安全快速（9ms 级）；挂死的只是「repeat with S in sessions」集合遍历，
+// 本函数不碰集合。选 tab + 选窗口 + 激活，一步到位。
+static BOOL SelectTabByTTY(const char* ttyDev) {
+    NSString *sc = [NSString stringWithFormat:
+        @"set out to \"nomatch\"\n"
+         "tell application \"iTerm2\"\n"
+         "repeat with W in windows\n"
+         "repeat with T in tabs of W\n"
+         "try\n"
+         "set tt to tty of first session of T\n"
+         "on error\n"
+         "set tt to \"\"\n end try\n"
+         "if tt is \"%@\" then\n"
+         "tell T to select\n select W\n set out to \"selected\"\n exit repeat\n end if\n"
+         "end repeat\n"
+         "if out is \"selected\" then exit repeat\n"
+         "end repeat\n"
+         "end tell\n"
+         "activate application \"iTerm2\"\n"
+         "return out", @(ttyDev)];
+    BOOL ok = NO;
+    NSString *o = RunOSOut(sc, 4.0, &ok);
+    return ok && [o containsString:@"selected"];
+}
 // 按窗口名选中：本机 iTerm2 的 tab「name」全部非文本（-1700，实测三枚全炸），而
 // 窗口名可用（~/Desktop / OC / Greeting，窗口即标签形态）。多 needle 逐个试：
 // 会话目录末级名 → cli 名（claude/pi）→（claude 加 "Claude"）。name 读取带 try，
@@ -990,6 +1039,16 @@ extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_i
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
     NSString *fmt = @(t->cli_fmt);
     NSString *cli = [[fmt componentsSeparatedByString:@" "] firstObject] ?: @"";
+    // ① 活进程按 tty 精确到 tab（含「非活动 tab」——窗口名只显示活动 tab，够不着，
+    //    2026-11-12 用户实测两次进不了已开标签的正是这种）。
+    NSString *tty = LiveCliTTY(cli.UTF8String);
+    if (tty && SelectTabByTTY(tty.UTF8String)) {
+        Say(reason, out_len, [NSString stringWithFormat:
+            @"已进入跑着这条会话的标签（%@）", tty]);
+        if (layer) *layer = 5;
+        return 0;
+    }
+    // ② 退窗口名匹配（活动 tab 场景）。
     NSMutableArray<NSString*> *ns = [NSMutableArray array];
     if (cwd && *cwd) {
         const char *slash = strrchr(cwd, '/');
@@ -1002,7 +1061,7 @@ extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_i
         if (layer) *layer = 5;
         return 0;
     }
-    Say(reason, out_len, @"没有找到跑着这条会话的终端窗口，将新开一个续上");
+    Say(reason, out_len, @"没有找到跑着这条会话的标签，将新开一个续上");
     if (layer) *layer = 6;
     return 1;
 }
