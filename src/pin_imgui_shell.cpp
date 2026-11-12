@@ -2260,7 +2260,7 @@ static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenC
 static ImU64 g_agent31TexQwenWork = 0, g_agent31TexPi = 0, g_agent31TexCodex = 0;
 /// 右缘窄柱那几枚剪影（edge_marks.h，白底＋形状覆盖度当 alpha）：稿子的
 /// `.cv-a .g i{background-color:…;mask:url(...)}` 只有贴纹理才认，画的时候乘墨色。
-static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0;
+static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0, g_markTexQwenWork = 0, g_markTexCodex = 0;
 // ── 自绘横幅：券到账时在桌面弹一块小卡（2026-10-30 用户拍板「我们自己画一块横幅窗」）──
 // 为什么不走系统横幅：那条通道先要过「系统设置→通知→Agent Ping」这道闸，本机实测档位是
 // 「被关着」，ap_notify_post 于是只返回 1（兜底出声）——人眼前什么都没有。自己画不欠授权。
@@ -6911,12 +6911,8 @@ static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agen
     }
     // 没有剪影的五路（opencode/qwenworkcn/pi/codex）退回各自的官方 RGBA 瓷贴——
     // 字母块是最后手段，不再给「有贴图可用的路」用（2026-11-12 用户拍板）。
-    const ImU64 tile = agent == "opencode"   ? g_agent31TexOpenCode
-                     : agent == "qwenworkcn" ? g_agent31TexQwenWork
-                     : agent == "pi"         ? g_agent31TexPi
-                     : agent == "codex"      ? g_agent31TexCodex
-                     : agent == "claude"     ? g_agentTexClaude
-                     : agent == "qoder"      ? g_agentTexQoder
+    const ImU64 tile = agent == "opencode" ? g_agent31TexOpenCode
+                     : agent == "pi"       ? g_agent31TexPi
                      : 0;
     if (tile) {
         const float px = EdgeMarkPx(agent);

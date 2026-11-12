@@ -11,6 +11,7 @@
 #include "agent_icons.h"
 #include "agent_icons31.h"
 #include "edge_marks.h"
+#include "edge_marks2.h"
 
 // ImGui 只在 imgui_internal.h 里给 IM_PI；这一层不引内部头，自己留一份同值常量。
 static const float kRPi = 3.14159265358979323846f;
@@ -368,12 +369,16 @@ static void MarkUpload() {
     g_markTexWorkBuddy = RMakeMaskTex(kMarkN, kMarkHexWorkBuddy);
     g_markTexZCode = RMakeMaskTex(kMarkN, kMarkHexZCode);
     g_markTexClaude = RMakeMaskTex(kMarkN, kMarkHexClaude);
+    g_markTexQwenWork = RMakeMaskTex(kMark2N, kMark2HexQwenWork);
+    g_markTexCodex = RMakeMaskTex(kMark2N, kMark2HexCodex);
 }
 static ImU64 MarkTex(const std::string& agent) {
     return agent == "qoder" ? g_markTexQoder
            : agent == "workbuddy" ? g_markTexWorkBuddy
            : agent == "zcode" ? g_markTexZCode
-           : agent == "claude" ? g_markTexClaude : 0;
+           : agent == "claude" ? g_markTexClaude
+           : agent == "qwenworkcn" ? g_markTexQwenWork
+           : agent == "codex" ? g_markTexCodex : 0;
 }
 /// 一枚剪影，居中画在 (cx,cy)；没有位图的那家退回同墨的首字母，不许画成别的形状。
 static void MarkGlyph(ImDrawList* dl, float cx, float cy, const std::string& agent,
