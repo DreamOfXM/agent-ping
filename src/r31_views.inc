@@ -754,6 +754,20 @@ static float R31LoopChip(ImDrawList* dl, float xr, float cy, const UIRow& r, int
     return tw + 14.0f;
 }
 
+/// N7 进程哨兵 chip「进程已死」：回合未收尾但该路 CLI 无同名进程＝事实（灰红，只标不响）。
+/// 与循环 chip 同款式但走灰：它说的是「这条路断了」，不是「它在空转烧钱」。
+static float R31DeadChip(ImDrawList* dl, float xr, float cy, const UIRow& r, int loc) {
+    if (!r.proc_dead) return 0.0f;
+    const std::string lab = T("r_procdie", loc);
+    const float tw = TextWidth(lab, loc, T_S9B);
+    const float x0 = xr - tw - 14.0f;
+    dl->AddRectFilled(ImVec2(x0, cy - 9.0f), ImVec2(xr, cy + 9.0f), IM_COL32(255, 176, 155, 22), 5.0f);
+    dl->AddRect(ImVec2(x0 + 0.5f, cy - 8.5f), ImVec2(xr - 0.5f, cy + 8.5f),
+                IM_COL32(255, 176, 155, 56), 5.0f, 0, 1.0f);
+    DrawTextRun(dl, x0 + 7.0f, TextMid(cy, T_S9B, loc), lab, loc, k31Muted, T_S9B);
+    return tw + 14.0f;
+}
+
 // ── 查询与筛选 ──────────────────────────────────────────────────────────────
 static bool R31Match(const UIRow& r, const std::string& q) {
     if (q.empty()) return true;
@@ -1453,8 +1467,11 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
         const std::string state = T(R31KindWord(kind), loc);
         const float launchX = inR - 12.0f;
         float sx = launchX - 6.0f - TextWidth(state, loc, T_S10);
-        // N1 循环 chip：挂在状态字左侧，环/图标与项目名裁剪都要让位，别压字。
-        const float loopW = R31LoopChip(dl, sx - 10.0f, y + 51.0f, r, loc);
+        // N1 循环 chip + N7 哨兵 chip：挂在状态字左侧，环/图标与项目名裁剪都要让位。
+        float chipW = R31LoopChip(dl, sx - 10.0f, y + 51.0f, r, loc);
+        if (chipW > 0.0f) chipW += 8.0f + R31DeadChip(dl, sx - 10.0f - chipW, y + 51.0f, r, loc);
+        else chipW = R31DeadChip(dl, sx - 10.0f, y + 51.0f, r, loc);
+        const float loopW = chipW;
         if (running) {
             R31Ring(dl, sx - 6.0f - 16.0f - loopW, y + 43.0f, tn);
         } else {
@@ -2794,6 +2811,55 @@ static float R31DetailBody(ImDrawList* dl, float x, float yTop, float w, int loc
     const float L = x + 22.0f, RW2 = w - 44.0f;
     const bool done = (R31KindOf(r) == 5);
     float cy = yTop + 20.0f;
+
+    // N6 任务接力模式：同一屏内切换（g_r31_relay 命中这一行的 key 时画简报，再点按钮回常规）。
+    // 简报只摘本机日志原文；「目标余量」块本轮不画——余量读数在用量屏，跨屏搬运容易过期，
+    // 不搬就不编（稿子的余量卡留待 PanelData 带上 quota 后再接）。
+    if (!g_r31_relay.empty() && g_r31_relay == r.key) {
+        DrawTextRun(dl, L, TextTop(cy, 28.0f, T_S23B, loc), T("r_relay", loc), loc, k31Fg, T_S23B);
+        cy += 34.0f;
+        cy = R31DrawWrap(dl, T("r_relay_hint", loc), L, cy, RW2, loc, T_S11, 18.7f, k31Muted, 2);
+        cy += 14.0f;
+        // 简报原文：逐行画（mono 语义的内容用 T_S11，密一点），行数多就撑高——body 自带滚动。
+        {
+            const float cardY = cy;
+            float iy = cardY;
+            std::vector<std::string> lines;
+            std::string cur;
+            for (char c : g_r31_relay_brief) {
+                if (c == '\n') { lines.push_back(cur); cur.clear(); }
+                else cur += c;
+            }
+            if (!cur.empty()) lines.push_back(cur);
+            const float cardH = 14.0f + (float)lines.size() * 17.6f + 12.0f;
+            R31Glass(dl, L, cardY, RW2, cardH, 10.0f);
+            iy = cardY + 14.0f;
+            for (const auto& ln : lines) {
+                if (!ln.empty())
+                    DrawTextRun(dl, L + 13.0f, TextTop(iy, 17.6f, T_S11, loc),
+                                ClipToWidth(ln, RW2 - 26.0f, loc, T_S11), loc, k31Sec, T_S11);
+                iy += 17.6f;
+            }
+            cy = cardY + cardH;
+        }
+        cy += 10.0f;
+        {   // 「复制接力简报」：原文装 title（沿用接线屏 HIT_COPYTEXT 的约定）
+            const float hov = TxPeekNew(Zid(loc, 2100, HIT_COPYTEXT, 0), 0.0f);
+            dl->AddRectFilled(ImVec2(L, cy), ImVec2(L + RW2, cy + 36.0f),
+                              hov > 0.01f ? MixA(k31Sel, k31Hover, hov) : k31Sel, 9.0f);
+            dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(L + RW2 - 0.5f, cy + 35.5f), k31Line, 9.0f, 0, 1.0f);
+            const std::string lab = T("r_relay_copy", loc);
+            const float tw3 = 13.0f + 7.0f + TextWidth(lab, loc, T_S12B);
+            const float cx3 = L + (RW2 - tw3) * 0.5f;
+            I31(dl, I31_COPY, cx3, cy + 11.5f, 13.0f, k31Fg);
+            DrawTextRun(dl, cx3 + 20.0f, TextMid(cy + 18.0f, T_S12B, loc), lab, loc, k31Fg, T_S12B);
+            AddHit(g_hits, L, cy, L + RW2, cy + 36.0f, HIT_COPYTEXT, 2100, 0, loc, lab, 0);
+            g_hits.back().title = g_r31_relay_brief;
+            cy += 46.0f;
+        }
+        cy = R31DrawWrap(dl, T("r_boundary", loc), L, cy, RW2, loc, T_S11, 18.7f, k31Muted, 2);
+        return cy + 8.0f;
+    }
     DrawTextRun(dl, L, TextMid(cy + 8.0f, T_S11B, loc),
                 done ? T("r_record", loc) : T("r_original", loc), loc, k31Muted, T_S11B);
     cy += 28.0f;
@@ -2842,6 +2908,105 @@ static float R31DetailBody(ImDrawList* dl, float x, float yTop, float w, int loc
         }
         cy -= 7.0f;        // 去掉末行的 gap 7（行间 gap 不作用在最后一行）
         pend = 18.0f;      // option-list 的 margin-bottom
+    }
+    // N2 循环证据卡：逐条摆原文（时刻 + 命令），只摆事实不写「它卡死了」这类判断句。
+    if (!r.loop_events.empty()) {
+        cy += std::fmax(pend, 18.0f);
+        DrawTextRun(dl, L, TextMid(cy + 8.0f, T_S11B, loc), T("r_loop_evd", loc), loc, k31Muted, T_S11B);
+        cy += 30.0f;
+        for (const auto& ev : r.loop_events) {
+            R31Glass(dl, L, cy, RW2, 26.0f, 8.0f);
+            int hh = 0, mm = 0;
+            RTimeOfDay(ev.first, &hh, &mm);
+            char tb[8];
+            snprintf(tb, sizeof tb, "%02d:%02d", hh, mm);
+            DrawTextRun(dl, L + 12.0f, TextMid(cy + 13.0f, T_S9, loc), tb, loc, k31Muted, T_S9);
+            DrawTextRun(dl, L + 58.0f, TextMid(cy + 13.0f, T_S11, loc),
+                        ClipToWidth(ev.second, RW2 - 70.0f, loc, T_S11), loc, k31Sec, T_S11);
+            cy += 31.0f;
+        }
+        const std::string same = RFmt(T("r_loop_same", loc), r.loop_count);
+        DrawTextRun(dl, L, TextMid(cy + 8.0f, T_S9, loc), same, loc, k31Faint, T_S9);
+        cy += 18.0f;
+        pend = 18.0f;
+    }
+    // N3 操作记录卡：改过的文件 + 最近命令（今日窗 tool_use 聚合，超格如实念「另有 N」）。
+    if (!r.op_files.empty() || !r.op_cmds.empty()) {
+        cy += std::fmax(pend, 18.0f);
+        DrawTextRun(dl, L, TextMid(cy + 8.0f, T_S11B, loc), T("r_ops", loc), loc, k31Muted, T_S11B);
+        cy += 30.0f;
+        const float cardH = 12.0f + (!r.op_files.empty() ? 17.0f + (float)r.op_files.size() * 16.8f +
+                                    (r.op_files_more > 0 ? 16.8f : 0.0f) : 0.0f) +
+                                   (!r.op_cmds.empty() ? 17.0f + (float)r.op_cmds.size() * 16.8f +
+                                    (r.op_cmds_more > 0 ? 16.8f : 0.0f) : 0.0f) + 10.0f;
+        R31Glass(dl, L, cy, RW2, cardH, 10.0f);
+        float iy = cy + 12.0f;
+        if (!r.op_files.empty()) {
+            const std::string fl = RFmt(T("r_ops_files", loc), (int)r.op_files.size());
+            DrawTextRun(dl, L + 13.0f, TextTop(iy, 16.8f, T_S9, loc), fl, loc, k31Muted, T_S9);
+            iy += 17.0f;
+            for (const auto& f : r.op_files) {
+                DrawTextRun(dl, L + 22.0f, TextTop(iy, 16.8f, T_S10, loc),
+                            ClipToWidth(f, RW2 - 36.0f, loc, T_S10), loc, k31Sec, T_S10);
+                iy += 16.8f;
+            }
+            if (r.op_files_more > 0) {
+                char mb[48];
+                snprintf(mb, sizeof mb, "+%d …", r.op_files_more);
+                DrawTextRun(dl, L + 22.0f, TextTop(iy, 16.8f, T_S9, loc), mb, loc, k31Faint, T_S9);
+                iy += 16.8f;
+            }
+        }
+        if (!r.op_cmds.empty()) {
+            const std::string cl = RFmt(T("r_ops_cmds", loc), (int)r.op_cmds.size());
+            DrawTextRun(dl, L + 13.0f, TextTop(iy, 16.8f, T_S9, loc), cl, loc, k31Muted, T_S9);
+            iy += 17.0f;
+            for (const auto& c : r.op_cmds) {
+                DrawTextRun(dl, L + 22.0f, TextTop(iy, 16.8f, T_S10, loc),
+                            ClipToWidth(c, RW2 - 36.0f, loc, T_S10), loc, k31Sec, T_S10);
+                iy += 16.8f;
+            }
+            if (r.op_cmds_more > 0) {
+                char mb[48];
+                snprintf(mb, sizeof mb, "+%d …", r.op_cmds_more);
+                DrawTextRun(dl, L + 22.0f, TextTop(iy, 16.8f, T_S9, loc), mb, loc, k31Faint, T_S9);
+                iy += 16.8f;
+            }
+        }
+        cy += cardH;
+        pend = 18.0f;
+    }
+    // N4/N6 入口：两张并排半宽卡——「任务接力」与「导出摘要 .md」。放在边界句之前。
+    {
+        cy += std::fmax(pend, 12.0f);
+        const float bw = (RW2 - 8.0f) * 0.5f;
+        const bool relayOn = (g_r31_relay == r.key);
+        {   // 任务接力
+            const float hov = TxPeekNew(Zid(loc, 2110, HIT_TASKRELAY, relayOn ? 1 : 0), 0.0f);
+            dl->AddRectFilled(ImVec2(L, cy), ImVec2(L + bw, cy + 34.0f),
+                              relayOn ? k31Sel : (hov > 0.01f ? MixA(k31Sel, k31Hover, hov) : k31Sel), 9.0f);
+            dl->AddRect(ImVec2(L + 0.5f, cy + 0.5f), ImVec2(L + bw - 0.5f, cy + 33.5f), k31Line, 9.0f, 0, 1.0f);
+            const std::string lab = T("r_relay", loc);
+            DrawTextRun(dl, L + (bw - TextWidth(lab, loc, T_S11)) * 0.5f,
+                        TextMid(cy + 17.0f, T_S11, loc), lab, loc, relayOn ? k31Blue : k31Sec, T_S11);
+            AddHit(g_hits, L, cy, L + bw, cy + 34.0f, HIT_TASKRELAY, 2110, relayOn ? 1 : 0, loc,
+                   lab, relayOn ? 1 : 0);
+            g_hits.back().key = r.key;
+        }
+        {   // 导出摘要
+            const float ex = L + bw + 8.0f;
+            const float hov = TxPeekNew(Zid(loc, 2111, HIT_EXPORTMD, 0), 0.0f);
+            dl->AddRectFilled(ImVec2(ex, cy), ImVec2(ex + bw, cy + 34.0f),
+                              hov > 0.01f ? MixA(k31Sel, k31Hover, hov) : k31Sel, 9.0f);
+            dl->AddRect(ImVec2(ex + 0.5f, cy + 0.5f), ImVec2(ex + bw - 0.5f, cy + 33.5f), k31Line, 9.0f, 0, 1.0f);
+            const std::string lab = T("r_export", loc);
+            DrawTextRun(dl, ex + (bw - TextWidth(lab, loc, T_S11)) * 0.5f,
+                        TextMid(cy + 17.0f, T_S11, loc), lab, loc, k31Sec, T_S11);
+            AddHit(g_hits, ex, cy, ex + bw, cy + 34.0f, HIT_EXPORTMD, 2111, 0, loc, lab, 0);
+            g_hits.back().key = r.key;
+        }
+        cy += 44.0f;
+        pend = 12.0f;
     }
     if (r.has_tokens || r.has_credits) {
         cy += pend;

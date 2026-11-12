@@ -6,6 +6,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -244,6 +247,10 @@ struct Raw {
     std::vector<std::pair<double, std::string>> tool_seq;
     int loop_count = 0;      // N1：尾部连续相同 tool_use 的条数（≥3 才非零）
     double loop_from = 0;    // N1：重复段第一条的时刻
+    /// N2：重复段逐条证据（与 loop_count 同一段）。N3：今日窗 tool_use 聚合。
+    std::vector<std::pair<double, std::string>> loop_events;
+    std::vector<std::string> op_files, op_cmds;
+    int op_files_more = 0, op_cmds_more = 0;
     long tokens = 0;
     double credits = 0;
     UsageParts usage;                  // 今天（或窗内）四档；tokens 与它同一口径
@@ -344,7 +351,12 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
         if (!v.empty()) {
             int n = 1;
             for (size_t i = v.size() - 1; i > 0 && v[i - 1].second == v.back().second; --i) ++n;
-            if (n >= 3) { r.loop_count = n; r.loop_from = v[v.size() - (size_t)n].first; }
+            if (n >= 3) {
+                r.loop_count = n;
+                r.loop_from = v[v.size() - (size_t)n].first;
+                // N2：这一段的逐条证据原样带走，详情屏只摆事实不下判断。
+                r.loop_events.assign(v.end() - n, v.end());
+            }
         }
     }
 
@@ -423,6 +435,43 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
         });
     }
 
+    // N3 操作记录（今日窗）：一趟 needle="tool_use" 的倒读回扫，聚「改过的文件」与「跑过的命令」。
+    // 只为详情屏与接力简报供料，判态不碰它。命令按首行、连续相同压成一条（循环段 12 条额度
+    // 不该被同一条命令吃光）；文件去重保序；超额如实计数，界面念「另有 N」。
+    {
+        std::set<std::string> fseen;
+        r.op_cmds.reserve(14);
+        scan_window(path, since, "\"tool_use\"", [&](const Json& rec, double) {
+            const Json* msg = rec.at("message");
+            const Json* content = msg ? msg->at("content") : nullptr;
+            if (!content || content->kind != Json::ARR) return;
+            for (const Json& blk : content->arr) {
+                const std::string* bt = blk.str_at("type");
+                if (!bt || *bt != "tool_use") continue;
+                const Json* in = blk.at("input");
+                if (!in) continue;
+                if (const std::string* f = in->str_at("file_path")) {
+                    if (!f->empty() && fseen.insert(*f).second) {
+                        if ((int)r.op_files.size() < 12) r.op_files.push_back(*f);
+                        else r.op_files_more++;
+                    }
+                }
+                if (const std::string* c = in->str_at("command")) {
+                    if (!c->empty()) {
+                        const std::string fl = first_line(*c);
+                        if (r.op_cmds.empty() || r.op_cmds.back() != fl) {
+                            r.op_cmds.push_back(fl);
+                            if ((int)r.op_cmds.size() > 12) {
+                                r.op_cmds.erase(r.op_cmds.begin());
+                                r.op_cmds_more++;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // 稿子 collect.py:156：以「最后一条记录所在的格」为右端，往前取 24 格，空格补 0。
     if (!r.slots.empty()) {
         long hi = r.slots.rbegin()->first;
@@ -497,6 +546,12 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
             s.last_cmd = r.last_cmd;
             s.loop_count = r.loop_count;
             s.loop_from = r.loop_from;
+            s.loop_events = r.loop_events;
+            s.op_files = r.op_files;
+            s.op_cmds = r.op_cmds;
+            s.op_files_more = r.op_files_more;
+            s.op_cmds_more = r.op_cmds_more;
+            s.first_prompt = r.prompt;
             s.queue_pos = (s.state == ST_QUEUED) ? r.queue_live : 0;
             s.tokens = r.last_ts >= since ? r.tokens : 0;
             s.credits = r.last_ts >= since ? r.credits : 0;
@@ -1999,9 +2054,10 @@ Snapshot scan_all(double now_epoch) {
         for (const Session& s : a.sessions)
             if (s.last_activity >= since) { snap.today_tokens += s.tokens; snap.today_credits += s.credits; }
     // 先盖 App 亲口报的运行状态，再让 hook 收件箱盖它：两家都是「它自己写的」，
-    // 但 hook 那条带问句原文与候选项，落点更具体。
+    // 但 hook 那条带问句原文与落点更具体。
     snap.live_landed = apply_qoder_live(snap, read_qoder_live(), now);
     apply_hook_signals(snap, now);
+    apply_proc_sentinel(snap);
     return snap;
 }
 
@@ -2047,11 +2103,11 @@ std::string snapshot_dump(const Snapshot& s) {
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
             snprintf(buf, sizeof buf,
-                     "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d loop=%d  %s%s%s%s",
+                     "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d loop=%d  %s%s%s%s%s",
                      state_name(x.state), utf8_clip(x.project, 14, "").c_str(), x.last_activity,
                      x.tokens, x.credits, x.turns, x.queue_pos, x.loop_count,
                      utf8_clip(x.title, 56, "…").c_str(),
-                     x.inferred_wait ? " (推断)" : "",
+                     x.inferred_wait ? " (推断)" : "", x.proc_dead ? " (进程已死)" : "",
                      x.question.empty() ? "" : "  ⟵", x.question.empty() ? "" : utf8_clip(x.question, 40, "…").c_str());
             out += buf;
             // 面板上那句问话底下还有候选项和「是哪个工具在问」，这两个数 + 等待起点 + 证据
@@ -2066,6 +2122,15 @@ std::string snapshot_dump(const Snapshot& s) {
                          x.await_src == QS_HOOK ? "hook" : x.await_src == QS_DB ? "db" : "log");
                 out += buf;
             }
+            // N1–N3 对账行：循环证据条数与今日操作聚合（详情屏/接力简报/导出的同一数据源）。
+            if (x.loop_count >= 3 || !x.op_files.empty() || !x.op_cmds.empty()) {
+                snprintf(buf, sizeof buf,
+                         "\n   [N1-N3] 循环证据 %zu 条·%s | 文件 %zu(+%d) | 命令 %zu(+%d) 最近:%s",
+                         x.loop_events.size(), x.loop_count >= 3 ? "成环" : "未成环",
+                         x.op_files.size(), x.op_files_more, x.op_cmds.size(), x.op_cmds_more,
+                         x.op_cmds.empty() ? "-" : utf8_clip(x.op_cmds.back(), 36, "…").c_str());
+                out += buf;
+            }
             out += "\n";
         }
     }
@@ -2073,5 +2138,56 @@ std::string snapshot_dump(const Snapshot& s) {
 }
 
 std::string hook_inbox_dir() { return hook_dir(); }
+
+// ── N7 进程哨兵 ─────────────────────────────────────────────────────────────
+// 只读进程名（comm）与 pid，不读 args/env/keychain——与「只读本机日志」同一档侵入性。
+// macOS 走 sysctl(KERN_PROC_ALL)；Linux 走 /proc/*/comm。
+// 覆盖披露（诚实边界）：claude/qoder 的 CLI 是 node 脚本，comm=node，进程名这一层认不出
+// 「这一路还有没有活 CLI」——所以本轮只对 comm 可辨的 codex 判；IDE 会话（一进程多会话）
+// 稿子本来就说不判。判据＝会话回合未收尾（ST_WORKING）且该路无同名进程＝事实；只标不响。
+namespace {
+std::set<std::string> live_proc_comms() {
+    std::set<std::string> out;
+#ifdef __APPLE__
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t len = 0;
+    if (sysctl(mib, 4, nullptr, &len, nullptr, 0) != 0 || len < sizeof(kinfo_proc)) return out;
+    std::vector<char> buf(len);
+    if (sysctl(mib, 4, buf.data(), &len, nullptr, 0) != 0) return out;
+    for (size_t off = 0; off + sizeof(kinfo_proc) <= len; off += sizeof(kinfo_proc)) {
+        const char* c = reinterpret_cast<const kinfo_proc*>(buf.data() + off)->kp_proc.p_comm;
+        if (c && *c) out.insert(c);
+    }
+#else
+    DIR* d = opendir("/proc");
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) {
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        std::string p = std::string("/proc/") + e->d_name + "/comm";
+        std::ifstream f(p);
+        std::string line;
+        if (std::getline(f, line)) {
+            while (!line.empty() && (line.back() == '\n' || line.back() == ' ')) line.pop_back();
+            if (!line.empty()) out.insert(line);
+        }
+    }
+    closedir(d);
+#endif
+    return out;
+}
+}  // namespace
+
+void apply_proc_sentinel(Snapshot& snap) {
+    static std::set<std::string> cached;
+    static double cached_at = -60;
+    // 进程表 3 秒扫一次没意义（进程起落没那么快），30 秒足够新鲜且省一遍 sysctl。
+    if (snap.scanned_at - cached_at >= 30) { cached = live_proc_comms(); cached_at = snap.scanned_at; }
+    for (auto& a : snap.agents) {
+        if (a.id != "codex") continue;          // comm 可辨的路才判（见上）
+        if (cached.count("codex") > 0) continue;
+        for (auto& s : a.sessions)
+            if (s.state == ST_WORKING) s.proc_dead = true;
+    }
+}
 
 }  // namespace ap

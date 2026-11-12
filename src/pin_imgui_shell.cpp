@@ -1123,6 +1123,32 @@ static const Key kStr[] = {
     // N1 循环证据 chip：日志尾部 ≥3 条相同 tool_use 原文（事实，非推断）。六语都一行以内。
     {"r_loop",         {"循环 ×%d", "loop ×%d", "Schleife ×%d", "ciclo ×%d",
                         "ループ ×%d", "반복 ×%d"}},
+    // v3 第一批 · 详情屏与哨兵。逐条只摆证据不下判断，与稿子同一口径。
+    {"r_loop_evd",     {"循环证据", "Loop evidence", "Schleifen-Belege", "Evidenza ciclo",
+                        "ループ証拠", "반복 증거"}},
+    {"r_loop_same",    {"同一命令连续 %d 次", "same command %d times in a row",
+                        "derselbe Befehl %d× hintereinander", "stesso comando %d volte di fila",
+                        "同一コマンドが連続 %d 回", "같은 명령 %d회 연속"}},
+    {"r_ops",          {"操作记录（今日）", "Actions (today)", "Aktionen (heute)",
+                        "Azioni (oggi)", "操作記録（今日）", "작업 기록 (오늘)"}},
+    {"r_ops_files",    {"改过的文件 · %d", "files touched · %d", "Dateien · %d",
+                        "file modificati · %d", "編集ファイル · %d", "수정한 파일 · %d"}},
+    {"r_ops_cmds",     {"命令 · %d 条，最近一条", "commands · %d, latest", "Befehle · %d, letzte",
+                        "comandi · %d, ultimo", "コマンド · %d 件・直近", "명령 · %d건, 최근"}},
+    {"r_relay",        {"任务接力", "Task relay", "Aufgabenübergabe", "Passaggio di consegne",
+                        "タスク引継ぎ", "작업 인계"}},
+    {"r_relay_hint",   {"换个工具不断任务：简报只摘本机日志原文，粘贴进目标工具即可。",
+                        "Switch tools without losing the task: the brief only quotes local logs.",
+                        "Werkzeug wechseln ohne Aufgabenverlust: nur Zitate aus lokalen Logs.",
+                        "Cambia strumento senza perdere il compito: solo citazioni dai log locali.",
+                        "ツールを変えてもタスクは続く：簡報はローカルログ原文のみ。",
+                        "도구를 바꿔도 작업은 이어진다: 요약은 로컬 로그 원문뿐."}},
+    {"r_relay_copy",   {"复制接力简报", "Copy relay brief", "Übergabe kopieren",
+                        "Copia brief", "引継ぎメモをコピー", "인계 요약 복사"}},
+    {"r_export",       {"导出摘要 .md", "Export summary .md", "Zusammenfassung als .md",
+                        "Esporta .md", "概要を .md 書き出し", "요약 .md 내보내기"}},
+    {"r_procdie",      {"进程已死", "process gone", "Prozess weg", "processo assente",
+                        "プロセス終了", "프로세스 없음"}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
     // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
     // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
@@ -1743,6 +1769,15 @@ struct UIRow {
     int loop_count = 0;
     /// 重复段起点时刻，0＝没有。与 at 相减即「重复了多久」。
     double loop_from = 0;
+    /// N2 循环证据逐条 (时刻, 命令原文)：详情屏「循环证据」卡的直接输入。
+    std::vector<std::pair<double, std::string>> loop_events;
+    /// N3 操作记录（今日）：详情屏「操作记录」卡与 N6 接力简报共用的一条管道。
+    std::vector<std::string> op_files, op_cmds;
+    int op_files_more = 0, op_cmds_more = 0;
+    /// 首条 user 指令（接力简报的「任务」行）。
+    std::string first_prompt;
+    /// N7 进程哨兵：回合未收尾但该路 CLI 无同名进程。灰 chip，只标不响。
+    bool proc_dead = false;
     /// 授权详情「触发说明」：hook 原文；空＝退回「工具」那一行。
     std::string trigger;
     /// 这一行的「等你」证据出自哪条通道（ap::AwaitSrc）：详情屏「来源」那一格按它选措辞。
@@ -1863,6 +1898,8 @@ static bool g_r31_explain = false;         // 运行卡「今日最长」的说�
 static std::vector<int> g_r31_trail;       // 返回栈：来时的 view
 static int g_r31_detail_kind = 0;          // 1＝问答 2＝授权 3＝已完成
 static std::string g_r31_detail_key;       // 详情屏那一行的 key（活数据按 key 重取）
+static std::string g_r31_relay;            // 详情屏「任务接力」模式看哪一行（key）；空＝常规详情
+static std::string g_r31_relay_brief;      // 接力简报原文（屏上预览/复制/导出共用这一份）
 static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
 static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
 static int g_r31_hist_n = 12;               // 完成记录已加载到第几条（懒加载页大小 12）
@@ -2390,7 +2427,10 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               // HIT_CLAIMREFRESH 权益屏表头那颗「刷新」：立刻重读三家落盘读数
               // HIT_CLAIMCARD 权益卡整张：把这家的 App 唤到前台（领取仍归他自己点）
               HIT_AXGO = 40, HIT_BANNER = 41, HIT_BANNERCLOSE = 42, HIT_CLAIMREFRESH = 43,
-              HIT_CLAIMCARD = 44 };
+              HIT_CLAIMCARD = 44,
+              // v3 第一批：详情屏「导出摘要 .md」（用户触发的唯一新写盘面）与「任务接力」
+              //（详情屏内切到接力简报模式，再点一次返回常规详情）。
+              HIT_EXPORTMD = 45, HIT_TASKRELAY = 46 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
@@ -2946,6 +2986,8 @@ static const char* ActName(int act) {
         case HIT_BANNERCLOSE: return "横幅·关掉";
         case HIT_CLAIMREFRESH: return "权益·刷新";
         case HIT_CLAIMCARD:    return "权益·卡";
+        case HIT_EXPORTMD:     return "导出摘要";
+        case HIT_TASKRELAY:    return "任务接力";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -3313,6 +3355,75 @@ static void MarkRow(const Hit& h, bool ack, bool later) {
 static void RefreshHooks(bool force);
 static std::string TildePath(const std::string& p);
 
+// ── v3 第一批 · N4/N6：接力简报与导出 ────────────────────────────────────────
+// 简报只摘本机日志的原文（首条指令/文件/命令/未答问题/用量），不总结不编造不联网。
+// 导出是本功能唯一的新写盘面：用户点按钮才写 ~/Desktop 一个新 .md。
+static const UIRow* RowByKey(const std::string& key) {
+    for (const auto& r : g_pd.rows)
+        if (r.key == key) return &r;
+    return nullptr;
+}
+static std::string RelayBriefOf(const UIRow& r, int loc) {
+    char line[512];
+    std::string out;
+    out += "任务：";
+    out += r.first_prompt.empty() ? r.title : r.first_prompt;
+    out += "\n";
+    if (!r.op_files.empty()) {
+        snprintf(line, sizeof line, "改过的文件 · %zu：\n", r.op_files.size());
+        out += line;
+        for (const auto& f : r.op_files) { out += "  " + f + "\n"; }
+        if (r.op_files_more > 0) {
+            snprintf(line, sizeof line, "  …另有 %d 个\n", r.op_files_more);
+            out += line;
+        }
+    }
+    if (!r.op_cmds.empty()) {
+        snprintf(line, sizeof line, "最近命令 · %zu 条：\n", r.op_cmds.size());
+        out += line;
+        for (const auto& c : r.op_cmds) { out += "  " + c + "\n"; }
+        if (r.op_cmds_more > 0) {
+            snprintf(line, sizeof line, "  …另有 %d 条\n", r.op_cmds_more);
+            out += line;
+        }
+    }
+    if (r.loop_count >= 3) {
+        snprintf(line, sizeof line, "循环证据：同一命令连续 %d 次\n", r.loop_count);
+        out += line;
+    }
+    if (!r.question.empty()) out += "未答问题：" + r.question + "\n";
+    snprintf(line, sizeof line, "已花：%ld tokens%s\n", r.tokens,
+             r.has_credits ? "" : "");
+    out += line;
+    if (r.has_credits) {
+        snprintf(line, sizeof line, "Credits：%.2f\n", r.credits);
+        out += line;
+    }
+    (void)loc;
+    return out;
+}
+
+static std::string ExportMdOf(const UIRow& r, int loc) {
+    std::time_t t = std::time(nullptr);
+    std::tm tv;
+    localtime_r(&t, &tv);
+    char stamp[32], fname[256];
+    strftime(stamp, sizeof stamp, "%m%d-%H%M", &tv);
+    std::string proj = r.project.empty() ? "session" : r.project;
+    for (char& c : proj) if (c == '/' || c == ' ') c = '-';
+    snprintf(fname, sizeof fname, "%s/Desktop/AgentPing-摘要-%s-%s.md",
+             getenv("HOME") ? getenv("HOME") : ".", proj.c_str(), stamp);
+    std::ofstream f(fname);
+    if (!f) return "";
+    f << "# Agent Ping · 会话摘要\n\n"
+      << "- 项目：" << r.project << "\n"
+      << "- 标题：" << r.title << "\n\n"
+      << "## 接力简报\n```\n" << RelayBriefOf(r, loc) << "```\n\n"
+      << "> 由 Agent Ping 导出；全部为本机日志原文摘录，无网络请求。\n";
+    f.close();
+    return fname;
+}
+
 static void DoAction(const Hit& h, const ImVec2& at) {
     std::string where = std::string(ActName(h.act)) + " · " + h.key +
                         " @ (" + std::to_string((int)at.x) + "," + std::to_string((int)at.y) + ")" +
@@ -3384,6 +3495,22 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             if (!h.title.empty()) ImGui::SetClipboardText(h.title.c_str());
             const int loc = LocOfZid(h.zid);
             Toast(T("setup_copied", loc), T("setup_copied_sub", loc));
+            return;
+        }
+        case HIT_EXPORTMD: {                  // N4：导出摘要 .md——用户触发，唯一新写盘面
+            const int loc = LocOfZid(h.zid);
+            const UIRow* r = RowByKey(h.key);
+            const std::string path = r ? ExportMdOf(*r, loc) : std::string();
+            if (!path.empty()) Toast(T("r_export", loc), TildePath(path));
+            else Toast(T("r_export", loc), "✗");
+            return;
+        }
+        case HIT_TASKRELAY: {                 // N6：详情屏内切「任务接力」简报模式（再点返回）
+            if (g_r31_relay == h.key) g_r31_relay.clear();
+            else {
+                g_r31_relay = h.key;
+                if (const UIRow* r = RowByKey(h.key)) g_r31_relay_brief = RelayBriefOf(*r, LocOfZid(h.zid));
+            }
             return;
         }
         case HIT_HOOKINST: {                    // 接线屏那颗「写入 / 重写」：真改本机配置
@@ -5249,6 +5376,13 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.last_cmd = se.last_cmd;
             row.loop_count = se.loop_count;
             row.loop_from = se.loop_from;
+            row.loop_events = se.loop_events;
+            row.op_files = se.op_files;
+            row.op_cmds = se.op_cmds;
+            row.op_files_more = se.op_files_more;
+            row.op_cmds_more = se.op_cmds_more;
+            row.first_prompt = se.first_prompt;
+            row.proc_dead = se.proc_dead;
             row.trigger = se.trigger;
             row.tokens = se.tokens;
             row.credits = se.credits;
@@ -6944,6 +7078,14 @@ static void LoadProbeFixture() {
     live->last_cmd = "rg -n \"safe-delete\" src/"; // .live 的 `$ cmd`
     live->loop_count = 6;                          // N1：样例循环证据（chip 演示用）
     live->loop_from = now - 32 * 60.0;             // 重复了约 32 分钟
+    // N2/N3 样例：详情屏「循环证据」「操作记录」卡与接力简报的数据源。
+    live->loop_events = {
+        {at(22, 41), "pytest -x tests/auth_test.py"}, {at(22, 47), "pytest -x tests/auth_test.py"},
+        {at(22, 53), "pytest -x tests/auth_test.py"}, {at(22, 59), "pytest -x tests/auth_test.py"},
+        {at(23, 05), "pytest -x tests/auth_test.py"}, {at(23, 35), "pytest -x tests/auth_test.py"}};
+    live->op_files = {"src/auth/token.ts", "src/auth/refresh.ts", "tests/auth_test.ts"};
+    live->op_cmds = {"npm run build", "pytest -x tests/auth_test.py"};
+    live->first_prompt = "把 CSV 导入的记账流程补上测试";
     live->children = {                             // 任务下挂着的子代理对话（展开用样例）
         {"c-a1", "你是调研员。收集三款同类产品的定价页与收费方式。", true, now - 300},
         {"c-a2", "你是 UI 调研员。只读它们的设置屏，列出可借鉴的三处。", false, now - 4320},
@@ -8352,6 +8494,11 @@ int main(int argc, char** argv) {
                 g_sel_key = r.key;
                 g_sel_copy = r;
                 g_sel_kind = (r.state == ap::ST_RESTING) ? 3 : (RowAsksQuestion(r) ? 1 : 2);
+                // N6 探针：连详情带「接力简报模式」一起钉住，真窗口里靠点「任务接力」。
+                if (getenv("AGENTPING_RELAY")) {
+                    g_r31_relay = r.key;
+                    g_r31_relay_brief = RelayBriefOf(r, 0);
+                }
                 break;
             }
         }

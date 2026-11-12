@@ -123,6 +123,17 @@ struct Session {
     int loop_count = 0;
     /// 重复段第一条的时刻；0＝没有循环。与 last_activity 相减即「重复了多久」。
     double loop_from = 0;
+    /// N2 循环证据逐条 (时刻, 命令原文)，与 loop_count 同一段切出来的。空＝没有。
+    std::vector<std::pair<double, std::string>> loop_events;
+    /// N3 操作记录（今日窗，tool_use 聚合）：改过的文件去重保序；命令留最后 12 条首行
+    /// （连续相同压成一条）。*_more＝超出上限被截断的条数，界面要如实念「另有 N」。
+    std::vector<std::string> op_files, op_cmds;
+    int op_files_more = 0, op_cmds_more = 0;
+    /// 首条 user 指令原文（接力简报的「任务」行）。空＝这一路没给。
+    std::string first_prompt;
+    /// N7 进程哨兵：回合未收尾（ST_WORKING）但这一路 CLI 已无同名进程＝事实。只标不响。
+    /// 只对 comm 可辨的路判（本轮＝codex）；node 系 CLI 的 comm 是 node，认不出，不判。
+    bool proc_dead = false;
     /// hook 信号自带的触发说明（Notification 的 message）。只有 hook 真给了才非空：
     /// 授权详情用它顶替「工具」那一行，日志推出来的推断不许编一句说明。
     std::string trigger;
@@ -202,5 +213,9 @@ std::string snapshot_dump(const Snapshot& s);
 /// 三个计数写回 snap（live / landed / dropped）；落不上的会往 stderr 写一行原因。
 /// 口径逐条对齐 Swift 侧 HookInbox.swift。
 void apply_hook_signals(Snapshot& snap, double now);
+
+/// N7 进程哨兵：回合未收尾但这一路 CLI 已无同名进程（只读 comm/pid）→ Session.proc_dead。
+/// 只对 comm 可辨的路判（本轮 codex）；只标不响。
+void apply_proc_sentinel(Snapshot& snap);
 
 }  // namespace ap
