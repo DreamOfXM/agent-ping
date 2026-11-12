@@ -27,14 +27,18 @@ struct Target {
     const char* deep_prefix;  // 空串＝这个 App 不认领 deep link
 };
 
-// 键＝采集器 id（与 scan.cpp 里 snap.id 同一套：qoder/claude/codex/zcode/workbuddy）
-const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy"};
+// 键＝采集器 id（与 scan.cpp 里 snap.id 同一套：qoder/claude/codex/zcode/workbuddy/opencode）
+const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencode"};
 const Target kTargets[] = {
     {"/Applications/Qoder.app",     ".qoder/projects",   ""},
     {"",                            ".claude/projects",  ""},
     {"",                            ".codex/sessions",   ""},
     {"/Applications/ZCode.app",     ".zcode/cli/db",     ""},
     {"/Applications/WorkBuddy.app", ".workbuddy/projects", "workbuddy://chat/"},
+    // opencode：App 认领 opencode:// scheme，但可用的 URL path 未探明（不猜路径）；
+    // CLI 侧 `opencode --session <id> <dir>` 能续会话，但那要在宿主终端里开 TUI，
+    // 与「唤起客户端」不是一个重量级——先按「唤起 App」一档接住，别让点击落空。
+    {"/Applications/OpenCode.app",  ".local/share/opencode", ""},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 
