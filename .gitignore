@@ -26,3 +26,4 @@ assets/AppIcon.iconset/
 # 只对作者本机有意义的取证脚本：它们引用仓库之外的稿子目录
 Tools/compose_side.py
 Tools/render_draft_tall.py
+local/
