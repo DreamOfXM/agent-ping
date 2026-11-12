@@ -900,8 +900,11 @@ static BOOL RunInTerminal(NSString *cmdBody) {
     fclose(f);
     chmod(pathp, 0755);
     NSString *path = [NSString stringWithUTF8String:pathp];
+    // delay 0.4：create window 返回时 session 可能还没就绪，立刻 write text 会被吞
+    //（2026-11-12 实拍：新窗口空白、claude 没起）。等就绪再写。
     NSString *it = [NSString stringWithFormat:
         @"tell application \"iTerm2\"\nactivate\ncreate window with default profile\n"
+         "delay 0.4\n"
          "tell current session of current window to write text \"sh %@\"\nend tell", path];
     if (RunOSC(it, 3.0)) return YES;
     NSString *te = [NSString stringWithFormat:
@@ -949,27 +952,33 @@ extern "C" int ap_wake_cli_term(char* reason, int out_len) {
 // 返回 YES 且 ttyOut 带上（如 ttys003）。
 
 // 按 tty 在 iTerm2（先）→ Terminal 里定位标签/会话并选中切过去。
-// 按标签名选中：tab 级遍历实测 9ms 安全；「sessions of T」遍历在本机必挂（>20s，
-// 2026-11-12 实测两次），任何定位代码都不许再碰 sessions 树。tty 匹配需要 session 级
-// 信息，这条路彻底放弃——tab 标题默认就是跑着的进程名（claude/pi），按它匹配足够。
-static BOOL SelectTabByName(NSString *needle) {
-    NSString *it = [NSString stringWithFormat:
-        @"tell application \"iTerm2\"\nactivate\n"
-         "repeat with W in windows\n repeat with T in tabs of W\n"
-         "if ((name of T) contains \"%@\") or ((name of T) contains \"%@\") then\n"
-         " tell T to select\n select W\n return \"selected\"\n end if\n"
-         "end repeat\n end repeat\n return \"nomatch\"\nend tell", needle, needle];
-    BOOL ok = NO;
-    NSString *o = RunOSOut(it, 3.0, &ok);
-    if (ok && [o containsString:@"selected"]) return YES;
-    NSString *te = [NSString stringWithFormat:
-        @"tell application \"Terminal\"\nactivate\n"
-         "repeat with W in windows\n repeat with T in tabs of W\n"
-         "if ((name of T) contains \"%@\") then\n set current tab of W to T\n"
-         "set frontmost of W to true\n return \"selected\"\n end if\n"
-         "end repeat\n end repeat\n return \"nomatch\"\nend tell", needle];
-    o = RunOSOut(te, 3.0, &ok);
-    return ok && [o containsString:@"selected"];
+// 按窗口名选中：本机 iTerm2 的 tab「name」全部非文本（-1700，实测三枚全炸），而
+// 窗口名可用（~/Desktop / OC / Greeting，窗口即标签形态）。多 needle 逐个试：
+// 会话目录末级名 → cli 名（claude/pi）→（claude 加 "Claude"）。name 读取带 try，
+// 一条坏名字不再炸整轮遍历。
+static BOOL SelectWindowByNeedles(NSArray<NSString*> *needles) {
+    for (NSString *nd in needles) {
+        if (nd.length == 0) continue;
+        NSString *low = [nd lowercaseString];
+        NSString *sc = [NSString stringWithFormat:
+            @"set out to \"nomatch\"\n"
+             "tell application \"iTerm2\"\n"
+             "repeat with W in windows\n"
+             "try\n"
+             "set nm to ((name of W) as text)\n"
+             "on error\n"
+             "set nm to \"\"\n end try\n"
+             "if (nm as lowercaseString) contains \"%@\" then\n"
+             "select W\n set out to \"selected\"\n exit repeat\n end if\n"
+             "end repeat\n"
+             "end tell\n"
+             "activate application \"iTerm2\"\n"
+             "return out", low];
+        BOOL ok = NO;
+        NSString *o = RunOSOut(sc, 3.0, &ok);
+        if (ok && [o containsString:@"selected"]) return YES;
+    }
+    return NO;
 }
 
 extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_id,
@@ -978,19 +987,19 @@ extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_i
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
     NSString *fmt = @(t->cli_fmt);
     NSString *cli = [[fmt componentsSeparatedByString:@" "] firstObject] ?: @"";
-    // 标签名匹配（tab 级安全；needle 优先 cwd 末级——标签名常带目录名，其次 cli 名）。
-    NSString *needle = cli;
+    NSMutableArray<NSString*> *ns = [NSMutableArray array];
     if (cwd && *cwd) {
         const char *slash = strrchr(cwd, '/');
-        if (slash && slash[1]) needle = [NSString stringWithUTF8String:slash + 1];
+        if (slash && slash[1]) [ns addObject:[NSString stringWithUTF8String:slash + 1]];
     }
-    if (SelectTabByName(needle)) {
-        Say(reason, out_len, [NSString stringWithFormat:
-            @"已切到跑着这条会话的标签（匹配「%@」）", needle]);
+    [ns addObject:cli];
+    if ([cli isEqualToString:@"claude"]) [ns addObject:@"Claude"];
+    if (SelectWindowByNeedles(ns)) {
+        Say(reason, out_len, @"已切到跑着这条会话的终端窗口");
         if (layer) *layer = 5;
         return 0;
     }
-    Say(reason, out_len, @"没有找到跑着这条会话的标签");
+    Say(reason, out_len, @"没有找到跑着这条会话的终端窗口，将新开一个续上");
     if (layer) *layer = 6;
     return 1;
 }
