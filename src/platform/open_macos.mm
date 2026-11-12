@@ -900,13 +900,16 @@ static BOOL RunInTerminal(NSString *cmdBody) {
     fclose(f);
     chmod(pathp, 0755);
     NSString *path = [NSString stringWithUTF8String:pathp];
-    // delay 0.4：create window 返回时 session 可能还没就绪，立刻 write text 会被吞
-    //（2026-11-12 实拍：新窗口空白、claude 没起）。等就绪再写。
+    // 规范写法（2026-11-22 逐式实测）：拿住 create window 的引用，对
+    // first session of first tab 写命令——current session of current window 有竞态
+    // （命令被吞，空白窗实拍两次）；first session of W 直取报 -1728。此式已用
+    // touch 标记文件法验证命令真被执行。
     NSString *it = [NSString stringWithFormat:
-        @"tell application \"iTerm2\"\nactivate\ncreate window with default profile\n"
-         "delay 0.4\n"
-         "tell current session of current window to write text \"sh %@\"\nend tell", path];
-    if (RunOSC(it, 3.0)) return YES;
+        @"tell application \"iTerm2\"\nactivate\n"
+         "set W to create window with default profile\n"
+         "delay 0.5\n"
+         "tell first session of first tab of W to write text \"sh %@\"\nend tell", path];
+    if (RunOSC(it, 4.0)) return YES;
     NSString *te = [NSString stringWithFormat:
         @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", path];
     return RunOSA(te);
