@@ -832,7 +832,25 @@ static NSString *EscAS(NSString *s) {
     return [s stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
             ?: @"";
 }
-static BOOL RunOSA(NSString *src) {
+// osascript 子进程 + 超时杀掉：iTerm2 的自动化在授权框没人点/接口卡住时会永久挂起，
+// NSAppleScript 同步跑会把调用线程一起拖死（2026-11-12 实拍）。osascript 走独立进程，
+// 超时即 terminate 退下一级；首次会弹一次 TCC 授权框，点一次允许就永久生效。
+static BOOL RunOSC(NSString *src, NSTimeInterval secs) {
+    @try {
+        NSTask *t = [[NSTask alloc] init];
+        t.launchPath = @"/usr/bin/osascript";
+        t.arguments = @[ @"-e", src ];
+        t.standardOutput = [NSPipe pipe];
+        t.standardError = [NSPipe pipe];
+        [t launch];
+        NSDate *dl = [NSDate dateWithTimeIntervalSinceNow:secs];
+        while ([t isRunning] && [dl timeIntervalSinceNow] > 0)
+            [NSThread sleepForTimeInterval:0.05];
+        if ([t isRunning]) { [t terminate]; return NO; }
+        return t.terminationStatus == 0;
+    } @catch (...) { return NO; }
+}
+static BOOL RunOSA(NSString *src) {   // 可靠通路（Terminal.app）保留同步版
     @try {
         NSAppleScript *as = [[NSAppleScript alloc] initWithSource:src];
         NSDictionary *err = nil;
@@ -851,12 +869,14 @@ static NSString *ShQ(NSString *s) {
 // 内插进 do script，uuid 被打烂成 I'⁺^A 卡在 zsh 续行提示上，实拍）。
 // iTerm2 永远优先（在跑或装了都试，activate 顺手拉起），它的 AS 报错才退 Terminal。
 static BOOL RunInTerminal(NSString *scriptPath) {
+    // iTerm2 优先：osascript 子进程 + 3s 超时（首次会弹 TCC 授权，点了永久生效；
+    // 卡住/被拒都不拖死面板，退可靠的 Terminal.do script）
     NSString *itTab = [NSString stringWithFormat:
         @"tell application \"iTerm2\"\nactivate\n"
          "if (count of windows) = 0 then\n create window with default profile\n"
          "else\n tell current window to create tab with default profile\n end if\n"
          "tell current session of current window to write text \"sh %@\"\nend tell", scriptPath];
-    if (RunOSA(itTab)) return YES;
+    if (RunOSC(itTab, 3.0)) return YES;
     NSString *teScr = [NSString stringWithFormat:
         @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", scriptPath];
     return RunOSA(teScr);
@@ -958,13 +978,13 @@ static BOOL SelectTabByTTY(NSString *tty) {
          "if tty of S is \"%@\" then\n tell T to select\n"
          "tell S to select\n return \"selected\"\n end if\n"
          "end repeat\n end repeat\n end repeat\n end tell", tty];
-    if (RunOSA(it)) return YES;
+    if (RunOSC(it, 3.0)) return YES;
     NSString *te = [NSString stringWithFormat:
         @"tell application \"Terminal\"\nactivate\n"
          "repeat with W in windows\n repeat with T in tabs of W\n"
          "if tty of T is \"%@\" then\n set current tab of W to T\n"
          "return \"selected\"\n end if\n end repeat\n end repeat\nend tell", tty];
-    return RunOSA(te);
+    return RunOSC(te, 4.0);
 }
 
 extern "C" int ap_locate_cli_session(const char* agent_id, const char* session_id,
