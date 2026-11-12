@@ -17,7 +17,7 @@
 static const ImU32 k31Fg       = IM_COL32(240, 242, 247, 255);  // --fg #F0F2F7
 static const ImU32 k31Sec      = IM_COL32(192, 198, 208, 255);  // --secondary #C0C6D0
 static const ImU32 k31Muted    = IM_COL32(186, 193, 205, 255);  // --muted 提亮一档（#A8B1BF→#BAC1CD）：灰字发虚一半是对比度
-static const ImU32 k31Faint    = IM_COL32(137, 149, 164, 255);  // --faint #8995A4
+static const ImU32 k31Faint    = IM_COL32(176, 186, 200, 255);  // --faint 提亮（#8995A4→#B0BAC8）：小字太浅看不清（2026-11-12）
 static const ImU32 k31Hover    = IM_COL32(235, 243, 255, 20);   // --hover 8%
 static const ImU32 k31Sel      = IM_COL32(216, 230, 255, 27);   // --selected 10.5%
 static const ImU32 k31Line     = IM_COL32(213, 229, 249, 32);   // --line 12.5%

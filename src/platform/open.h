@@ -36,6 +36,17 @@ int ap_open3(const char* agent_id, const char* session_id, const char* cwd, char
    读的是 ap_open3 同一张落点表，两处不许各判各的。 */
 int ap_has_client(const char* agent_id);
 
+/* 纯 CLI（claude/pi 这类）的会话级落点：在 iTerm2（优先，装了就算在跑不在跑都认）
+   或 Terminal.app 里新开窗口跑 resume 命令（cd 到会话目录再续那一条）。
+   layer 回填 4；reason 写明走的是哪个终端。返回 0 开成了 / 1 两个终端都没开成。 */
+int ap_open_cli_resume(const char* agent_id, const char* session_id, const char* cwd,
+                       char* reason, int out_len, int* layer);
+
+/* 活着的终端切到前台：iTerm2 在跑切 iTerm2，否则 Terminal 在跑切 Terminal，
+   都没在跑返回 1（调用方退 ap_open_cli_resume 新开）。用于「这条会话正在终端里跑，
+   别给我新开一个，切过去就行」的场合。 */
+int ap_wake_cli_term(char* reason, int out_len);
+
 /* ZCode 专用：会话级落点。ZCode 没有会话级 URL（10-29 在 app.asar 里逐条核过，
    只认领 oauth/callback 与 workspace/open?path=），能落到「那一条对话」的只有它自己的界面：
    ① 先读侧栏「任务列表」的行（Chromium 要先置 AXManualAccessibility 才建这棵树），

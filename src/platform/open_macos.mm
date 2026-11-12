@@ -25,24 +25,24 @@ struct Target {
     const char* app_rel;      // 空串＝本机没有 .app（纯 CLI）
     const char* log_rel;      // 会话记录目录，兜底落点
     const char* deep_prefix;  // 空串＝这个 App 不认领 deep link
+    const char* cli_fmt;      // 纯 CLI 的会话级 resume 命令（%s＝会话 id）；
+                              // 空＝没有（这类落点＝终端新窗口跑命令，见 ap_open3 ⓪）
 };
 
 // 键＝采集器 id（与 scan.cpp 里 snap.id 同一套：qoder/claude/codex/zcode/workbuddy/opencode）
 const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencode", "pi",
                        "qwenworkcn"};
+// cli_fmt：纯 CLI 的会话级 resume 命令。只有旗标在本机核实过的才写
+//（claude --resume 实测、pi --session 实测；codex 的 resume 旗标没核实，不猜，落 ③）。
 const Target kTargets[] = {
-    {"/Applications/Qoder.app",     ".qoder/projects",   ""},
-    {"",                            ".claude/projects",  ""},
-    {"",                            ".codex/sessions",   ""},
-    {"/Applications/ZCode.app",     ".zcode/cli/db",     ""},
-    {"/Applications/WorkBuddy.app", ".workbuddy/projects", "workbuddy://chat/"},
-    // opencode：App 认领 opencode:// scheme，但可用的 URL path 未探明（不猜路径）；
-    // CLI 侧 `opencode --session <id> <dir>` 能续会话，但那要在宿主终端里开 TUI，
-    // 与「唤起客户端」不是一个重量级——先按「唤起 App」一档接住，别让点击落空。
-    {"/Applications/OpenCode.app",  ".local/share/opencode", ""},
-    // pi 是纯 CLI：没有 .app，落点走 ③（记录目录），会话级由 JumpTo 的 resume 复制接住
-    {"",                            ".pi/agent/sessions", ""},
-    {"/Applications/QwenWorkCN.app", ".qwenworkcn/projects", ""},
+    {"/Applications/Qoder.app",     ".qoder/projects",   "", ""},
+    {"",                            ".claude/projects",  "", "claude --resume %s"},
+    {"",                            ".codex/sessions",   "", ""},
+    {"/Applications/ZCode.app",     ".zcode/cli/db",     "", ""},
+    {"/Applications/WorkBuddy.app", ".workbuddy/projects", "workbuddy://chat/", ""},
+    {"/Applications/OpenCode.app",  ".local/share/opencode", "", ""},
+    {"",                            ".pi/agent/sessions", "", "pi --session %s"},
+    {"/Applications/QwenWorkCN.app", ".qwenworkcn/projects", "", ""},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 
@@ -824,6 +824,77 @@ extern "C" int ap_open2(const char* agent_id, const char* session_id, const char
     return ap_open3(agent_id, session_id, cwd, reason, out_len, nullptr);
 }
 
+// ── 纯 CLI 的终端托管（2026-11-12）：iTerm2 优先、Terminal 兜底 ──────────────
+// AppleScript 字符串转义（\ 与 "），命令体里的单引号由 ShQ 负责。
+static NSString *EscAS(NSString *s) {
+    return [s stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+            ?: @"";
+}
+static BOOL RunOSA(NSString *src) {
+    @try {
+        NSAppleScript *as = [[NSAppleScript alloc] initWithSource:src];
+        NSDictionary *err = nil;
+        [as executeAndReturnError:&err];
+        return err == nil;
+    } @catch (...) { return NO; }
+}
+static NSString *ShQ(NSString *s) {
+    if (!s) s = @"";
+    NSString *inner = [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    return [[@"'" stringByAppendingString:inner] stringByAppendingString:@"'"];
+}
+// 在 iTerm2（在跑/装了都认，activate 会顺手拉起）新开 tab 跑命令；没 iTerm2 用 Terminal
+// 新开窗口。返回 YES＝命令已经交代给一个真终端。
+static BOOL RunInTerminal(NSString *cmd) {
+    NSString *esc = [cmd stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSRunningApplication *it = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
+        @"com.googlecode.iterm2"] firstObject];
+    BOOL itermInstalled = [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm.app"];
+    if (it || itermInstalled) {
+        NSString *sc = [NSString stringWithFormat:
+            @"tell application \"iTerm2\"\nactivate\n"
+             "if (count of windows) = 0 then\n create window with default profile\n"
+             "else\n tell current window to create tab with default profile\n end if\n"
+             "tell current session of current window to write text \"%@\"\nend tell", esc];
+        if (RunOSA(sc)) return YES;
+    }
+    NSString *sc2 = [NSString stringWithFormat:
+        @"tell application \"Terminal\"\nactivate\ndo script \"%@\"\nend tell", esc];
+    return RunOSA(sc2);
+}
+// 活终端切前台：iTerm2 在跑切 iTerm2，否则 Terminal 在跑切 Terminal；都没有 NO。
+static BOOL WakeTerminalFront(void) {
+    NSRunningApplication *it = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
+        @"com.googlecode.iterm2"] firstObject];
+    if (it) return [it activateWithOptions:0];
+    NSRunningApplication *te = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
+        @"com.apple.Terminal"] firstObject];
+    if (te) return [te activateWithOptions:0];
+    return NO;
+}
+extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, const char* cwd,
+                                  char* reason, int out_len, int* layer) {
+    const Target* t = Find(agent_id);
+    if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
+    NSString *cli = [NSString stringWithFormat:@(t->cli_fmt),
+                     ShQ(session_id ? @(session_id) : @"")];
+    NSString *full = (cwd && *cwd)
+        ? [NSString stringWithFormat:@"cd %@ && %@", ShQ(@(cwd)), cli] : cli;
+    if (layer) *layer = 4;
+    if (RunInTerminal(full)) {
+        Say(reason, out_len, @"已在新终端窗口续上这条会话");
+        return 0;
+    }
+    Say(reason, out_len, @"终端没开成（iTerm2 / Terminal 都试过）");
+    if (layer) *layer = 0;
+    return 1;
+}
+extern "C" int ap_wake_cli_term(char* reason, int out_len) {
+    if (WakeTerminalFront()) { Say(reason, out_len, @"终端已切到前台"); return 0; }
+    Say(reason, out_len, @"没有在跑的终端可切");
+    return 1;
+}
+
 extern "C" int ap_open3(const char* agent_id, const char* session_id, const char* cwd,
                         char* reason, int out_len, int* layer) {
     if (layer) *layer = 0;
@@ -832,6 +903,22 @@ extern "C" int ap_open3(const char* agent_id, const char* session_id, const char
     NSString* app = t->app_rel[0] ? @(t->app_rel) : nil;
     NSString* log = Expand(t->log_rel);
     NSString* tail = @"";
+
+    // ⓪ 纯 CLI 的会话级落点（claude/pi）：iTerm2›Terminal 新开窗口跑 resume 命令。
+    //    真正「回到那一条会话」，比开一堆文件夹诚实；活会话的「只切前台」在面板侧判断。
+    if (t->cli_fmt[0]) {
+        NSString* cli = [NSString stringWithFormat:@(t->cli_fmt),
+                         ShQ(session_id ? @(session_id) : @"")];
+        NSString* full = (cwd && *cwd)
+            ? [NSString stringWithFormat:@"cd %@ && %@", ShQ(@(cwd)), cli] : cli;
+        if (layer) *layer = 4;
+        if (RunInTerminal(full)) {
+            Say(reason, out_len, @"已在新终端窗口续上这条会话");
+            return 0;
+        }
+        Say(reason, out_len, @"终端没开成（iTerm2 / Terminal 都试过）");
+        return 1;
+    }
 
     // ① deep link：唯一不需要辅助功能授权、又能精确到「那一条对话」的入口，排最前。
     NSString* deep = DeepURL(t, session_id);

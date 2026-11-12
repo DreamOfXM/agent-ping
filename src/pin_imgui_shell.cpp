@@ -1159,6 +1159,27 @@ static const Key kStr[] = {
     {"r_useg_yest",    {"昨天", "Yesterday", "Gestern", "Ieri", "昨日", "어제"}},
     {"r_useg_week",    {"本周", "This week", "Diese Woche", "Questa settimana", "今週", "이번 주"}},
     {"r_useg_month",   {"本月", "This month", "Diesen Monat", "Questo mese", "今月", "이번 달"}},
+    {"land_term",      {"已在终端打开这条会话", "Opened in a new terminal tab",
+                        "Im Terminal geöffnet", "Aperto nel terminale",
+                        "ターミナルで開いた", "터미널에서 열었음"}},
+    {"land_term_sub",  {"窗口已带到前台 — 会话就在这个窗口里",
+                        "The window is in front — the session lives in it",
+                        "Das Fenster ist vorn — die Sitzung lebt darin",
+                        "La finestra è davanti — la sessione vive lì",
+                        "ウィンドウは前面 — セッションはその中",
+                        "창이 앞에 — 세션은 그 안에"}},
+    {"land_termlive",  {"终端正在跑这条会话，已切到前台",
+                        "That session is running in a terminal — brought to front",
+                        "Diese Sitzung läuft in einem Terminal — nach vorn geholt",
+                        "Sessione in un terminale — portata in primo piano",
+                        "ターミナルで実行中 — 前面に切り替えた",
+                        "터미널에서 실행 중 — 앞으로 가져옴"}},
+    {"land_termlive_sub", {"没有新开窗口 — 它本来就在那儿",
+                        "No new window — it was already there",
+                        "Kein neues Fenster — war schon da",
+                        "Nessuna nuova finestra — era già lì",
+                        "新しい窓は開かない — もともとそこに",
+                        "새 창 없음 — 원래 거기 있었음"}},
     {"r_scan_at",      {"扫描 %s", "Scanned %s", "Scan %s", "Scansione %s",
                         "スキャン %s", "스캔 %s"}},
     {"r_useg_lastweek",{"上周", "Last week", "Letzte Woche", "Settimana scorsa",
@@ -3247,6 +3268,9 @@ enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / 侧�
                  L_AX,         // 挡在辅助功能授权前面——这一格只能他自己拨
                  L_OCLI,       // opencode：会话活在终端里（恒 CLI），落点＝resume 命令进剪贴板。
                                // 唤桌面客户端等于打开另一种形态，不是回到这条会话（2026-11-12 用户实测纠偏）
+                 L_TERM,       // 纯 CLI（claude/pi）：不在跑 → iTerm2›Terminal 新窗口 resume，
+                               // 真正回到那一条会话（2026-11-12 用户拍板：不许只开记录目录）
+                 L_TERMLIVE,   // 同为 CLI 但这条正在终端里跑 → 只切终端前台，不新开
                  L_NONE };     // 一层都没落上
 struct Landing { int level = L_NONE; std::string why; };   // why＝平台原话，只进日志
 
@@ -3261,6 +3285,8 @@ static const char* LandName(int lv) {
         case L_DIR:  return "记录目录";
         case L_AX:   return "缺辅助功能";
         case L_OCLI: return "resume 已复制";
+        case L_TERM: return "终端续会话";
+        case L_TERMLIVE: return "切终端前台";
         default:     return "落空";
     }
 }
@@ -3294,21 +3320,33 @@ static void ShowPanel() {
 /// 跳到那会话。先用会话级那把钥匙（Qoder＝按名字点它自己托盘里的条目，ZCode＝按名字点侧栏
 /// 任务列表里的行），没开成才走 ap_open3 的三层阶梯；两条 reason 各用各的缓冲区。
 /// 上一版复用同一个 why，ap_open 一把盖掉了「未授权辅助功能」那句，屏幕上就只剩「打开了文件夹」。
+static const UIRow* RowByKey(const std::string& key);
 static Landing JumpTo(const Hit& h) {
     Landing out;
     char key[512], lad[512];
     key[0] = lad[0] = 0;
     const bool titled = !h.title.empty();
-    if (h.agent_id == "pi") {
-        // pi 同属终端形态（ClientTagOf 恒 CLI）：resume 命令进剪贴板，与 opencode 同一约定。
-        std::string cmd = "pi --session " + h.native_id;
-        if (!g_shot_to) ImGui::SetClipboardText(cmd.c_str());
-        out.level = L_OCLI;
-        out.why = "pi resume 命令已复制";
-        ShowPanel();
-        fprintf(stderr, "[落点] pi/%s → resume 已复制 ｜ %s\n", h.native_id.c_str(), cmd.c_str());
-        fflush(stderr);
-        return out;
+    // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。
+    // 活着（在跑/等你/排队）＝只把终端切到前台，别新开；不活＝iTerm2›Terminal 新窗口
+    // resume 那一条（ap_open3 的 cli 分支，layer=4）。
+    if (h.agent_id == "claude" || h.agent_id == "pi") {
+        const UIRow* row = RowByKey(h.key);
+        const bool live = row && (row->state == ap::ST_WORKING ||
+                                  row->state == ap::ST_NEEDS_USER ||
+                                  row->state == ap::ST_QUEUED);
+        if (live && !g_shot_to) {
+            char lad[256] = {0};
+            if (ap_wake_cli_term(lad, (int)sizeof lad) == 0) {
+                out.level = L_TERMLIVE;
+                out.why = lad;
+                ShowPanel();
+                fprintf(stderr, "[落点] %s/%s → 终端在跑，切前台\n", h.agent_id.c_str(),
+                        h.native_id.c_str());
+                fflush(stderr);
+                return out;
+            }
+            // 没有在跑的终端可切：掉下去走新窗口 resume。
+        }
     }
     if (h.agent_id == "opencode") {
         // opencode 的会话都活在终端里（ClientTagOf 恒 CLI）：唤桌面客户端是打开另一种
@@ -3386,11 +3424,13 @@ static Landing JumpTo(const Hit& h) {
                              lad, (int)sizeof lad, &layer);
     if (lvl < 0) {
         if (rc2 != 0) lvl = L_NONE;
-        else lvl = layer == 1 ? L_SESS : layer == 2 ? L_APP : layer == 3 ? L_DIR : L_NONE;
+        else lvl = layer == 1 ? L_SESS : layer == 2 ? L_APP : layer == 3 ? L_DIR
+             : layer == 4 ? L_TERM : L_NONE;
     }
     out.level = lvl;
     out.why = (key[0] ? std::string(key) + "；" : std::string()) + (lad[0] ? lad : "未走阶梯");
     if (out.level == L_SESS) HidePanel();
+    else if (out.level == L_TERM) HidePanel();   // 新终端窗口在前，面板收开别挡它
     else ShowPanel();   // 点横幅进来时面板是藏着的；这一层要他看见回执，得先摆回来
     fprintf(stderr, "[落点] %s/%s → %s ｜ 会话级：%s ｜ 阶梯：%s（ap_open %s，layer=%d）\n",
             h.agent_id.c_str(), h.native_id.c_str(), LandName(out.level),
@@ -3427,11 +3467,15 @@ static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true
                     : ld.level == L_NEWRUN ? "land_newrun"
                     : ld.level == L_WAKE ? "land_wake"
                     : ld.level == L_OCLI ? "land_ocli"
+                    : ld.level == L_TERM ? "land_term"
+                    : ld.level == L_TERMLIVE ? "land_termlive"
                     : ld.level == L_APP ? "land_app" : ld.level == L_DIR ? "land_dir" : "land_none";
     Toast(fill(T(key, loc)),
           T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub"
             : ld.level == L_WAKE ? "land_wake_sub" : ld.level == L_NEWRUN ? "land_newrun_sub"
             : ld.level == L_OCLI ? "land_ocli_sub"
+            : ld.level == L_TERM ? "land_term_sub"
+            : ld.level == L_TERMLIVE ? "land_termlive_sub"
             : "land_copy",
             loc));
     g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
