@@ -957,9 +957,21 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
     char cmdb[512];
     snprintf(cmdb, sizeof cmdb, t->cli_fmt, session_id ? session_id : "");
     NSString *cliCmd = @(cmdb);
-    NSString *body = (cwd && *cwd)
-        ? [NSString stringWithFormat:@"cd %@ && exec %@", ShQ(@(cwd)), cliCmd]
-        : [NSString stringWithFormat:@"exec %@", cliCmd];
+    // 探测段：iTerm2 的 command 会话没有用户 PATH，裸 `claude` 会 not found——
+    // 脚本头逐个探测常见安装位，用解析出的绝对路径 exec。
+    NSString *cliName = [[cliCmd componentsSeparatedByString:@" "] firstObject] ?: @"claude";
+    NSString *rest = cliCmd.length > cliName.length
+        ? [cliCmd substringFromIndex:cliName.length + 1] : @"";
+    NSString *probe = [NSString stringWithFormat:
+        @"CLI=\"\"\n"
+         "for c in /opt/homebrew/bin/%@ /usr/local/bin/%@ \"$HOME/.%@/local/%@\" /usr/bin/%@; do\n"
+         " [ -x \"$c\" ] && CLI=\"$c\" && break\n"
+         "done\n"
+         "if [ -z \"$CLI\" ]; then echo \"%@ not found in standard locations\"; exit 1; fi\n",
+         cliName, cliName, cliName, cliName, cliName, cliName];
+    NSString *body = [NSString stringWithFormat:
+        @"%@\ncd %@ && exec \"$CLI\" %@",
+        probe, ShQ(@(cwd)), rest];
     if (layer) *layer = 4;
     if (RunInTerminal(body)) {
         Say(reason, out_len, @"已在新终端窗口续上这条会话");
@@ -1104,10 +1116,20 @@ extern "C" int ap_open3(const char* agent_id, const char* session_id, const char
     if (t->cli_fmt[0]) {
         char cmdb[512];
         snprintf(cmdb, sizeof cmdb, t->cli_fmt, session_id ? session_id : "");
-        NSString* cli = @(cmdb);
-        NSString* body = (cwd && *cwd)
-            ? [NSString stringWithFormat:@"cd %@ && exec %@", ShQ(@(cwd)), cli]
-            : [NSString stringWithFormat:@"exec %@", cli];
+        NSString* cliCmd = @(cmdb);
+        NSString* cliName = [[cliCmd componentsSeparatedByString:@" "] firstObject] ?: @"claude";
+        NSString* rest = cliCmd.length > cliName.length
+            ? [cliCmd substringFromIndex:cliName.length + 1] : @"";
+        NSString* probe = [NSString stringWithFormat:
+            @"CLI=\"\"\n"
+             "for c in /opt/homebrew/bin/%@ /usr/local/bin/%@ \"$HOME/.%@/local/%@\" /usr/bin/%@; do\n"
+             " [ -x \"$c\" ] && CLI=\"$c\" && break\n"
+             "done\n"
+             "if [ -z \"$CLI\" ]; then echo \"%@ not found in standard locations\"; exit 1; fi\n",
+             cliName, cliName, cliName, cliName, cliName, cliName];
+        NSString* body = [NSString stringWithFormat:
+            @"%@\ncd %@ && exec \"$CLI\" %@",
+            probe, ShQ(@(cwd)), rest];
         if (layer) *layer = 4;
         if (RunInTerminal(body)) {
             Say(reason, out_len, @"已在新终端窗口续上这条会话");
