@@ -1149,6 +1149,31 @@ static const Key kStr[] = {
                         "Esporta .md", "概要を .md 書き出し", "요약 .md 내보내기"}},
     {"r_procdie",      {"进程已死", "process gone", "Prozess weg", "processo assente",
                         "プロセス終了", "프로세스 없음"}},
+    // v3 第二批 · 用量屏：时间维度 / 趋势（估算）/ 用尽注记 / 命中率。全部只摆可复核的读数。
+    {"r_useg_yest",    {"昨天", "Yesterday", "Gestern", "Ieri", "昨日", "어제"}},
+    {"r_useg_week",    {"本周", "This week", "Diese Woche", "Questa settimana", "今週", "이번 주"}},
+    {"r_useg_month",   {"本月", "This month", "Diesen Monat", "Questo mese", "今月", "이번 달"}},
+    {"r_useg_last7",   {"近 7 天", "Last 7 days", "Letzte 7 Tage", "Ultimi 7 giorni",
+                        "直近7日", "최근 7일"}},
+    {"r_useg_peak",    {"峰值 %s", "peak %s", "Spitze %s", "picco %s", "最大 %s", "최고 %s"}},
+    {"r_trend5",       {"近 1h −%d%% · 估算", "−%d%% in 1h · est.", "−%d%% in 1 Std. · gesch.",
+                        "−%d%% in 1h · stima", "直近1h −%d%%・推定", "최근 1h −%d%% · 추정"}},
+    {"r_trend_up",     {"近 1h +%d%% · 估算", "+%d%% in 1h · est.", "+%d%% in 1 Std. · gesch.",
+                        "+%d%% in 1h · stima", "直近1h +%d%%・推定", "최근 1h +%d%% · 추정"}},
+    {"r_exhausted",    {"余额用尽（它自己报的）", "balance exhausted (its own report)",
+                        "Guthaben aufgebraucht (eigene Meldung)", "saldo esaurito (suo report)",
+                        "残高を使い切り（自己申告）", "잔액 소진(본인 보고)"}},
+    {"r_relay_goto",   {"去会话列表接力 ›", "relay from the session list ›",
+                        "aus der Sitzungsliste übergeben ›", "passa dalla lista sessioni ›",
+                        "セッション一覧から引継ぎ ›", "세션 목록에서 인계 ›"}},
+    {"r_hitrate",      {"缓存命中率（今日）", "Cache hit rate (today)", "Cache-Trefferquote (heute)",
+                        "Tasso cache (oggi)", "キャッシュ命中率（今日）", "캐시 적중률 (오늘)"}},
+    {"r_hitrate_note", {"命中率＝缓存读÷(输入+缓存读)，四档用量是各家日志里的现成字段。",
+                        "hit = cache read ÷ (input + cache read), straight from usage fields.",
+                        "Quote = Cache-Lesung ÷ (Input + Cache-Lesung), direkt aus den Feldern.",
+                        "hit = lettura cache ÷ (input + lettura cache), dai campi d'uso.",
+                        "命中率＝キャッシュ読み÷(入力+キャッシュ読み)、ログ既存フィールド。",
+                        "적중률=캐시 읽기÷(입력+캐시 읽기), 로그 기존 필드."}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
     // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
     // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
@@ -1828,6 +1853,10 @@ struct Tool {
     // 面板就不摆 token 那一列；余额也不跨工具相加（每格是它自己账户的口径）。
     ap::UsageParts usage;
     double credits = 0;
+    /// M2 趋势（估算）：5h 窗剩余%的差分速率（每小时百分点，负=在耗）。known=false 整行不画。
+    bool trend_known = false;
+    double trend_pct_per_hour = 0;
+    std::vector<double> trend_recent;
     bool has_credits = false;
     std::vector<ap::ModelUse> models;
     std::array<long, 24> hourly{};
@@ -1859,6 +1888,10 @@ struct PanelData {
     int live = 0;                        // 状态项上的数字：非静置会话数
     int hero = -1;                       // 总览顶部「在跑」卡指的那一行（最近有动静的运行/排队会话）
     double now = 0, window_start = 0;    // 历史屏要按「今天零点→现在」算时刻，只此一处带过来
+    /// M9 日聚合（最近 8 天，旧→新）与周/月累计；第一天上线只有一行，柱图如实少几根。
+    std::vector<ap::Snapshot::DayUse> daily;
+    long week_tokens = 0, month_tokens = 0;
+    long yday_tokens = 0;
 };
 static PanelData g_pd;
 static long g_pd_seq = -1;
@@ -1900,6 +1933,7 @@ static int g_r31_detail_kind = 0;          // 1＝问答 2＝授权 3＝已完�
 static std::string g_r31_detail_key;       // 详情屏那一行的 key（活数据按 key 重取）
 static std::string g_r31_relay;            // 详情屏「任务接力」模式看哪一行（key）；空＝常规详情
 static std::string g_r31_relay_brief;      // 接力简报原文（屏上预览/复制/导出共用这一份）
+static int g_r31_useg = 0;                 // M9 用量屏时段：0今天 1昨天 2本周 3本月
 static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
 static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
 static int g_r31_hist_n = 12;               // 完成记录已加载到第几条（懒加载页大小 12）
@@ -2430,7 +2464,9 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               HIT_CLAIMCARD = 44,
               // v3 第一批：详情屏「导出摘要 .md」（用户触发的唯一新写盘面）与「任务接力」
               //（详情屏内切到接力简报模式，再点一次返回常规详情）。
-              HIT_EXPORTMD = 45, HIT_TASKRELAY = 46 };
+              HIT_EXPORTMD = 45, HIT_TASKRELAY = 46,
+              // M9 用量屏时间维度那排筛选（今天/昨天/本周/本月），opt＝段号。
+              HIT_USEG = 47 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
@@ -2988,6 +3024,7 @@ static const char* ActName(int act) {
         case HIT_CLAIMCARD:    return "权益·卡";
         case HIT_EXPORTMD:     return "导出摘要";
         case HIT_TASKRELAY:    return "任务接力";
+        case HIT_USEG:         return "用量时段";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -3511,6 +3548,10 @@ static void DoAction(const Hit& h, const ImVec2& at) {
                 g_r31_relay = h.key;
                 if (const UIRow* r = RowByKey(h.key)) g_r31_relay_brief = RelayBriefOf(*r, LocOfZid(h.zid));
             }
+            return;
+        }
+        case HIT_USEG: {                      // M9 用量屏时段筛选
+            g_r31_useg = h.opt;
             return;
         }
         case HIT_HOOKINST: {                    // 接线屏那颗「写入 / 重写」：真改本机配置
@@ -5415,6 +5456,11 @@ static void RebuildPanel(const ap::Snapshot& s) {
         tl.rows = shown;
         tl.hue = HueFor(ag.name);
         tl.usage = ag.usage;
+        if (auto it = s.trend5.find(ag.id); it != s.trend5.end()) {
+            tl.trend_known = it->second.known;
+            tl.trend_pct_per_hour = it->second.pct_per_hour;
+            tl.trend_recent = it->second.recent;
+        }
         tl.credits = 0;
         for (const auto& se : ag.sessions) tl.credits += se.credits;
         tl.has_credits = tl.credits > 0;
@@ -5429,6 +5475,9 @@ static void RebuildPanel(const ap::Snapshot& s) {
     pd.hook_live = s.hook_live;
     pd.today_tokens = s.today_tokens;
     pd.has_today_tokens = s.today_tokens > 0;
+    pd.daily = s.daily;
+    pd.week_tokens = s.week_tokens;
+    pd.month_tokens = s.month_tokens;
     // 组内按「多久以前」升序：稿子 done 组就是 4 分钟前排在 14 小时前前面
     std::sort(pd.rows.begin(), pd.rows.end(), [](const UIRow& a, const UIRow& b) {
         int ga = GroupOf(a.state), gb = GroupOf(b.state);
@@ -5455,6 +5504,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
     // 今日用量是整轮口径（scan_all 已汇总），不由逐项拼出来
     pd.credits = s.today_credits;
     pd.yday_credits = s.yesterday_credits;
+    pd.yday_tokens = s.yesterday_tokens;
     // 权益层与快照分开取：它读的是各家另外的日志，一轮 <10ms（实测），不必进快照缓存。
     pd.claims = ap::claims_scan(now);
     pd.now = now;
@@ -7245,9 +7295,14 @@ static void LoadProbeFixture() {
     {
         Tool* t = tool("claude", "Claude Code", true, false, 5);
         t->usage.input = 1234567;
-        t->usage.output = 84521;
+        t->usage.output = 84551;
         t->usage.cache_read = 5678901;
         t->usage.cache_write = 210944;
+        // M2 样例趋势（估算）：6 分钟里剩 78%→66%，约 −12%/h；折线数据同斜率。
+        t->trend_known = true;
+        t->trend_pct_per_hour = -12.0;
+        for (int k = 0; k < 40; k++)
+            t->trend_recent.push_back(78.0 - 12.0 * k / 40.0 * 1.0);
         t->models = {{"claude-opus-4-6", 4200000}, {"claude-sonnet-4-5", 2600000},
                      {"claude-haiku-4-5", 309933}};
         for (int i = 9; i <= 22; i++)
@@ -7266,6 +7321,28 @@ static void LoadProbeFixture() {
         t->quota.week.resets_at = now + 3 * 86400.0;
         t->quota.week.window_min = 10080;
         t->quota.week.seen_at = now - 120.0;
+    }
+    // M9 样例日聚合：近 7 天（末位=今天）。真机 daily.txt 第一天只有一行，柱图如实少几根；
+    // fixture 摆满是为了把柱图版式本身拍全。
+    {
+        const long d0 = (long)(midnight - 6 * 86400.0);
+        std::time_t tt0 = (std::time_t)d0;
+        std::tm tv0;
+        localtime_r(&tt0, &tv0);
+        const long sample[7] = {3400000, 890000, 610000, 5200000, 6100000, 9800000, 7390000};
+        for (int i = 0; i < 7; i++) {
+            std::time_t td = (std::time_t)(midnight - (double)(6 - i) * 86400.0);
+            std::tm tvd;
+            localtime_r(&td, &tvd);
+            ap::Snapshot::DayUse du;
+            du.day = (long)tvd.tm_year * 10000 + (tvd.tm_mon + 1) * 100 + tvd.tm_mday;
+            du.tokens = sample[i];
+            du.credits = sample[i] / 20000.0;
+            pd.daily.push_back(du);
+        }
+        pd.week_tokens = 3400000 + 890000 + 610000 + 5200000 + 6100000 + 9800000 + 7390000;
+        pd.month_tokens = pd.week_tokens + 2100000;
+        pd.yday_tokens = 9800000;
     }
     {
         Tool* t = tool("codex", "Codex", true, false, 0);

@@ -2058,6 +2058,8 @@ Snapshot scan_all(double now_epoch) {
     snap.live_landed = apply_qoder_live(snap, read_qoder_live(), now);
     apply_hook_signals(snap, now);
     apply_proc_sentinel(snap);
+    roll_daily(snap);
+    compute_trends(snap);
     return snap;
 }
 
@@ -2187,6 +2189,104 @@ void apply_proc_sentinel(Snapshot& snap) {
         if (cached.count("codex") > 0) continue;
         for (auto& s : a.sessions)
             if (s.state == ST_WORKING) s.proc_dead = true;
+    }
+}
+
+// ── M9 日聚合 ───────────────────────────────────────────────────────────────
+// append-only 的 daily.txt：一行一天「YYYYMMDD tokens credits」。今天那行每轮幂等重写
+// （当天数字还会涨），历史行永不回改。第一天上线只有一行，柱图就少几根——不回填，不编。
+namespace {
+std::string daily_path() {
+    const char* over = getenv("AGENTPING_STATE_DIR");
+    if (over && *over) return std::string(over) + "/daily.txt";
+    const char* h = getenv("HOME");
+    if (!h || !*h) return "";
+    return std::string(h) + "/Library/Application Support/AgentPing/daily.txt";
+}
+long day_key(double epoch) {
+    std::time_t t = (std::time_t)epoch;
+    std::tm tv;
+    localtime_r(&t, &tv);
+    return (long)tv.tm_year * 10000 + (long)(tv.tm_mon + 1) * 100 + (long)tv.tm_mday;
+}
+}  // namespace
+
+void roll_daily(Snapshot& s) {
+    const std::string p = daily_path();
+    if (p.empty()) return;
+    const long today = day_key(s.window_start);
+    std::vector<Snapshot::DayUse> rows;
+    {
+        std::ifstream f(p);
+        long d; long tk; double cr;
+        while (f >> d >> tk >> cr) {
+            if (d == today) continue;          // 今天的旧行丢弃，下面用最新数字重写
+            rows.push_back({d, tk, cr});
+        }
+    }
+    rows.push_back({today, s.today_tokens, s.today_credits});
+    std::sort(rows.begin(), rows.end(),
+              [](const auto& a, const auto& b) { return a.day < b.day; });
+    {
+        std::ofstream f(p);                    // 全量重写：文件只有几百行，幂等且防断行
+        for (const auto& r : rows) f << r.day << " " << r.tokens << " " << r.credits << "\n";
+    }
+    // 快照带最近 8 天（柱图 7 根 + 今天），并顺手算周/月聚合。
+    s.daily.clear();
+    for (auto it = rows.rbegin(); it != rows.rend() && s.daily.size() < 8; ++it)
+        s.daily.push_back(*it);
+    std::reverse(s.daily.begin(), s.daily.end());
+    std::time_t t = (std::time_t)s.window_start;
+    std::tm tv;
+    localtime_r(&t, &tv);
+    tv.tm_hour = 0; tv.tm_min = 0; tv.tm_sec = 0;
+    tv.tm_wday = 0;                             // 让 mktime 只按 y/m/d 折
+    const long monday_key = [&]() {
+        std::tm m = tv;
+        m.tm_mday -= (m.tm_wday == 0 ? 6 : m.tm_wday - 1);   // 周一=一周之始
+        mktime(&m);
+        return day_key(mktime(&m));
+    }();
+    std::tm m0 = tv;
+    m0.tm_mday = 1;
+    const long month_key = day_key(mktime(&m0));
+    s.week_tokens = s.month_tokens = 0;
+    for (const auto& r : rows) {
+        if (r.day >= monday_key) s.week_tokens += r.tokens;
+        if (r.day >= month_key) s.month_tokens += r.tokens;
+    }
+}
+
+// ── M2 趋势（估算）─────────────────────────────────────────────────────────
+// 只做差分：每工具保留最近 ~6 分钟的 (seen_at, 5h窗剩余%) 读数，取首尾差算每小时几个点。
+// 标「估算」且不预测耗尽时刻。读数不足两根（刚启动/读数不更新）known=false 整行不画。
+namespace {
+std::map<std::string, std::deque<std::pair<double, double>>>& trend_buf() {
+    static std::map<std::string, std::deque<std::pair<double, double>>> m;
+    return m;
+}
+}
+
+void compute_trends(Snapshot& s) {
+    for (const auto& a : s.agents) {
+        const ap::QuotaWindow& q = a.quota.five;
+        if (!q.known || q.seen_at <= 0 || q.resets_at <= 0) continue;
+        const double pct = q.used > 0 && q.used <= 1.0 ? (1.0 - q.used) * 100.0
+                        : (q.used > 1.0 ? std::max(0.0, 100.0 - q.used) : 0.0);
+        auto& buf = trend_buf()[a.id];
+        if (buf.empty() || buf.back().first != q.seen_at)
+            buf.emplace_back(q.seen_at, pct);
+        while (buf.size() > 140) buf.pop_front();          // ~7 分钟 @3s
+        if (buf.size() >= 2) {
+            const double dt = buf.back().first - buf.front().first;
+            const double dp = buf.back().second - buf.front().second;   // 剩余%的变化（负=在耗）
+            if (dt >= 60.0) {                              // 至少一分钟跨度才敢差分
+                Snapshot::Trend& t = s.trend5[a.id];
+                t.known = true;
+                t.pct_per_hour = dp / dt * 3600.0;
+                for (const auto& pt : buf) t.recent.push_back(pt.second);
+            }
+        }
     }
 }
 

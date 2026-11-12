@@ -162,6 +162,16 @@ struct Snapshot {
     std::vector<AgentSnap> agents;
     double scanned_at = 0;
     double window_start = 0;    // 今天零点，三格统计与「今天没活动」共用同一个窗
+    /// M9 日聚合（append-only 的 daily.txt，与 N5 等待镜子共用一个文件）：最近 N 天每日 tokens。
+    /// 只由本机逐日落盘累计，不回填历史——第一天上线只有一行，柱图如实少几根。
+    struct DayUse { long day = 0; long tokens = 0; double credits = 0; };
+    std::vector<DayUse> daily;
+    long week_tokens = 0;       // 本周一零点起（从日聚合累加，含今天这一行）
+    long month_tokens = 0;      // 本月一号起
+    /// M2 趋势（估算）：每工具 5h 窗剩余%的进程内差分（最近 6 分钟读数），known=false 整行不画。
+    /// 只算差分速率，不预测耗尽时刻——那是编的数。
+    struct Trend { bool known = false; double pct_per_hour = 0; std::vector<double> recent; };
+    std::map<std::string, Trend> trend5;
     long today_tokens = 0;
     double today_credits = 0;
     /// 昨天同一个钟点之前那一个整日的用量，只为表头第三格的「较昨日」环比服务。
@@ -217,5 +227,11 @@ void apply_hook_signals(Snapshot& snap, double now);
 /// N7 进程哨兵：回合未收尾但这一路 CLI 已无同名进程（只读 comm/pid）→ Session.proc_dead。
 /// 只对 comm 可辨的路判（本轮 codex）；只标不响。
 void apply_proc_sentinel(Snapshot& snap);
+
+/// M9 日聚合落盘（daily.txt，append-only 语义）并填 snap.daily/week/month。
+void roll_daily(Snapshot& s);
+
+/// M2 5h 窗剩余%的进程内差分 → snap.trend5（估算，只给速率不给预测）。
+void compute_trends(Snapshot& s);
 
 }  // namespace ap
