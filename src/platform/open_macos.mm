@@ -28,7 +28,8 @@ struct Target {
 };
 
 // 键＝采集器 id（与 scan.cpp 里 snap.id 同一套：qoder/claude/codex/zcode/workbuddy/opencode）
-const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencode"};
+const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencode", "pi",
+                       "qwenworkcn"};
 const Target kTargets[] = {
     {"/Applications/Qoder.app",     ".qoder/projects",   ""},
     {"",                            ".claude/projects",  ""},
@@ -39,6 +40,9 @@ const Target kTargets[] = {
     // CLI 侧 `opencode --session <id> <dir>` 能续会话，但那要在宿主终端里开 TUI，
     // 与「唤起客户端」不是一个重量级——先按「唤起 App」一档接住，别让点击落空。
     {"/Applications/OpenCode.app",  ".local/share/opencode", ""},
+    // pi 是纯 CLI：没有 .app，落点走 ③（记录目录），会话级由 JumpTo 的 resume 复制接住
+    {"",                            ".pi/agent/sessions", ""},
+    {"/Applications/QwenWorkCN.app", ".qwenworkcn/projects", ""},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 
