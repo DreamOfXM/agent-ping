@@ -168,6 +168,11 @@ struct Snapshot {
     std::vector<DayUse> daily;
     long week_tokens = 0;       // 本周一零点起（从日聚合累加，含今天这一行）
     long month_tokens = 0;      // 本月一号起
+    /// 按工具的日聚合（2026-11-12 起的格式：一行一天一工具）。昨天/周/月的分工具消耗从这来；
+    /// 上线首日只有今天一行，切换时段时没有分工具历史——如实显示，不拿今天的冒充。
+    /// key＝agent id；全局量仍在 daily/week_tokens（旧格式行折算成 "*" 行读回）。
+    std::map<std::string, DayUse> agent_today;
+    std::map<long, std::map<std::string, DayUse>> agent_daily;   // day → agent → 量
     /// M2 趋势（估算）：每工具 5h 窗剩余%的进程内差分（最近 6 分钟读数），known=false 整行不画。
     /// 只算差分速率，不预测耗尽时刻——那是编的数。
     struct Trend { bool known = false; double pct_per_hour = 0; std::vector<double> recent; };

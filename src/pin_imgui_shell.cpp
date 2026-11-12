@@ -1156,6 +1156,13 @@ static const Key kStr[] = {
     {"r_useg_last7",   {"近 7 天", "Last 7 days", "Letzte 7 Tage", "Ultimi 7 giorni",
                         "直近7日", "최근 7일"}},
     {"r_useg_peak",    {"峰值 %s", "peak %s", "Spitze %s", "picco %s", "最大 %s", "최고 %s"}},
+    // 分 agent 消耗区：量纲各归各（tokens/Credits 不同行），时段切换跟着换。
+    {"r_seg_noperagent", {"按工具的分段记录从 11-12 起积累，此前只有全局合计",
+                          "per-tool segment history starts 11-12; earlier days are totals only",
+                          "Pro-Tool-Segmente erst ab 11-12; vorher nur Summen",
+                          "storico per strumento dall'11-12; prima solo totali",
+                          "ツール別の区分履歴は 11-12 以降。それ以前は合計のみ",
+                          "도구별 구간 기록은 11-12부터. 이전은 합계만"}},
     {"r_trend5",       {"近 1h −%d%% · 估算", "−%d%% in 1h · est.", "−%d%% in 1 Std. · gesch.",
                         "−%d%% in 1h · stima", "直近1h −%d%%・推定", "최근 1h −%d%% · 추정"}},
     {"r_trend_up",     {"近 1h +%d%% · 估算", "+%d%% in 1h · est.", "+%d%% in 1 Std. · gesch.",
@@ -1899,6 +1906,9 @@ struct PanelData {
     std::vector<ap::Snapshot::DayUse> daily;
     long week_tokens = 0, month_tokens = 0;
     long yday_tokens = 0;
+    /// 按工具的日聚合：今日一份 + 整份历史（分工具的时段消耗从这来，11-12 起积累）。
+    std::map<std::string, ap::Snapshot::DayUse> agent_today;
+    std::map<long, std::map<std::string, ap::Snapshot::DayUse>> agent_daily;
 };
 static PanelData g_pd;
 static long g_pd_seq = -1;
@@ -5485,6 +5495,8 @@ static void RebuildPanel(const ap::Snapshot& s) {
     pd.daily = s.daily;
     pd.week_tokens = s.week_tokens;
     pd.month_tokens = s.month_tokens;
+    pd.agent_today = s.agent_today;
+    pd.agent_daily = s.agent_daily;
     // 组内按「多久以前」升序：稿子 done 组就是 4 分钟前排在 14 小时前前面
     std::sort(pd.rows.begin(), pd.rows.end(), [](const UIRow& a, const UIRow& b) {
         int ga = GroupOf(a.state), gb = GroupOf(b.state);
@@ -7288,7 +7300,7 @@ static void LoadProbeFixture() {
     {
         Tool* t = tool("qoder", "Qoder CLI", true, false, 8);
         t->has_credits = true;
-        t->credits = 469.72;
+        t->credits = 4.21;                 // 今日消耗（Credits 口径）；469.72 是余额，在下面的余额卡里
         // 账户余额：与真机同形状 —— 有分母（100 Credits）但已被这期用尽，且读数停在四小时前
         // （App 关了就不再写盘）→ 走「已用尽 + 上次读数」那一格。
         t->quota.known = true;

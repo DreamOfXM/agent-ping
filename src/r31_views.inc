@@ -2010,6 +2010,12 @@ static float R31BalanceCell(ImDrawList* dl, float x, float y, float w, const ap:
 }
 
 // ── 用量与额度（view 6）：整块正文滚动（162..809），页脚 41 ───────────────────
+/// 与 scan.cpp 的 day_key 同一口径的 UI 侧副本（那边的在匿名 namespace，够不着）。
+static long day_key_ui(std::time_t t) {
+    std::tm tv;
+    localtime_r(&t, &tv);
+    return (long)tv.tm_year * 10000 + (long)(tv.tm_mon + 1) * 100 + (long)tv.tm_mday;
+}
 static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
     const float L = x + 16.0f, listW = w - 32.0f;
@@ -2059,29 +2065,95 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 fx += tw + 18.0f + 7.0f;
             }
         }
-        R31Mid(dl, hx, cy + 38.25f, T("r_total_today", loc), loc, k31Muted, T_S11);
-        double sum = one ? (sel ? (double)sel->usage.total() : 0.0)
-                         : (g_pd.has_today_tokens ? (double)g_pd.today_tokens : 0.0);
-        if (!one && !g_pd.has_today_tokens)
+        // 分 agent 消耗（2026-11-12 用户拍板）：tokens 与 Credits 不同量纲，分行各归各，
+        // 不再合成一个混装大数字。时段切换跟着换；分段历史 11-12 起才有，之前只有全局。
+        {
+            struct Ag { const Tool* t; long tokens; double credits; };
+            std::vector<Ag> rows;
+            double totalTk = 0.0;
+            if (g_r31_useg == 0) {
+                for (const Tool& t : g_pd.tools) {
+                    if (one && !inSrc(t)) continue;
+                    if (!t.present()) continue;
+                    if (t.usage.total() <= 0 && !(t.has_credits && t.credits > 0)) continue;
+                    rows.push_back({&t, t.usage.total(), t.has_credits ? t.credits : 0.0});
+                    totalTk += (double)t.usage.total();
+                }
+            } else {
+                // 昨天/周/月：从按工具日聚合累计；"*" 是旧全局行，不冒充分工具。
+                std::time_t t0 = (std::time_t)g_pd.window_start;
+                std::tm tv0;
+                localtime_r(&t0, &tv0);
+                tv0.tm_hour = 0; tv0.tm_min = 0; tv0.tm_sec = 0; tv0.tm_wday = 0;
+                long fromKey;
+                if (g_r31_useg == 1) fromKey = day_key_ui(t0 - 86400);
+                else if (g_r31_useg == 2) {
+                    std::tm m = tv0;
+                    m.tm_mday -= (m.tm_wday == 0 ? 6 : m.tm_wday - 1);
+                    mktime(&m);
+                    fromKey = day_key_ui(mktime(&m));
+                } else {
+                    std::tm m = tv0;
+                    m.tm_mday = 1;
+                    fromKey = day_key_ui(mktime(&m));
+                }
+                std::map<std::string, std::pair<long, double>> agg;
+                for (const auto& [d, m] : g_pd.agent_daily) {
+                    if (d < fromKey) continue;
+                    for (const auto& [who, u] : m) {
+                        if (who == "*") continue;
+                        agg[who].first += u.tokens;
+                        agg[who].second += u.credits;
+                    }
+                }
+                bool any = false;
+                for (const Tool& t : g_pd.tools) {
+                    if (one && !inSrc(t)) continue;
+                    auto it = agg.find(t.id);
+                    if (it == agg.end() || (it->second.first <= 0 && it->second.second <= 0)) continue;
+                    rows.push_back({&t, it->second.first, it->second.second});
+                    totalTk += (double)it->second.first;
+                    any = true;
+                }
+                if (!any && !one) {
+                    // 该时段没有分工具记录：全局一行 + 说清从哪天起才有，不拿今天的冒充。
+                    const long gk = (g_r31_useg == 1) ? day_key_ui(t0 - 86400) : fromKey;
+                    long g2 = 0;
+                    for (const auto& [d, m] : g_pd.agent_daily) {
+                        if (d < gk) continue;
+                        auto st = m.find("*");
+                        if (st != m.end()) g2 += st->second.tokens;
+                    }
+                    rows.push_back({nullptr, g2, 0.0});
+                }
+            }
+            float ry = cy + 30.0f;
+            for (const auto& a : rows) {
+                if (a.t) Brand31(dl, L + 7.0f, ry + 3.0f, 18.0f, a.t->id, loc);
+                const std::string nm = a.t ? R31Agent(a.t->id, loc)
+                                           : T(segs[g_r31_useg].key, loc);
+                DrawTextRun(dl, L + 7.0f + 26.0f, TextMid(ry + 12.0f, T_S12B, loc), nm, loc,
+                            k31Fg, T_S12B);
+                // 量纲各归各：tokens 工具给 tokens；只有 Credits 的（Qoder）给 Credits，
+                // 两者都有的先 tokens（credits 括注）。不拿 0 冒充。
+                char vb[48];
+                if (a.t && a.tokens <= 0 && a.credits > 0)
+                    snprintf(vb, sizeof vb, "%.2f Credits", a.credits);
+                else
+                    snprintf(vb, sizeof vb, "%s tokens", R31Compact((double)a.tokens).c_str());
+                DrawTextRight(dl, L + 7.0f + (listW - 14.0f), TextMid(ry + 12.0f, T_S13B, loc), vb,
+                              loc, k31Fg, T_S13B);
+                ry += 30.0f;
+            }
+            if (g_r31_useg > 0 && !one && !rows.empty() && !rows[0].t)
+                ry = R31DrawWrap(dl, T("r_seg_noperagent", loc), L + 7.0f, ry + 2.0f, listW - 20.0f,
+                                 loc, T_S10, 16.0f, k31Faint, 2);
+            int n = 0;
             for (const Tool& t : g_pd.tools)
-                if (t.present()) sum += (double)t.usage.total();
-        // M9：非「今天」段，大数字直接换成本段聚合（选了单一来源时时段不适用，保持今日口径）。
-        if (!one && g_r31_useg > 0 && segs[g_r31_useg].has) sum = (double)segs[g_r31_useg].tokens;
-        // 单位跟着来源走：只有 Credits 读数的工具（Qoder）把 Credits 亮在大数字上，
-        // 不拿「0 tokens」替它说话。
-        const bool bigCredits = one && sel && sel->usage.total() == 0 && sel->has_credits &&
-                                sel->credits > 0;
-        const std::string big = bigCredits ? R31Num(sel->credits) : R31Compact(sum);
-        const std::string unit = bigCredits ? "Credits" : "tokens";
-        const float nw = TextWidth(big, loc, T_N35, -1.2f);
-        DrawTextRun(dl, hx, TextTop(cy + 51.0f, 42.0f, T_N35, loc), big, loc, k31Fg, T_N35, -1.2f);
-        DrawTextRun(dl, hx + nw + 3.0f, TextTop(cy + 76.5f, 16.5f, T_CHIP, loc), unit, loc,
-                    k31Muted, T_CHIP);
-        int n = 0;
-        for (const Tool& t : g_pd.tools)
-            if (inSrc(t) && (R31HasUsage(t) || R31QuotaAny(t))) n++;
-        R31Mid(dl, hx, cy + 107.5f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
-        cy += 133.0f;
+                if (inSrc(t) && (R31HasUsage(t) || R31QuotaAny(t))) n++;
+            R31Mid(dl, hx, ry + 6.0f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
+            cy = ry + 26.0f;
+        }
         // 四档拆分行（今日段）：大数字=四档之和，拆开摆才对得了账——缓存读按原值计入
         // 会让总量看着虚高（官方读数多半只算输入），两种口径都亮出来，用户自己判断。
         if (g_r31_useg == 0) {

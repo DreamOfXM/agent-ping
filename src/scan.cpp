@@ -2215,35 +2215,64 @@ void roll_daily(Snapshot& s) {
     const std::string p = daily_path();
     if (p.empty()) return;
     const long today = day_key(s.window_start);
-    std::vector<Snapshot::DayUse> rows;
+    // 2026-11-12 起按工具落盘：一行一天一工具「day agent tokens credits」；旧格式
+    // 「day tokens credits」读回时折算成 "*"（全局）行——周/月总量与柱图照旧成立。
+    std::map<long, std::map<std::string, Snapshot::DayUse>> per;   // day → agent → 量
     {
         std::ifstream f(p);
-        long d; long tk; double cr;
-        while (f >> d >> tk >> cr) {
-            if (d == today) continue;          // 今天的旧行丢弃，下面用最新数字重写
-            rows.push_back({d, tk, cr});
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.empty()) continue;
+            std::istringstream is(line);
+            long d;
+            std::string who;
+            Snapshot::DayUse u;
+            if (is >> d >> who >> u.tokens >> u.credits) {
+                u.day = d;
+                if (d != today) per[d][who] = u;                 // 今天整段重写
+            } else {
+                // 旧三列格式：day tokens credits → "*" 行
+                std::istringstream is2(line);
+                long d2; long tk; double cr;
+                if (is2 >> d2 >> tk >> cr && d2 != today)
+                    per[d2]["*"] = {d2, tk, cr};
+            }
         }
     }
-    rows.push_back({today, s.today_tokens, s.today_credits});
-    std::sort(rows.begin(), rows.end(),
-              [](const auto& a, const auto& b) { return a.day < b.day; });
-    {
-        std::ofstream f(p);                    // 全量重写：文件只有几百行，幂等且防断行
-        for (const auto& r : rows) f << r.day << " " << r.tokens << " " << r.credits << "\n";
+    for (const auto& a : s.agents) {
+        Snapshot::DayUse u{today, a.usage.total(), 0};
+        // Qoder 的 JSONL 没有 token 明细、只有 credits：量记在 credits 列，单位各归各。
+        u.credits = 0;
+        for (const auto& se : a.sessions)
+            if (se.last_activity >= s.window_start) u.credits += se.credits;
+        per[today][a.id] = u;
     }
-    // 快照带最近 8 天（柱图 7 根 + 今天），并顺手算周/月聚合。
+    per[today]["*"] = {today, s.today_tokens, s.today_credits};
+    {
+        std::ofstream f(p);
+        for (const auto& [d, m] : per)
+            for (const auto& [who, u] : m)
+                f << d << " " << who << " " << u.tokens << " " << u.credits << "\n";
+    }
+    // 快照带最近 8 天全局（柱图）+ 整份按工具表（时段分工具消耗用）。
     s.daily.clear();
-    for (auto it = rows.rbegin(); it != rows.rend() && s.daily.size() < 8; ++it)
-        s.daily.push_back(*it);
+    s.agent_daily = per;
+    s.agent_today = per.count(today) ? per[today] : std::map<std::string, Snapshot::DayUse>{};
+    for (auto it = per.rbegin(); it != per.rend(); ++it) {
+        auto g = it->second.find("*");
+        if (g == it->second.end()) continue;
+        s.daily.push_back(g->second);
+        if (s.daily.size() >= 8) break;
+    }
     std::reverse(s.daily.begin(), s.daily.end());
     std::time_t t = (std::time_t)s.window_start;
     std::tm tv;
     localtime_r(&t, &tv);
     tv.tm_hour = 0; tv.tm_min = 0; tv.tm_sec = 0;
-    tv.tm_wday = 0;                             // 让 mktime 只按 y/m/d 折
+    tv.tm_wday = 0;
     const long monday_key = [&]() {
         std::tm m = tv;
-        m.tm_mday -= (m.tm_wday == 0 ? 6 : m.tm_wday - 1);   // 周一=一周之始
+        m.tm_mday -= (m.tm_wday == 0 ? 6 : m.tm_wday - 1);
         mktime(&m);
         return day_key(mktime(&m));
     }();
@@ -2251,9 +2280,11 @@ void roll_daily(Snapshot& s) {
     m0.tm_mday = 1;
     const long month_key = day_key(mktime(&m0));
     s.week_tokens = s.month_tokens = 0;
-    for (const auto& r : rows) {
-        if (r.day >= monday_key) s.week_tokens += r.tokens;
-        if (r.day >= month_key) s.month_tokens += r.tokens;
+    for (const auto& [d, m] : per) {
+        auto g = m.find("*");
+        if (g == m.end()) continue;
+        if (d >= monday_key) s.week_tokens += g->second.tokens;
+        if (d >= month_key) s.month_tokens += g->second.tokens;
     }
 }
 
