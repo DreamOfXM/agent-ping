@@ -854,20 +854,28 @@ static NSString *RunOSOut(NSString *src, NSTimeInterval secs, BOOL *ok) {
         return [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
     } @catch (...) { if (ok) *ok = NO; return @""; }
 }
+static NSString *g_lastOscErr = @"";
 static BOOL RunOSC(NSString *src, NSTimeInterval secs) {
+    g_lastOscErr = @"";
     @try {
         NSTask *t = [[NSTask alloc] init];
         t.launchPath = @"/usr/bin/osascript";
         t.arguments = @[ @"-e", src ];
         t.standardOutput = [NSPipe pipe];
-        t.standardError = [NSPipe pipe];
+        NSPipe *errp = [NSPipe pipe];
+        t.standardError = errp;
         [t launch];
         NSDate *dl = [NSDate dateWithTimeIntervalSinceNow:secs];
         while ([t isRunning] && [dl timeIntervalSinceNow] > 0)
             [NSThread sleepForTimeInterval:0.05];
-        if ([t isRunning]) { [t terminate]; return NO; }
-        return t.terminationStatus == 0;
-    } @catch (...) { return NO; }
+        if ([t isRunning]) { [t terminate]; g_lastOscErr = @"osascript 超时"; return NO; }
+        if (t.terminationStatus == 0) return YES;
+        NSData *ed = [errp.fileHandleForReading readDataToEndOfFile];
+        NSString *e = [[NSString alloc] initWithData:ed encoding:NSUTF8StringEncoding] ?: @"?";
+        g_lastOscErr = [e stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        return NO;
+    } @catch (...) { g_lastOscErr = @"osascript 异常"; return NO; }
 }
 static BOOL RunOSA(NSString *src) {   // 可靠通路（Terminal.app）保留同步版
     @try {
@@ -902,10 +910,21 @@ static BOOL RunInTerminal(NSString *cmdBody) {
     NSString *path = [NSString stringWithUTF8String:pathp];
     // 终式（2026-11-12 实测两种证据）：create window 直接带 command 参数——会话以该
     // 命令启动，不存在「开窗后再模拟敲键」的竞态（write text 方案在真机上 flakes 两次）。
-    NSString *it = [NSString stringWithFormat:
-        @"tell application \"iTerm2\"\nactivate\n"
-         "create window with default profile command \"sh %@\"\nend tell", path];
-    if (RunOSC(it, 5.0)) return YES;
+    // 用户规则（2026-11-12 第三次强调）：有 iTerm2 就优先打开 iTerm2，终端优先级靠后。
+    // iTerm2 失败绝不静默换 Terminal——先把失败原因留在 g_lastOscErr 里（调用方写进
+    // reason，面板与日志都看得见），Terminal 只做「iTerm2 失败后的最后兜底」并注明。
+    const BOOL itermInstalled =
+        [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm.app"] ||
+        [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm2.app"];
+    if (itermInstalled) {
+        NSString *it = [NSString stringWithFormat:
+            @"tell application \"iTerm2\"\nactivate\n"
+             "create window with default profile command \"sh %@\"\nend tell", path];
+        if (RunOSC(it, 5.0)) return YES;
+        fprintf(stderr, "[终端] iTerm2 脚本失败，退 Terminal 兜底 ｜ %s\n",
+                g_lastOscErr.UTF8String ?: "");
+        fflush(stderr);
+    }
     NSString *te = [NSString stringWithFormat:
         @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", path];
     return RunOSA(te);
