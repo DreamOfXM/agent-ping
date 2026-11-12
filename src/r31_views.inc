@@ -2518,7 +2518,11 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             }
             const float nh = (float)R31Wrap(notes[i], listW - 28.0f, loc, T_S9, 3).size() * 13.5f;
             if (cr) expH[i] = nh + 10.0f;
-            else if (rows[i].has_parts) expH[i] = 4.0f * 17.0f + 4.0f + nh + 8.0f;
+            else if (rows[i].has_parts) {
+                const int mls =
+                    (g_r31_useg == 0 && rows[i].tool) ? (int)rows[i].tool->models.size() : 0;
+                expH[i] = 5.0f * 48.0f + (float)mls * 16.0f + nh + 14.0f;
+            }
             else expH[i] = nh + 10.0f;
         }
         float cardH = 26.0f + (float)rows.size() * 30.0f +
@@ -2596,35 +2600,70 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             ry += 30.0f;
             if (open[i]) {
                 if (!cr && r.has_parts) {
-                    static const char* kPart[4] = {"r_input", "r_output", "r_cache_read",
-                                                   "r_cache_write"};
+                    // v7 M14/M13：两列小格网格——命中环 + 四档 + 诚实格。
+                    // 厂商日志没写的字段画「—」并注明（不拿 0 冒充，也不估算）。
+                    const float valX = L + listW - 14.0f;
                     const long pv[4] = {r.parts.input, r.parts.output, r.parts.cache_read,
                                         r.parts.cache_write};
-                    const float barX = L + 14.0f + 58.0f;
-                    const float valX = L + listW - 14.0f;
-                    for (int k = 0; k < 4; k++) {
-                        const float prY = ry + (float)k * 17.0f;
-                        DrawTextRun(dl, L + 14.0f, TextMid(prY + 8.5f, T_S9, loc),
-                                    T(kPart[k], loc), loc, k31Muted, T_S9);
-                        const std::string pvs = R31Compact((double)pv[k]);
-                        const float pvw = TextWidth(pvs, loc, T_S9);
-                        DrawTextRun(dl, valX - pvw, TextMid(prY + 8.5f, T_S9, loc), pvs, loc,
-                                    k31Sec, T_S9);
-                        const float bw2 = valX - pvw - 8.0f - barX;
-                        if (bw2 > 20.0f) {
-                            dl->AddRectFilled(ImVec2(barX, prY + 7.0f),
-                                              ImVec2(barX + bw2, prY + 10.0f),
-                                              WithA(k31Line, 150), 1.5f);
-                            const float ratio =
-                                r.tokens > 0 ? (float)((double)pv[k] / (double)r.tokens) : 0.0f;
-                            if (ratio > 0.0f)
-                                dl->AddRectFilled(
-                                    ImVec2(barX, prY + 7.0f),
-                                    ImVec2(barX + bw2 * std::min(1.0f, ratio), prY + 10.0f),
-                                    WithA(k31Blue, 190), 1.5f);
+                    const int den = (int)(r.parts.input + r.parts.cache_read);
+                    const int hitPct = den > 0 ? (int)std::lround(100.0 * (double)r.parts.cache_read /
+                                                                 (double)den)
+                                               : -1;
+                    const bool hasCr = r.tool && r.tool->has_credits && r.tool->credits > 0;
+                    struct MCell {
+                        const char* k;
+                        std::string v;
+                        const char* sub;
+                        bool blank;
+                        bool ring;
+                    };
+                    const MCell cells[10] = {
+                        {"r_cell_hit", hitPct >= 0 ? std::to_string(hitPct) + "%" : "",
+                         "", hitPct < 0, true},
+                        {"r_ctx_use", "", "r_sub_ctx", true, false},
+                        {"r_input", R31Compact((double)pv[0]), "", false, false},
+                        {"r_output", R31Compact((double)pv[1]), "", false, false},
+                        {"r_cache_read", R31Compact((double)pv[2]), "", false, false},
+                        {"r_cache_write", R31Compact((double)pv[3]), "", false, false},
+                        {"r_think", "", "r_sub_ctx", true, false},
+                        {"r_cell_cr", hasCr ? R31Num(r.tool->credits) : "", "r_sub_notlogged",
+                         !hasCr, false},
+                        {"r_cell_dur", "", "r_sub_nodur", true, false},
+                        {"r_cell_spd", "", "r_sub_noest", true, false},
+                    };
+                    int modelLines = (g_r31_useg == 0 && r.tool) ? (int)r.tool->models.size() : 0;
+                    const int cols = 2;
+                    const float cW = (listW - 28.0f - 12.0f) / 2.0f;
+                    for (int ci = 0; ci < 10; ci++) {
+                        const MCell& c = cells[ci];
+                        const int col = ci % cols, row = ci / cols;
+                        const float cx = L + 14.0f + (float)col * (cW + 12.0f);
+                        const float cyC = ry + (float)row * 48.0f;
+                        float lx = cx;
+                        if (c.ring) {
+                            // 进度环：13px 径、48 段平滑弧，从顶起顺时针到命中率——
+                            // 灰轨+蓝弧在小尺寸下会糊成一团，尺寸和段数照稿子的 12px/2.6 放大。
+                            const float rc = cx + 6.5f, ryc = cyC + 7.5f, rr = 6.0f;
+                            dl->AddCircle(ImVec2(rc, ryc), rr, WithA(k31Line, 140), 40, 2.4f);
+                            if (hitPct > 0) {
+                                dl->PathArcTo(ImVec2(rc, ryc), rr, -3.14159265f * 0.5f,
+                                              -3.14159265f * 0.5f +
+                                                  3.14159265f * 2.0f * (float)hitPct / 100.0f,
+                                              48);
+                                dl->PathStroke(WithA(k31Blue, 230), 0, 2.4f);
+                            }
+                            lx = cx + 17.0f;
                         }
+                        DrawTextRun(dl, lx, TextMid(cyC + 6.0f, T_S9, loc), T(c.k, loc), loc,
+                                    k31Faint, T_S9);
+                        DrawTextRun(dl, cx, TextMid(cyC + 24.0f, T_S12B, loc),
+                                    c.v.empty() ? "—" : c.v.c_str(), loc,
+                                    c.blank ? k31Faint : k31Fg, T_S12B);
+                        if (c.sub && c.sub[0])
+                            DrawTextRun(dl, cx, TextMid(cyC + 40.0f, T_S9, loc), T(c.sub, loc),
+                                        loc, k31Muted, T_S9);
                     }
-                    ry += 4.0f * 17.0f;
+                    ry += 5.0f * 48.0f;
                     // v7：逐模型行（名 + 本段 tokens）。命中率按模型日志没写，不编。
                     if (g_r31_useg == 0 && r.tool && !r.tool->models.empty()) {
                         for (const auto& mu : r.tool->models) {
