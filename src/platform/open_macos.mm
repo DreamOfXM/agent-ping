@@ -927,11 +927,15 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
     // 命令体：cd '<cwd 转义>' + exec <resume 命令>。会话 id 是 uuid（无 shell 元字符），
     // 裸传；cwd 含中文/空格，用 POSIX 单引号包住并转义内嵌单引号。
+    // 命令体在 C 侧拼（snprintf 的 %s 吃 char*，语义正确）。之前的写法把 NSString
+    // 塞进 %@ 格式串当 %s 用——打出的是对象指针字节（脚本里出现 I'╊ 这种乱码 uuid，
+    // 2026-11-12 用户实测三轮「新窗口没会话」的直接根因）。
+    char cmdb[512];
+    snprintf(cmdb, sizeof cmdb, t->cli_fmt, session_id ? session_id : "");
+    NSString *cliCmd = @(cmdb);
     NSString *body = (cwd && *cwd)
-        ? [NSString stringWithFormat:@"cd %@ && exec %@",
-           ShQ(@(cwd)), [NSString stringWithFormat:@(t->cli_fmt), @(session_id ? session_id : "")]]
-        : [NSString stringWithFormat:@"exec %@",
-           [NSString stringWithFormat:@(t->cli_fmt), @(session_id ? session_id : "")]];
+        ? [NSString stringWithFormat:@"cd %@ && exec %@", ShQ(@(cwd)), cliCmd]
+        : [NSString stringWithFormat:@"exec %@", cliCmd];
     if (layer) *layer = 4;
     if (RunInTerminal(body)) {
         Say(reason, out_len, @"已在新终端窗口续上这条会话");
@@ -1074,8 +1078,9 @@ extern "C" int ap_open3(const char* agent_id, const char* session_id, const char
     // ⓪ 纯 CLI 的会话级落点（claude/pi）：iTerm2›Terminal 新开窗口跑 resume 命令。
     //    真正「回到那一条会话」，比开一堆文件夹诚实；活会话的「只切前台」在面板侧判断。
     if (t->cli_fmt[0]) {
-        NSString* cli = [NSString stringWithFormat:@(t->cli_fmt),
-                         (session_id ? @(session_id) : @"")];
+        char cmdb[512];
+        snprintf(cmdb, sizeof cmdb, t->cli_fmt, session_id ? session_id : "");
+        NSString* cli = @(cmdb);
         NSString* body = (cwd && *cwd)
             ? [NSString stringWithFormat:@"cd %@ && exec %@", ShQ(@(cwd)), cli]
             : [NSString stringWithFormat:@"exec %@", cli];
