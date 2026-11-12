@@ -3329,7 +3329,8 @@ static Landing JumpTo(const Hit& h) {
     // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。定位不分死活：
     // ① 活进程按 tty 精确定位到那个标签；② 进程退了但标签还留着 → 按标题（含 cli 首词）
     // 选中新开；都没中 ③ iTerm2›Terminal 新窗口跑 resume——真正回到那一条会话。
-    if (h.agent_id == "claude" || h.agent_id == "pi") {
+    if (h.agent_id == "claude" || h.agent_id == "pi" ||
+        h.agent_id == "codex" || h.agent_id == "opencode") {
         char lad[512] = {0};
         int lloc = -1;
         if (ap_locate_cli_session(h.agent_id.c_str(), h.native_id.c_str(),

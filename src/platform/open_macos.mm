@@ -39,10 +39,12 @@ const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencod
 const Target kTargets[] = {
     {"/Applications/Qoder.app",     ".qoder/projects",   "", ""},
     {"",                            ".claude/projects",  "", "claude --resume %s"},
-    {"",                            ".codex/sessions",   "", ""},
+    // codex resume <UUID> 子命令实测存在（--help 核过）；无桌面 App，终端托管
+    {"",                            ".codex/sessions",   "", "codex resume %s"},
     {"/Applications/ZCode.app",     ".zcode/cli/db",     "", ""},
     {"/Applications/WorkBuddy.app", ".workbuddy/projects", "workbuddy://chat/", ""},
-    {"/Applications/OpenCode.app",  ".local/share/opencode", "", ""},
+    // opencode 的 TUI 活在终端里（本机 ttys001 实测），--session 旗标 --help 核过
+    {"/Applications/OpenCode.app",  ".local/share/opencode", "", "opencode --session %s"},
     {"",                            ".pi/agent/sessions", "", "pi --session %s"},
     {"/Applications/QwenWorkCN.app", ".qwenworkcn/projects", "", ""},
 };
