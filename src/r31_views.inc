@@ -2087,6 +2087,28 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             if (inSrc(t) && (R31HasUsage(t) || R31QuotaAny(t))) n++;
         R31Mid(dl, hx, cy + 107.5f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
         cy += 133.0f;
+        // 四档拆分行（今日段）：大数字=四档之和，拆开摆才对得了账——缓存读按原值计入
+        // 会让总量看着虚高（官方读数多半只算输入），两种口径都亮出来，用户自己判断。
+        if (g_r31_useg == 0) {
+            ap::UsageParts up;
+            if (one) { if (sel) up = sel->usage; }
+            else for (const Tool& t : g_pd.tools) if (t.present()) {
+                up.input += t.usage.input;
+                up.output += t.usage.output;
+                up.cache_read += t.usage.cache_read;
+                up.cache_write += t.usage.cache_write;
+            }
+            if (up.total() > 0) {
+                char b1[16], b2[16], b3[16];
+                std::string c1 = R31Compact((double)up.input);   snprintf(b1, sizeof b1, "%s", c1.c_str());
+                std::string c2 = R31Compact((double)up.output);  snprintf(b2, sizeof b2, "%s", c2.c_str());
+                std::string c3 = R31Compact((double)up.cache_read); snprintf(b3, sizeof b3, "%s", c3.c_str());
+                const std::string br = RFmt(T("r_usage_break", loc), b1, b2, b3);
+                DrawTextRun(dl, L + 7.0f, TextTop(cy - 10.0f, 14.0f, T_S9, loc), br, loc,
+                            k31Faint, T_S9);
+                cy += 12.0f;
+            }
+        }
         // M9 近 7 天柱图：数据是 daily.txt 的既有行。第一天只有 1 根也照画——
         // 整块消失会让「柱图在哪」变成疑问；1 根就是今天的真实形状，不装满。
         if (!one && !g_pd.daily.empty()) {

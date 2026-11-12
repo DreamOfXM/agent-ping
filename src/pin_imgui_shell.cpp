@@ -1174,6 +1174,13 @@ static const Key kStr[] = {
                         "hit = lettura cache ÷ (input + lettura cache), dai campi d'uso.",
                         "命中率＝キャッシュ読み÷(入力+キャッシュ読み)、ログ既存フィールド。",
                         "적중률=캐시 읽기÷(입력+캐시 읽기), 로그 기존 필드."}},
+     // 用量大数字的四档拆分：大数字=四档之和，拆分行让它可对账——缓存读按原值计入
+     // 会让总量看着虚高（官方 App 多半只显示输入），拆开摆比换口径诚实。
+     {"r_usage_break", {"输入 %s · 输出 %s · 缓存读 %s", "input %s · output %s · cache read %s",
+                        "Input %s · Output %s · Cache-Lesung %s",
+                        "input %s · output %s · lettura cache %s",
+                        "入力 %s · 出力 %s · キャッシュ読み %s",
+                        "입력 %s · 출력 %s · 캐시 읽기 %s"}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
     // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
     // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
