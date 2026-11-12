@@ -2109,8 +2109,8 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                 cy += 12.0f;
             }
         }
-        // M9 近 7 天柱图：数据是 daily.txt 的既有行。第一天只有 1 根也照画——
-        // 整块消失会让「柱图在哪」变成疑问；1 根就是今天的真实形状，不装满。
+        // M9 近 7 天柱图：固定 7 槽位（6 天前→今天），daily 没有的天画空槽底线——
+        // 第一天绝不能让一根柱吃满整图宽，那是色块不是图表。
         if (!one && !g_pd.daily.empty()) {
             const float bh = 84.0f;
             R31Glass(dl, L, cy, listW, bh, 12.0f);
@@ -2121,30 +2121,39 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             R31Mid(dl, L + 14.0f, cy + 14.0f, T("r_useg_last7", loc), loc, k31Sec, T_S11B);
             const std::string pk2 = RFmt(T("r_useg_peak", loc), pk);
             DrawTextRight(dl, L + listW - 14.0f, TextMid(cy + 14.0f, T_S9, loc), pk2, loc, k31Muted, T_S9);
-            const int bars = (int)g_pd.daily.size();
-            const float gap = 7.0f, bw2 = (listW - 28.0f - gap * (bars - 1)) / bars;
-            const long todayKey = (long)0;   // 末行即今天（daily 旧→新）
-            for (int i = 0; i < bars; i++) {
-                const auto& d = g_pd.daily[i];
-                const bool isToday = (i == bars - 1);
-                const float h2 = d.tokens <= 0 ? 2.0f
-                    : std::fmax(3.0f, (float)((double)d.tokens / peak) * 44.0f);
+            std::map<long, long> byday;
+            for (const auto& d : g_pd.daily) byday[d.day] = d.tokens;
+            const float gap = 7.0f, bw2 = (listW - 28.0f - gap * 6.0f) / 7.0f;
+            for (int i = 0; i < 7; i++) {
+                // 槽位日期：今天往回数 i 天（用本地日历折日，避开 DST 的整除漂移）
+                std::time_t td = (std::time_t)(g_pd.window_start - (double)(6 - i) * 86400.0);
+                std::tm tvd;
+                localtime_r(&td, &tvd);
+                const long key = (long)tvd.tm_year * 10000 + (tvd.tm_mon + 1) * 100 + tvd.tm_mday;
+                const auto it = byday.find(key);
+                const bool has = (it != byday.end() && it->second > 0);
+                const bool isToday = (i == 6);
                 const float bx = L + 14.0f + (float)i * (bw2 + gap);
-                dl->AddRectFilled(ImVec2(bx, cy + 62.0f - h2), ImVec2(bx + bw2, cy + 62.0f),
-                                  isToday ? WithA(k31Blue, 220) : WithA(k31Blue, 110), 3.0f);
-                // 末位是今天（今天Key无需算），用文字标注而非日期数字，六语都成立
+                if (has) {
+                    const float h2 = std::fmax(3.0f, (float)((double)it->second / peak) * 44.0f);
+                    dl->AddRectFilled(ImVec2(bx, cy + 62.0f - h2), ImVec2(bx + bw2, cy + 62.0f),
+                                      isToday ? WithA(k31Blue, 220) : WithA(k31Blue, 110), 3.0f);
+                } else {
+                    // 空槽：2px 底线占位，明说「这一天没有记录」而不是留白谜语
+                    dl->AddRectFilled(ImVec2(bx, cy + 60.0f), ImVec2(bx + bw2, cy + 62.0f),
+                                      WithA(k31Line, 150), 1.5f);
+                }
                 if (isToday) {
                     const std::string tl = T("r_today", loc);
-                    DrawTextRun(dl, bx + (bw2 - TextWidth(tl, loc, T_S8)) * 0.5f,
-                                cy + 66.5f, tl, loc, k31Sec, T_S8);
+                    DrawTextRun(dl, bx + (bw2 - TextWidth(tl, loc, T_S8)) * 0.5f, cy + 66.5f,
+                                tl, loc, has ? k31Sec : k31Faint, T_S8);
                 } else {
                     char db[8];
-                    snprintf(db, sizeof db, "%ld", d.day % 100);
-                    DrawTextRun(dl, bx + (bw2 - TextWidth(db, loc, T_S8)) * 0.5f,
-                                cy + 66.5f, db, loc, k31Faint, T_S8);
+                    snprintf(db, sizeof db, "%02d", tvd.tm_mday);
+                    DrawTextRun(dl, bx + (bw2 - TextWidth(db, loc, T_S8)) * 0.5f, cy + 66.5f,
+                                db, loc, has ? k31Faint : WithA(k31Faint, 130), T_S8);
                 }
             }
-            (void)todayKey;
             cy += bh + 10.0f;
         }
     }
