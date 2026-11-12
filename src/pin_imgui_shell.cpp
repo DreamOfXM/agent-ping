@@ -3824,7 +3824,34 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_r31_useg_unit = (h.opt == 1) ? 1 : 0;
             return;
         }
-        case HIT_USEGROW: {                   // v5 账本行展开/收起
+        case HIT_USEGROW: {                   // v5 账本行展开/收起；双击＝定位最近会话
+            // 双击检测：同 key <400ms 两击 → 不翻展开，直接跳到该工具最近的一条会话
+            //（2026-11-12 用户拍板：账本行双击要能定位，光展开不够）。
+            static std::string dk_last;
+            static double dk_at = 0;
+            const double dnow = ImGui::GetTime();
+            if (dk_last == h.key && dnow - dk_at < 0.40) {
+                dk_last.clear();
+                const UIRow* best = nullptr;
+                const std::string aid = h.key.substr(h.key.find_last_of(':') + 1);
+                for (const auto& r : g_pd.rows)
+                    if (r.agent_id == aid && (!best || r.at > best->at)) best = &r;
+                if (best) {
+                    Hit jh = h;
+                    jh.key = best->key;
+                    jh.agent_id = best->agent_id;
+                    jh.native_id = best->native_id;
+                    jh.cwd = best->cwd;
+                    jh.title = best->title;
+                    jh.state = best->state;
+                    JumpAndReport(jh);
+                } else {
+                    Toast(T("r_ledger_none_tk", LocOfZid(h.zid)), "");
+                }
+                return;
+            }
+            dk_last = h.key;
+            dk_at = dnow;
             if (g_r31_useg_open.count(h.key)) g_r31_useg_open.erase(h.key);
             else g_r31_useg_open.insert(h.key);
             return;
