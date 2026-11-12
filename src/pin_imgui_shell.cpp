@@ -6871,7 +6871,9 @@ static bool EdgeMotionReduced();
 /// 柱上剪影盒子只有 18pt，这一套按柱稿自己的墨量配（各家字形粗细不同，同号画出来重量不一）。
 static float EdgeMarkPx(const std::string& agent) {
     return agent == "qoder" ? 13.8f : agent == "workbuddy" ? 16.7f
-         : agent == "zcode" ? 14.1f : agent == "claude" ? 16.0f : 0.0f;
+         : agent == "zcode" ? 14.1f : agent == "claude" ? 16.0f
+         : agent == "opencode" ? 15.0f : agent == "qwenworkcn" ? 15.0f
+         : agent == "pi" ? 13.5f : agent == "codex" ? 15.0f : 0.0f;
 }
 /// 一枚剪影：有位图按 SIZE 表画；没有的回退 11px/600 首字母（稿子 markHTML 的 fallback）。
 static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agent,
@@ -6881,6 +6883,22 @@ static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agen
         const float px = EdgeMarkPx(agent);
         dl->AddImage((ImTextureID)tex, ImVec2(cx - px * 0.5f, cy - px * 0.5f),
                      ImVec2(cx + px * 0.5f, cy + px * 0.5f), ImVec2(0, 0), ImVec2(1, 1), ink);
+        return;
+    }
+    // 没有剪影的五路（opencode/qwenworkcn/pi/codex）退回各自的官方 RGBA 瓷贴——
+    // 字母块是最后手段，不再给「有贴图可用的路」用（2026-11-12 用户拍板）。
+    const ImU64 tile = agent == "opencode"   ? g_agent31TexOpenCode
+                     : agent == "qwenworkcn" ? g_agent31TexQwenWork
+                     : agent == "pi"         ? g_agent31TexPi
+                     : agent == "codex"      ? g_agent31TexCodex
+                     : agent == "claude"     ? g_agentTexClaude
+                     : agent == "qoder"      ? g_agentTexQoder
+                     : 0;
+    if (tile) {
+        const float px = EdgeMarkPx(agent);
+        dl->AddImageRounded((ImTextureID)tile, ImVec2(cx - px * 0.5f, cy - px * 0.5f),
+                            ImVec2(cx + px * 0.5f, cy + px * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
+                            IM_COL32_WHITE, px * 0.22f);
         return;
     }
     const std::string g = initial.empty() ? std::string("?") : initial;
