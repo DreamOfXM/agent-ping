@@ -739,6 +739,21 @@ static void R31StatusRight(ImDrawList* dl, float x1, float cy, const UIRow& r, i
     DrawTextRun(dl, x1 - tw, TextMid(cy, T_S11B, loc), w, loc, col, T_S11B);
 }
 
+/// N1 循环证据 chip「循环 ×N」：右对齐画在 xr，返回占宽；没有证据返回 0，一格不画。
+/// 与「疑似」相对：疑似是推断（灰、不催人），循环是日志尾部 ≥3 条相同原文的事实
+/// （红、醒目），但同样不响——进告警档得先过 alert_probe，这里只摆证据。
+static float R31LoopChip(ImDrawList* dl, float xr, float cy, const UIRow& r, int loc) {
+    if (r.loop_count < 3) return 0.0f;
+    const std::string lab = RFmt(T("r_loop", loc), r.loop_count);
+    const float tw = TextWidth(lab, loc, T_S9B);
+    const float x0 = xr - tw - 14.0f;
+    dl->AddRectFilled(ImVec2(x0, cy - 9.0f), ImVec2(xr, cy + 9.0f), IM_COL32(255, 176, 155, 30), 5.0f);
+    dl->AddRect(ImVec2(x0 + 0.5f, cy - 8.5f), ImVec2(xr - 0.5f, cy + 8.5f),
+                IM_COL32(255, 176, 155, 70), 5.0f, 0, 1.0f);
+    DrawTextRun(dl, x0 + 7.0f, TextMid(cy, T_S9B, loc), lab, loc, k31Red, T_S9B);
+    return tw + 14.0f;
+}
+
 // ── 查询与筛选 ──────────────────────────────────────────────────────────────
 static bool R31Match(const UIRow& r, const std::string& q) {
     if (q.empty()) return true;
@@ -1333,6 +1348,8 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
     const float tw1 = R31RowTag(dl, cx, topCy, r.client, loc);
     cx += tw1 + (tw1 > 0.0f ? 5.0f : 0.0f);   // 没画就不留间距
     R31StatusRight(dl, mainR - 2.0f, topCy, r, loc);
+    // N1：待处理行（失败/授权）同样挂循环证据 chip，右对齐到状态词左侧。
+    R31LoopChip(dl, mainR - 2.0f - R31StatusW(r, loc) - 16.0f, topCy, r, loc);
     // row-title：y+30..+46（有子对话时，项目名给「⌄ N 条子对话」芯片让位）
     {
         const std::string name = R31RowName(r);
@@ -1436,15 +1453,17 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
         const std::string state = T(R31KindWord(kind), loc);
         const float launchX = inR - 12.0f;
         float sx = launchX - 6.0f - TextWidth(state, loc, T_S10);
+        // N1 循环 chip：挂在状态字左侧，环/图标与项目名裁剪都要让位，别压字。
+        const float loopW = R31LoopChip(dl, sx - 10.0f, y + 51.0f, r, loc);
         if (running) {
-            R31Ring(dl, sx - 6.0f - 16.0f, y + 43.0f, tn);
+            R31Ring(dl, sx - 6.0f - 16.0f - loopW, y + 43.0f, tn);
         } else {
-            I31(dl, R31KindIcon(kind), sx - 6.0f - 11.0f, y + 45.5f, 11.0f, kc);
+            I31(dl, R31KindIcon(kind), sx - 6.0f - 11.0f - loopW, y + 45.5f, 11.0f, kc);
         }
         DrawTextRun(dl, sx, TextMid(y + 51.0f, T_S10, loc), state, loc, kc, T_S10);
         I31(dl, I31_LAUNCH, launchX, y + 45.0f, 12.0f, kc);
         DrawTextRun(dl, bodyL, TextMid(y + 51.0f, T_S15B, loc),
-                    ClipToWidth(proj, sx - 12.0f - bodyL, loc, T_S15B), loc, k31Fg, T_S15B, -0.3f);
+                    ClipToWidth(proj, sx - 12.0f - loopW - bodyL, loc, T_S15B), loc, k31Fg, T_S15B, -0.3f);
     }
     // rprog：y+70..+74（x59..387）
     if (maxTurns > 0) {

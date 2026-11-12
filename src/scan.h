@@ -118,6 +118,11 @@ struct Session {
     /// 尾部最后一条 tool_use 的真命令（Bash 的 command / 编辑类的 file_path）。
     /// `.live` 的 `$ cmd` 只画这条原文；没有就整行不画，不用标题冒充命令。
     std::string last_cmd;
+    /// N1 循环证据：尾部连续 ≥3 条完全相同的 tool_use 原文（日志事实，不是「没输出」推断）。
+    /// <3 ＝ 没有循环证据。只标不响——进告警档得先过 alert_probe，这里不动告警语义。
+    int loop_count = 0;
+    /// 重复段第一条的时刻；0＝没有循环。与 last_activity 相减即「重复了多久」。
+    double loop_from = 0;
     /// hook 信号自带的触发说明（Notification 的 message）。只有 hook 真给了才非空：
     /// 授权详情用它顶替「工具」那一行，日志推出来的推断不许编一句说明。
     std::string trigger;

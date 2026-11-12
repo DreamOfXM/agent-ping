@@ -1120,6 +1120,9 @@ static const Key kStr[] = {
                         "記録に切り詰めの印なし", "원본에 잘림 표시 없음"}},
     {"r_children",     {"%d 条子对话", "%d sub-agents", "%d Unteragenten", "%d sotto-agenti",
                         "%d 件のサブ会話", "%d개 하위 대화"}},
+    // N1 循环证据 chip：日志尾部 ≥3 条相同 tool_use 原文（事实，非推断）。六语都一行以内。
+    {"r_loop",         {"循环 ×%d", "loop ×%d", "Schleife ×%d", "ciclo ×%d",
+                        "ループ ×%d", "반복 ×%d"}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
     // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
     // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
@@ -1736,6 +1739,10 @@ struct UIRow {
     double span_sec = 0;
     /// `.live` 的 `$ cmd`：尾部最后一条 tool_use 的真命令；空＝整行不画。
     std::string last_cmd;
+    /// N1 循环证据（尾部 ≥3 条相同 tool_use 原文）。<3＝没有，chip 整格不画。
+    int loop_count = 0;
+    /// 重复段起点时刻，0＝没有。与 at 相减即「重复了多久」。
+    double loop_from = 0;
     /// 授权详情「触发说明」：hook 原文；空＝退回「工具」那一行。
     std::string trigger;
     /// 这一行的「等你」证据出自哪条通道（ap::AwaitSrc）：详情屏「来源」那一格按它选措辞。
@@ -5240,6 +5247,8 @@ static void RebuildPanel(const ap::Snapshot& s) {
             row.span_sec = (se.first_activity > 0 && se.last_activity > se.first_activity)
                                ? se.last_activity - se.first_activity : 0.0;
             row.last_cmd = se.last_cmd;
+            row.loop_count = se.loop_count;
+            row.loop_from = se.loop_from;
             row.trigger = se.trigger;
             row.tokens = se.tokens;
             row.credits = se.credits;
@@ -6933,6 +6942,8 @@ static void LoadProbeFixture() {
     live->title = "【样例】多 Agent 监控工具调研";   // R31RowName 标题优先
     live->span_sec = 4 * 3600.0 + 12 * 60.0;      // .live「连续 4h 12m」
     live->last_cmd = "rg -n \"safe-delete\" src/"; // .live 的 `$ cmd`
+    live->loop_count = 6;                          // N1：样例循环证据（chip 演示用）
+    live->loop_from = now - 32 * 60.0;             // 重复了约 32 分钟
     live->children = {                             // 任务下挂着的子代理对话（展开用样例）
         {"c-a1", "你是调研员。收集三款同类产品的定价页与收费方式。", true, now - 300},
         {"c-a2", "你是 UI 调研员。只读它们的设置屏，列出可借鉴的三处。", false, now - 4320},

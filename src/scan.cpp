@@ -240,6 +240,10 @@ struct Raw {
     std::string cwd;
     std::string prompt;      // 首条 user 正文首行
     std::string last_cmd;    // 尾部最后一条 tool_use 的真命令
+    /// 尾部 tool_use 原文序列（≤10 条 (时刻, 首行)）：N1 循环检测的证据，只看尾部所以只会漏报。
+    std::vector<std::pair<double, std::string>> tool_seq;
+    int loop_count = 0;      // N1：尾部连续相同 tool_use 的条数（≥3 才非零）
+    double loop_from = 0;    // N1：重复段第一条的时刻
     long tokens = 0;
     double credits = 0;
     UsageParts usage;                  // 今天（或窗内）四档；tokens 与它同一口径
@@ -323,8 +327,24 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
                 for (const char* k : {"command", "file_path", "pattern", "description"}) {
                     if (const std::string* v = in->str_at(k)) if (!v->empty()) { cmd = *v; break; }
                 }
-                if (!cmd.empty()) r.last_cmd = first_line(cmd);
+                if (!cmd.empty()) {
+                    const std::string fl = first_line(cmd);
+                    r.last_cmd = fl;
+                    r.tool_seq.emplace_back(d, fl);
+                    if (r.tool_seq.size() > 10) r.tool_seq.erase(r.tool_seq.begin());
+                }
             }
+        }
+    }
+
+    // N1 循环检测：只认「尾部连续相同」这一种形态（≥3 条），并把首条重复的时刻一并留下。
+    // 中间断开过的不算——那是两次独立调用，不是死循环；宁可漏报不误报（与队列口径同精神）。
+    {
+        const auto& v = r.tool_seq;
+        if (!v.empty()) {
+            int n = 1;
+            for (size_t i = v.size() - 1; i > 0 && v[i - 1].second == v.back().second; --i) ++n;
+            if (n >= 3) { r.loop_count = n; r.loop_from = v[v.size() - (size_t)n].first; }
         }
     }
 
@@ -475,6 +495,8 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
             // 时间算进「连续」。面板那边拿到的是秒数，画不画由它按 span_sec>0 判。
             s.first_activity = r.first_ts >= since ? r.first_ts : 0;
             s.last_cmd = r.last_cmd;
+            s.loop_count = r.loop_count;
+            s.loop_from = r.loop_from;
             s.queue_pos = (s.state == ST_QUEUED) ? r.queue_live : 0;
             s.tokens = r.last_ts >= since ? r.tokens : 0;
             s.credits = r.last_ts >= since ? r.credits : 0;
@@ -2024,9 +2046,11 @@ std::string snapshot_dump(const Snapshot& s) {
         }
         for (const Session& x : a.sessions) {
             // 按字节截（%.70s）会把 UTF-8 砍成半个字，这份 dump 是对账用的，必须可读
-            snprintf(buf, sizeof buf, "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d  %s%s%s%s",
+            snprintf(buf, sizeof buf,
+                     "  %-10s %-14s %.0f  tok=%ld cr=%.2f turn=%d q=%d loop=%d  %s%s%s%s",
                      state_name(x.state), utf8_clip(x.project, 14, "").c_str(), x.last_activity,
-                     x.tokens, x.credits, x.turns, x.queue_pos, utf8_clip(x.title, 56, "…").c_str(),
+                     x.tokens, x.credits, x.turns, x.queue_pos, x.loop_count,
+                     utf8_clip(x.title, 56, "…").c_str(),
                      x.inferred_wait ? " (推断)" : "",
                      x.question.empty() ? "" : "  ⟵", x.question.empty() ? "" : utf8_clip(x.question, 40, "…").c_str());
             out += buf;
