@@ -257,8 +257,11 @@ struct Raw {
     std::string model;                 // 窗内用得最多的模型
     std::map<std::string, long> models;
     std::array<long, 24> hourly{};     // 本机 0–23 点
+    std::array<double, 24> chourly{};  // 同小时的 Credits（Qoder 的 usage.credits 逐条有）
     long y_tokens = 0;      // 昨天同一个窗内的量，只喂表头的「较昨日」
     double y_credits = 0;
+    std::array<long, 24> y_hourly{};     // 昨天的小时格
+    std::array<double, 24> y_chourly{};  // 昨天的 Credits 小时格
     int turns = 0;          // 窗内人打出去的指令条数（排掉工具回执）
     /// 15 分钟一格的 assistant 记录数（键＝ts/900），供稿子的 Sparkline。
     /// 口径差：稿子数「所有带 timestamp 的 assistant 记录」，这里只能顺数带 usage 的那批
@@ -413,6 +416,7 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
                     std::tm tv;
                     localtime_r(&tt, &tv);
                     r.hourly[tv.tm_hour] += p.total();
+                    r.chourly[tv.tm_hour] += cr;
                 }
                 if (msg) {
                     if (const std::string* m = msg->str_at("model")) {
@@ -423,6 +427,13 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
             } else {
                 r.y_tokens += p.total();
                 r.y_credits += cr;
+                if (ts > 0) {
+                    std::time_t tt = (std::time_t)ts;
+                    std::tm tv;
+                    localtime_r(&tt, &tv);
+                    r.y_hourly[tv.tm_hour] += p.total();
+                    r.y_chourly[tv.tm_hour] += cr;
+                }
             }
         });
     }
@@ -568,7 +579,15 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
                         if (m.name == kv.first) { m.tokens += kv.second; found = true; break; }
                     if (!found) snap.models.push_back({kv.first, kv.second});
                 }
-                for (int h = 0; h < 24; h++) snap.hourly[h] += r.hourly[h];
+                for (int h = 0; h < 24; h++) {
+                    snap.hourly[h] += r.hourly[h];
+                    snap.credits_hourly[h] += r.chourly[h];
+                }
+            }
+            // 昨天的小时格独立于「今天有没有动静」：昨天跑过、今天没开的会话也要进昨天的柱图。
+            for (int h = 0; h < 24; h++) {
+                snap.yday_hourly[h] += r.y_hourly[h];
+                snap.yday_credits_hourly[h] += r.y_chourly[h];
             }
             if (y_tokens) *y_tokens += r.y_tokens;
             if (y_credits) *y_credits += r.y_credits;
@@ -1432,9 +1451,24 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
     return snap;
 }
 
+/// sqlite_master 里有没有这张表。OpenCode 2 起会话表换成 session_v2/session_message，
+/// 旧库还留着 session/message/part；两套并存，不能只按版本号猜。
+bool table_exists(sqlite3* db, const char* name) {
+    sqlite3_stmt* st = nullptr;
+    bool ok = false;
+    if (sqlite3_prepare_v2(db, "select 1 from sqlite_master where type='table' and name=? limit 1",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+        ok = (sqlite3_step(st) == SQLITE_ROW);
+    }
+    sqlite3_finalize(st);
+    return ok;
+}
+
 /// OpenCode（开源 CLI，macOS/Linux 同一个路径）：~/.local/share/opencode/opencode.db。
-/// 它的库自己就把用量按轮记全了（part 里的 step-finish），所以窗内词元能从源头按天切，
-/// 不必拿 session 表那列整生累计值冒充「今天」。
+/// 旧版把用量按轮记在 part 的 step-finish 里，窗内词元能从源头按天切；OpenCode 2
+/// 换成 session_v2 的累计列 + session_message 消息流，没有逐轮 token 行，只能分清
+/// 「今天新建的会话」（累计值全是今天的）与「跨天的会话」（不拿累计冒充今天）。
 AgentSnap scan_opencode(const std::string& name, const std::string& db_path, double now, double since) {
     AgentSnap snap;
     snap.id = "opencode";
@@ -1453,7 +1487,8 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
 
     const long long cutoff_ms = (long long)((now - kDaysBack * 86400) * 1000);
     const long long since_ms = (long long)(since * 1000);
-    // 按本机小时分桶；用量在 part 上，message 那一侧没有 tokens。
+    std::map<std::string, Session> merged;   // 裸 session id → 行；两套 schema 同一个 id 只留一条
+    // 按本机小时分桶；旧 schema 的用量在 part 上，message 那一侧没有 tokens。
     {
         std::ostringstream q;
         q << "select cast(strftime('%H', p.time_created/1000, 'unixepoch', 'localtime') as integer) h, "
@@ -1472,95 +1507,195 @@ AgentSnap scan_opencode(const std::string& name, const std::string& db_path, dou
         sqlite3_finalize(st);
     }
     // 一条语句拿齐一行要的东西：part 有 session_id 索引，60 条相关子查询量不出来。
-    std::ostringstream q;
-    q << "select s.id, coalesce(s.title, ''), coalesce(s.directory, ''), s.time_updated, "
-         "(select count(*) from part p where p.session_id = s.id "
-         " and json_extract(p.data,'$.state.status') = 'running'), "
-         "(select ifnull(sum(json_extract(p.data,'$.tokens.input') "
-         " + json_extract(p.data,'$.tokens.cache.read') "
-         " + json_extract(p.data,'$.tokens.cache.write')), 0) from part p "
-         " where p.session_id = s.id and json_extract(p.data,'$.type') = 'step-finish' "
-         " and p.time_created >= " << since_ms << "), "
-         "(select count(*) from message m where m.session_id = s.id "
-         " and json_extract(m.data,'$.role') = 'user' and m.time_created >= " << since_ms << "), "
-         "(select p.data from part p where p.session_id = s.id "
-         " and json_extract(p.data,'$.type') = 'tool' "
-         " order by p.time_created desc, p.id desc limit 1), "
-         "(select json_object('i', ifnull(sum(json_extract(p.data,'$.tokens.input')), 0), "
-         " 'o', ifnull(sum(json_extract(p.data,'$.tokens.output')), 0), "
-         " 'r', ifnull(sum(json_extract(p.data,'$.tokens.cache.read')), 0), "
-         " 'w', ifnull(sum(json_extract(p.data,'$.tokens.cache.write')), 0)) from part p "
-         " where p.session_id = s.id and json_extract(p.data,'$.type') = 'step-finish' "
-         " and p.time_created >= " << since_ms << ") "
-         "from session s where coalesce(s.time_archived, 0) = 0 "
-         "and s.time_updated >= " << cutoff_ms << " order by s.time_updated desc limit 60;";
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) != SQLITE_OK) {
-        snap.scan_error = std::string("查询失败：") + sqlite3_errmsg(db);
-        sqlite3_finalize(st);
-        sqlite3_close(db);
-        return snap;
-    }
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        std::string sid = col_text(st, 0);
-        std::string title = trim(col_text(st, 1));
-        std::string dir = col_text(st, 2);
-        long long upd = sqlite3_column_int64(st, 3);
-        int running = (int)sqlite3_column_int64(st, 4);
-        if (upd <= 0) continue;
+    {
+        std::ostringstream q;
+        q << "select s.id, coalesce(s.title, ''), coalesce(s.directory, ''), s.time_updated, "
+             "(select count(*) from part p where p.session_id = s.id "
+             " and json_extract(p.data,'$.state.status') = 'running'), "
+             "(select ifnull(sum(json_extract(p.data,'$.tokens.input') "
+             " + json_extract(p.data,'$.tokens.cache.read') "
+             " + json_extract(p.data,'$.tokens.cache.write')), 0) from part p "
+             " where p.session_id = s.id and json_extract(p.data,'$.type') = 'step-finish' "
+             " and p.time_created >= " << since_ms << "), "
+             "(select count(*) from message m where m.session_id = s.id "
+             " and json_extract(m.data,'$.role') = 'user' and m.time_created >= " << since_ms << "), "
+             "(select p.data from part p where p.session_id = s.id "
+             " and json_extract(p.data,'$.type') = 'tool' "
+             " order by p.time_created desc, p.id desc limit 1), "
+             "(select json_object('i', ifnull(sum(json_extract(p.data,'$.tokens.input')), 0), "
+             " 'o', ifnull(sum(json_extract(p.data,'$.tokens.output')), 0), "
+             " 'r', ifnull(sum(json_extract(p.data,'$.tokens.cache.read')), 0), "
+             " 'w', ifnull(sum(json_extract(p.data,'$.tokens.cache.write')), 0)) from part p "
+             " where p.session_id = s.id and json_extract(p.data,'$.type') = 'step-finish' "
+             " and p.time_created >= " << since_ms << ") "
+             "from session s where coalesce(s.time_archived, 0) = 0 "
+             "and s.time_updated >= " << cutoff_ms << " order by s.time_updated desc limit 60;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                std::string sid = col_text(st, 0);
+                std::string title = trim(col_text(st, 1));
+                std::string dir = col_text(st, 2);
+                long long upd = sqlite3_column_int64(st, 3);
+                int running = (int)sqlite3_column_int64(st, 4);
+                if (upd <= 0) continue;
 
-        Session s;
-        s.id = "opencode-" + sid;
-        s.await_src = QS_DB;
-        s.title = title;
-        s.project = basename_last(dir);
-        if (s.project.empty()) s.project = "未绑定项目";
-        if (s.title.empty()) s.title = s.project;
-        s.cwd = dir;
-        s.last_activity = (double)upd / 1000.0;
-        // 四档分项在第 8 列；旧的第 5 列不含 output，只作为解析失败时的兜底。
-        std::string parts_json = col_text(st, 8);
-        Json pj;
-        if (!parts_json.empty() && json_parse(parts_json.data(), parts_json.size(), pj)) {
-            auto pnum = [&](const char* k) -> long {
-                const Json* v = pj.at(k);
-                return (v && v->kind == Json::NUM) ? (long)v->num : 0;
-            };
-            s.usage.input = pnum("i");
-            s.usage.output = pnum("o");
-            s.usage.cache_read = pnum("r");
-            s.usage.cache_write = pnum("w");
+                Session s;
+                s.id = "opencode-" + sid;
+                s.await_src = QS_DB;
+                s.title = title;
+                s.project = basename_last(dir);
+                if (s.project.empty()) s.project = "未绑定项目";
+                if (s.title.empty()) s.title = s.project;
+                s.cwd = dir;
+                s.last_activity = (double)upd / 1000.0;
+                // 四档分项在第 8 列；旧的第 5 列不含 output，只作为解析失败时的兜底。
+                std::string parts_json = col_text(st, 8);
+                Json pj;
+                if (!parts_json.empty() && json_parse(parts_json.data(), parts_json.size(), pj)) {
+                    auto pnum = [&](const char* k) -> long {
+                        const Json* v = pj.at(k);
+                        return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+                    };
+                    s.usage.input = pnum("i");
+                    s.usage.output = pnum("o");
+                    s.usage.cache_read = pnum("r");
+                    s.usage.cache_write = pnum("w");
+                }
+                s.tokens = s.usage.total();
+                if (s.tokens == 0) s.tokens = (long)sqlite3_column_int64(st, 5);
+                s.turns = (int)sqlite3_column_int64(st, 6);
+                // 库里没有 credits 这一档（cost 是美元），而表头那格是 cr，不混。
+                s.credits = 0;
+
+                // 判活：它自己把在飞的工具调用写成 state.status='running'，这是本机唯一能
+                // 直接读到的「正在跑」证据；没有 running 件就看最后一颗工具调用的回执。
+                s.state = running > 0 ? ST_WORKING : ST_NEEDS_USER;
+                std::string data = col_text(st, 7);
+                Json j;
+                if (!data.empty() && json_parse(data.data(), data.size(), j)) {
+                    const Json* state = j.at("state");
+                    const std::string* status = state ? state->str_at("status") : nullptr;
+                    if (status && *status == "error") {
+                        s.state = ST_FAILED;
+                        const Json* err = state->at("error");
+                        s.error_text = err ? brief_error(*err) : "工具调用报错";
+                    } else if (status && *status == "running") {
+                        s.state = ST_WORKING;
+                    }
+                }
+                merged[sid] = std::move(s);
+            }
         }
+        sqlite3_finalize(st);
+    }
+    // OpenCode 2：session_v2 的 tokens_* 是整段会话累计值，session_message 是消息流。
+    // 同一个 id 在旧表里也有时，优先新表（时间戳/状态更新），但旧表的窗内四档更精确，
+    // 新表算不出今天这一段就沿用旧表那份，绝不把整段累计冒充今天。
+    if (table_exists(db, "session_v2") && table_exists(db, "session_message")) {
+        std::ostringstream q;
+        q << "select s.id, coalesce(s.title, ''), coalesce(s.directory, ''), coalesce(s.path, ''), "
+             "s.time_updated, s.time_created, "
+             "s.tokens_input, s.tokens_output, s.tokens_reasoning, "
+             "s.tokens_cache_read, s.tokens_cache_write, coalesce(s.model, ''), "
+             "(select count(*) from session_message m where m.session_id = s.id "
+             " and m.type = 'user' and m.time_created >= " << since_ms << "), "
+             "(select m.data from session_message m where m.session_id = s.id "
+             " and m.type = 'assistant' order by m.seq desc limit 1), "
+             "(select m.type from session_message m where m.session_id = s.id "
+             " order by m.seq desc limit 1) "
+             "from session_v2 s where coalesce(s.time_archived, 0) = 0 "
+             "and s.time_updated >= " << cutoff_ms << " order by s.time_updated desc limit 60;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const std::string sid = col_text(st, 0);
+                const long long upd = sqlite3_column_int64(st, 4);
+                const long long created = sqlite3_column_int64(st, 5);
+                if (sid.empty() || upd <= 0) continue;
+
+                Session s;
+                s.id = "opencode-" + sid;
+                s.await_src = QS_DB;
+                s.title = trim(col_text(st, 1));
+                std::string dir = col_text(st, 2);
+                if (dir.empty()) dir = col_text(st, 3);
+                s.cwd = dir;
+                s.project = basename_last(dir);
+                if (s.project.empty()) s.project = "未绑定项目";
+                if (s.title.empty()) s.title = s.project;
+                s.last_activity = (double)upd / 1000.0;
+                s.created = (double)created / 1000.0;
+                s.turns = (int)sqlite3_column_int64(st, 12);
+                s.credits = 0;
+
+                std::string model_json = col_text(st, 11);
+                Json mj;
+                if (!model_json.empty() && json_parse(model_json.data(), model_json.size(), mj))
+                    if (const std::string* mid = mj.str_at("id")) s.model = *mid;
+
+                // 只有今天新建的会话，累计值才全是今天的；跨天会话的今日增量新库里
+                // 没有逐轮时间戳可切（part 也没有），留 0 比拿累计冒充诚实。
+                if (created >= since_ms) {
+                    s.usage.input = (long)sqlite3_column_int64(st, 6);
+                    s.usage.output = (long)sqlite3_column_int64(st, 7)
+                                   + (long)sqlite3_column_int64(st, 8);   // reasoning 归入输出档
+                    s.usage.cache_read = (long)sqlite3_column_int64(st, 9);
+                    s.usage.cache_write = (long)sqlite3_column_int64(st, 10);
+                    s.tokens = s.usage.total();
+                }
+
+                const std::string assistant = col_text(st, 13);
+                const std::string last_type = col_text(st, 14);
+                bool running = false, streaming = false, tool_error = false;
+                Json aj;
+                if (!assistant.empty() && json_parse(assistant.data(), assistant.size(), aj)) {
+                    const Json* content = aj.at("content");
+                    if (content && content->kind == Json::ARR) {
+                        for (const Json& item : content->arr) {
+                            const std::string* ty = item.str_at("type");
+                            if (!ty || *ty != "tool") continue;
+                            const Json* state = item.at("state");
+                            const std::string* status = state ? state->str_at("status") : nullptr;
+                            if (status && *status == "running") running = true;
+                            if (status && *status == "error") tool_error = true;
+                        }
+                    }
+                    const Json* tj = aj.at("time");
+                    if (tj && !tj->has("completed")) streaming = true;
+                }
+                if (last_type == "user") s.state = ST_WORKING;
+                else if (last_type == "idle") s.state = ST_NEEDS_USER;
+                else if (last_type == "assistant")
+                    s.state = (running || streaming) ? ST_WORKING
+                            : (tool_error ? ST_FAILED : ST_NEEDS_USER);
+                else s.state = ST_NEEDS_USER;
+                if (!assistant.empty() && s.state == ST_FAILED)
+                    s.error_text = "工具调用报错";
+
+                // 迁移期的老会话：新表算不出今日增量时，沿用旧表那份精确的四档。
+                auto old = merged.find(sid);
+                if (old != merged.end()) {
+                    if (s.usage.total() == 0 && old->second.usage.total() > 0)
+                        s.usage = old->second.usage;
+                    if (s.turns == 0) s.turns = old->second.turns;
+                    if (s.title.empty()) s.title = old->second.title;
+                }
+                merged[sid] = std::move(s);
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    for (auto& [sid, s] : merged) {
+        (void)sid;
+        if (now - s.last_activity > kNeedsUserStale && s.state != ST_FAILED) s.state = ST_RESTING;
         s.tokens = s.usage.total();
-        if (s.tokens == 0) s.tokens = (long)sqlite3_column_int64(st, 5);
         snap.usage.input += s.usage.input;
         snap.usage.output += s.usage.output;
         snap.usage.cache_read += s.usage.cache_read;
         snap.usage.cache_write += s.usage.cache_write;
-        s.turns = (int)sqlite3_column_int64(st, 6);
-        // 库里没有 credits 这一档（cost 是美元），而表头那格是 cr，不混。
-        s.credits = 0;
-
-        // 判活：它自己把在飞的工具调用写成 state.status='running'，这是本机唯一能
-        // 直接读到的「正在跑」证据；没有 running 件就看最后一颗工具调用的回执。
-        s.state = running > 0 ? ST_WORKING : ST_NEEDS_USER;
-        std::string data = col_text(st, 7);
-        Json j;
-        if (!data.empty() && json_parse(data.data(), data.size(), j)) {
-            const Json* state = j.at("state");
-            const std::string* status = state ? state->str_at("status") : nullptr;
-            if (status && *status == "error") {
-                s.state = ST_FAILED;
-                const Json* err = state->at("error");
-                s.error_text = err ? brief_error(*err) : "工具调用报错";
-            } else if (status && *status == "running") {
-                s.state = ST_WORKING;
-            }
-        }
-        if (now - s.last_activity > kNeedsUserStale && s.state != ST_FAILED) s.state = ST_RESTING;
         snap.sessions.push_back(std::move(s));
     }
-    sqlite3_finalize(st);
     sqlite3_close(db);
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
@@ -2047,6 +2182,8 @@ Snapshot scan_all(double now_epoch) {
         const char* xd = getenv("XDG_DATA_HOME");
         std::string root = (xd && *xd) ? std::string(xd) : join(h, ".local/share");
         snap.agents.push_back(scan_opencode("OpenCode", join(root, "opencode/opencode.db"), now, since));
+    snap.agents.push_back(scan_pi("Pi", join(h, ".pi/agent/sessions"), now, since));
+    snap.agents.push_back(scan_qwenwork("QwenWork", join(h, ".qwenworkcn/projects"), now, since));
     }
 #endif
 
@@ -2060,6 +2197,7 @@ Snapshot scan_all(double now_epoch) {
     apply_proc_sentinel(snap);
     roll_daily(snap);
     compute_trends(snap);
+    roll_await(snap);
     return snap;
 }
 
@@ -2069,10 +2207,11 @@ std::string snapshot_dump(const Snapshot& s) {
     snprintf(buf, sizeof buf,
              "scanned_at=%.0f window_start=%.0f today_credits=%.2f today_tokens=%ld "
              "| yesterday_credits=%.2f yesterday_tokens=%ld | hook 落地%d/有效%d/解析不了%d "
+             "| await 本周 n=%ld avg=%.0f max=%.0f "
              "| App 运行状态落地%d\n",
              s.scanned_at, s.window_start, s.today_credits, s.today_tokens,
              s.yesterday_credits, s.yesterday_tokens, s.hook_landed, s.hook_live, s.hook_dropped,
-             s.live_landed);
+             s.await_n, s.await_avg, s.await_max, s.live_landed);
     out += buf;
     for (const AgentSnap& a : s.agents) {
         snprintf(buf, sizeof buf, "[%s] %s available=%d sessions=%zu%s%s\n", a.id.c_str(), a.name.c_str(),
@@ -2139,6 +2278,223 @@ std::string snapshot_dump(const Snapshot& s) {
     return out;
 }
 
+// ── pi 与千问办公：message 信封式 JSONL（2026-11-12 新增两路）──────────────
+// pi     ~/.pi/agent/sessions/<工作区slug>/*.jsonl
+//        记录 {"type":"session|model_change|message|...","timestamp":ISO}；
+//        message.message = {role, content:[{type:text|toolCall}], usage:{input,output,
+//        cacheRead,cacheWrite}, stopReason: stop|length|aborted|error|toolUse}
+// 千问办公 ~/.qwenworkcn/projects/<工作区slug>/*.jsonl
+//        记录 {"type":"workspace-directories|runtime-config|user|assistant|..."}；
+//        user/assistant 带 message{role,stop_reason,...}，无 token 字段——
+//        没有的格整格不画，不拿 0 冒充（家规）。
+// 共用一条判态：最后一声是人＝在跑；assistant 收尾值（end_turn/stop/length/aborted）＝
+// 该你读了；toolUse 类挂起 90s＝疑似等授权（推断不响铃）；error＝失败；
+// 20 分钟没动静收成 resting。都用 ISO 时间戳（json_date_at 直读）。
+namespace {
+State derive_envelope(bool last_voiced_user, const std::string& stop, double last_ts,
+                      double now, bool& inferred, const char* tool_word,
+                      bool errored = false) {
+    inferred = false;
+    State st = ST_RESTING;
+    if (last_ts > 0) {
+        if (errored) st = ST_FAILED;
+        else if (last_voiced_user) st = ST_WORKING;
+        else if (stop == "end_turn" || stop == "stop" || stop == "stop_sequence" ||
+                 stop == "length" || stop == "aborted") st = ST_NEEDS_USER;
+        else if (stop == tool_word && now - last_ts >= kStalledToolUse) {
+            st = ST_AWAIT;
+            inferred = true;
+        } else st = ST_WORKING;
+        if (st == ST_WORKING && now - last_ts > kNeedsUserStale) st = ST_RESTING;
+    }
+    return st;
+}
+}
+
+AgentSnap scan_pi(const std::string& name, const std::string& root, double now, double since) {
+    AgentSnap snap;
+    snap.id = "pi"; snap.name = name; snap.client = "CLI";
+    FStat rs = fst(root);
+    if (!rs.ok || !rs.dir) return snap;      // 本机没有这一路：不算「今天没活动」
+    snap.available = true;
+    const double cutoff = now - kDaysBack * 86400;
+    for (const std::string& dir : list_dir(root)) {
+        std::string dpath = join(root, dir);
+        if (!fst(dpath).dir) continue;
+        for (const std::string& f : list_dir(dpath)) {
+            if (f.size() < 7 || f.compare(f.size() - 6, 6, ".jsonl") != 0) continue;
+            std::string path = join(dpath, f);
+            FStat st = fst(path);
+            if (!st.ok || st.mtime < cutoff) continue;
+            auto tail = tail_records(path);
+            if (tail.empty()) continue;
+            Session s;
+            s.id = "pi-" + strip_ext(f);
+            double last_ts = 0, first_ts = 0;
+            bool last_voiced_user = false, errored = false, title_set = false;
+            auto stamp = [&](const Json& rec) {
+                double d = json_date_at(rec, "timestamp");
+                if (d > 1e12) d /= 1000.0;            // runtime-config 这类给毫秒，归一成秒
+                if (d > last_ts) last_ts = d;
+                if (d > 0 && (first_ts == 0 || d < first_ts)) first_ts = d;
+                return d;
+            };
+            std::string stop, model, cwd, title;
+            int turns = 0;
+            for (const Json& rec : tail) {
+                const double d = stamp(rec);
+                const std::string* t = rec.str_at("type");
+                if (t && *t == "session") {
+                    if (const std::string* c = rec.str_at("cwd")) cwd = *c;
+                    continue;
+                }
+                if (t && *t == "model_change") {
+                    if (const std::string* m = rec.str_at("modelId")) model = *m;
+                    continue;
+                }
+                if (!t || *t != "message") continue;
+                const Json* m = rec.at("message");
+                if (!m) continue;
+                const std::string* role = m->str_at("role");
+                const std::string* sr = m->str_at("stopReason");
+                if (sr && !sr->empty()) stop = *sr;
+                if (const Json* u = m->at("usage")) {
+                    auto num = [&](const char* k) -> long {
+                        const Json* v = u->at(k);
+                        return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+                    };
+                    if (d == 0 || d >= since) {
+                        s.usage.input += num("input");
+                        s.usage.output += num("output");
+                        s.usage.cache_read += num("cacheRead");
+                        s.usage.cache_write += num("cacheWrite");
+                    }
+                }
+                if (role && *role == "user") {
+                    last_voiced_user = true;
+                    if (d > 0 && d >= since) turns++;
+                    const Json* content = m->at("content");
+                    if (content && content->kind == Json::ARR && !title_set) {
+                        for (const Json& blk : content->arr) {
+                            const std::string* bt = blk.str_at("type");
+                            if (bt && *bt == "text" && !title_set) {
+                                if (const std::string* x = blk.str_at("text")) {
+                                    // 系统注入的前缀（<system-reminder> 等）不作标题
+                                    if (!x->empty() && x->rfind("<", 0) != 0) {   // 凡 < 开头的合成标记（system/user-pasted 等）都不作标题
+                                        title = first_line(*x); title_set = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (role && *role == "assistant") {
+                    last_voiced_user = false;
+                    if (stop == "error") errored = true;
+                }
+            }
+            s.last_activity = last_ts;
+            s.first_activity = (first_ts >= since) ? first_ts : 0;
+            s.cwd = cwd;
+            s.project = cwd.empty() ? dir : basename_last(cwd);
+            s.turns = turns;
+            s.model = model;
+            s.tokens = s.usage.total();
+            bool inf;
+            s.state = derive_envelope(last_voiced_user, stop, last_ts, now, inf, "toolUse", errored);
+            s.inferred_wait = inf && s.state == ST_AWAIT;
+            s.title = !title.empty() ? utf8_clip(title, 40, "…") : s.project;
+            snap.sessions.push_back(std::move(s));
+        }
+    }
+    std::sort(snap.sessions.begin(), snap.sessions.end(),
+              [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
+    return snap;
+}
+
+AgentSnap scan_qwenwork(const std::string& name, const std::string& root, double now, double since) {
+    AgentSnap snap;
+    snap.id = "qwenworkcn"; snap.name = name; snap.client = "IDE";
+    FStat rs = fst(root);
+    if (!rs.ok || !rs.dir) return snap;
+    snap.available = true;
+    const double cutoff = now - kDaysBack * 86400;
+    for (const std::string& dir : list_dir(root)) {
+        std::string dpath = join(root, dir);
+        if (!fst(dpath).dir) continue;
+        for (const std::string& f : list_dir(dpath)) {
+            if (f.size() < 7 || f.compare(f.size() - 6, 6, ".jsonl") != 0) continue;
+            std::string path = join(dpath, f);
+            FStat st = fst(path);
+            if (!st.ok || st.mtime < cutoff) continue;
+            auto tail = tail_records(path);
+            if (tail.empty()) continue;
+            Session s;
+            s.id = "qwenworkcn-" + strip_ext(f);
+            double last_ts = 0;
+            bool last_voiced_user = false, title_set = false;
+            std::string stop, model, cwd, title;
+            int turns = 0;
+            for (const Json& rec : tail) {
+                double d = json_date_at(rec, "timestamp");
+                if (d > 1e12) d /= 1000.0;                    // 这一路混有毫秒，归一成秒
+                if (d > last_ts) last_ts = d;
+                const std::string* t = rec.str_at("type");
+                if (t && *t == "workspace-directories") {
+                    if (const Json* ds = rec.at("directories"))
+                        if (ds->kind == Json::ARR && !ds->arr.empty() &&
+                            ds->arr[0].kind == Json::STR)
+                            cwd = ds->arr[0].str;
+                    if (const std::string* sid = rec.str_at("sessionId")) s.id = "qwenworkcn-" + *sid;
+                    continue;
+                }
+                if (t && *t == "runtime-config") {
+                    if (const std::string* m = rec.str_at("model")) model = *m;
+                    continue;
+                }
+                if (!t || (*t != "user" && *t != "assistant")) continue;
+                const Json* m = rec.at("message");
+                if (!m) continue;
+                if (t && *t == "user") {
+                    last_voiced_user = true;
+                    if (last_ts > 0 && last_ts >= since) turns++;
+                    const Json* content = m->at("content");
+                    if (content && content->kind == Json::ARR && !title_set) {
+                        for (const Json& blk : content->arr) {
+                            const std::string* bt = blk.str_at("type");
+                            if (bt && *bt == "text" && !title_set) {
+                                if (const std::string* x = blk.str_at("text")) {
+                                    // 系统注入的前缀（<system-reminder> 等）不作标题
+                                    if (!x->empty() && x->rfind("<", 0) != 0) {   // 凡 < 开头的合成标记（system/user-pasted 等）都不作标题
+                                        title = first_line(*x); title_set = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    last_voiced_user = false;
+                    if (const std::string* sr = m->str_at("stop_reason")) stop = *sr;
+                    if (const std::string* mm = m->str_at("model")) model = *mm;
+                }
+            }
+            s.last_activity = last_ts;
+            s.cwd = cwd;
+            s.project = cwd.empty() ? dir : basename_last(cwd);
+            s.turns = turns;
+            s.model = model;
+            // 这一路日志没有 token 字段：usage 全零 → 界面 usage 整列不画（不拿 0 冒充）
+            s.state = derive_envelope(last_voiced_user, stop, last_ts, now, s.inferred_wait,
+                                      "toolUse", false);
+            s.inferred_wait = s.inferred_wait && s.state == ST_AWAIT;
+            s.title = !title.empty() ? utf8_clip(title, 40, "…") : s.project;
+            snap.sessions.push_back(std::move(s));
+        }
+    }
+    std::sort(snap.sessions.begin(), snap.sessions.end(),
+              [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
+    return snap;
+}
+
 std::string hook_inbox_dir() { return hook_dir(); }
 
 // ── N7 进程哨兵 ─────────────────────────────────────────────────────────────
@@ -2179,6 +2535,77 @@ std::set<std::string> live_proc_comms() {
 }
 }  // namespace
 
+// ── N5 等待镜子 ─────────────────────────────────────────────────────────────
+// 「让它等了多久」＝从会话进入等人的那一刻，到人接话那一刻。跨扫描的状态机：
+// 进入 NEEDS_USER/AWAIT 记起点；转 WORKING（人接话）或 FAILED（等待中失败）闭合入账；
+// 转 RESTING（人一直没来，20 分钟自然凉）不闭合不记——混进去就是编数。
+namespace {
+std::string await_path() {
+    if (const char* over = getenv("AGENTPING_STATE_DIR"); over && *over)
+        return std::string(over) + "/await.txt";
+    const char* h = getenv("HOME");
+    if (!h || !*h) return "";
+    return std::string(h) + "/Library/Application Support/AgentPing/await.txt";
+}
+std::string& await_key_of(const AgentSnap& a, const Session& x) {
+    static std::string k;
+    k = a.id + ":" + x.id;
+    return k;
+}
+}  // namespace
+
+void roll_await(Snapshot& s) {
+    static std::map<std::string, std::pair<bool, double>> open_wait;   // key → (记着, 起点)
+    const std::string p = await_path();
+    std::tm tv0{};
+    const std::time_t t00 = (std::time_t)s.window_start;
+    localtime_r(&t00, &tv0);
+    const long today = (long)tv0.tm_year * 10000L + (long)(tv0.tm_mon + 1) * 100L + (long)tv0.tm_mday;
+    for (const auto& a : s.agents) {
+        if (!a.available) continue;
+        for (const auto& x : a.sessions) {
+            const std::string& k = await_key_of(a, x);
+            const bool waiting = (x.state == ST_NEEDS_USER || x.state == ST_AWAIT);
+            auto it = open_wait.find(k);
+            if (waiting) {
+                if (it == open_wait.end()) open_wait[k] = {true, s.scanned_at};
+            } else if (it != open_wait.end()) {
+                const double dt = s.scanned_at - it->second.second;
+                open_wait.erase(it);
+                // 只有「人接话」和「等待中失败」两种闭合入账；RESTING（人没来）直接丢弃。
+                if ((x.state == ST_WORKING || x.state == ST_FAILED) && dt >= 5.0 && !p.empty()) {
+                    std::ofstream f(p, std::ios::app);
+                    if (f) f << today << " " << (long)dt << "\n";
+                }
+            }
+        }
+    }
+    // 本周聚合：周一零点起的已闭合间隔。文件一行一条，量级很小，逐轮直读。
+    if (p.empty()) return;
+    std::tm tv{};
+    const std::time_t t0 = (std::time_t)s.window_start;
+    localtime_r(&t0, &tv);
+    const int wd = tv.tm_wday;
+    std::tm mon = tv;
+    mon.tm_mday -= (wd == 0 ? 6 : wd - 1);
+    mon.tm_hour = 12;
+    mktime(&mon);
+    const long week_from = (long)mon.tm_year * 10000L + (long)(mon.tm_mon + 1) * 100L + (long)mon.tm_mday;
+    long n = 0;
+    double sum = 0, mx = 0;
+    std::ifstream f(p);
+    long d; long sec;
+    while (f >> d >> sec) {
+        if (d < week_from) continue;
+        n++;
+        sum += (double)sec;
+        if ((double)sec > mx) mx = (double)sec;
+    }
+    s.await_n = n;
+    s.await_avg = n > 0 ? sum / (double)n : 0.0;
+    s.await_max = mx;
+}
+
 void apply_proc_sentinel(Snapshot& snap) {
     static std::set<std::string> cached;
     static double cached_at = -60;
@@ -2215,8 +2642,10 @@ void roll_daily(Snapshot& s) {
     const std::string p = daily_path();
     if (p.empty()) return;
     const long today = day_key(s.window_start);
-    // 2026-11-12 起按工具落盘：一行一天一工具「day agent tokens credits」；旧格式
-    // 「day tokens credits」读回时折算成 "*"（全局）行——周/月总量与柱图照旧成立。
+    // 2026-11-12 起按工具落盘：一行一天一工具「day agent tokens credits in out cr cw 5h% wk%」；
+    // 旧格式「day tokens credits」读回时折算成 "*"（全局）行——周/月总量与柱图照旧成立。
+    // 后六列是 v5 追加的：四档明细与当天最后一轮额度快照。老行没有就留 0/-1，
+    // 界面说「本段没有四档记录」，不按总量编一个明细。
     std::map<long, std::map<std::string, Snapshot::DayUse>> per;   // day → agent → 量
     {
         std::ifstream f(p);
@@ -2229,6 +2658,17 @@ void roll_daily(Snapshot& s) {
             Snapshot::DayUse u;
             if (is >> d >> who >> u.tokens >> u.credits) {
                 u.day = d;
+                long in = 0, out = 0, cr = 0, cw = 0;
+                if (is >> in >> out >> cr >> cw) {
+                    u.parts.input = in;
+                    u.parts.output = out;
+                    u.parts.cache_read = cr;
+                    u.parts.cache_write = cw;
+                }
+                int f5 = -1, wk = -1;
+                if (!(is >> f5 >> wk)) { f5 = -1; wk = -1; }
+                u.five_pct = f5;
+                u.week_pct = wk;
                 if (d != today) per[d][who] = u;                 // 今天整段重写
             } else {
                 // 旧三列格式：day tokens credits → "*" 行
@@ -2239,22 +2679,43 @@ void roll_daily(Snapshot& s) {
             }
         }
     }
+    auto remain_pct = [](const QuotaWindow& q) -> int {
+        if (!q.known) return -1;
+        double v = (1.0 - q.used) * 100.0;
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        return (int)std::lround(v);
+    };
+    UsageParts all_parts;
     for (const auto& a : s.agents) {
-        Snapshot::DayUse u{today, a.usage.total(), 0};
+        Snapshot::DayUse u;
+        u.day = today;
+        u.tokens = a.usage.total();
         // Qoder 的 JSONL 没有 token 明细、只有 credits：量记在 credits 列，单位各归各。
         u.credits = 0;
         for (const auto& se : a.sessions)
             if (se.last_activity >= s.window_start) u.credits += se.credits;
+        u.parts = a.usage;
+        u.five_pct = remain_pct(a.quota.five);
+        u.week_pct = remain_pct(a.quota.week);
+        all_parts.input += u.parts.input;
+        all_parts.output += u.parts.output;
+        all_parts.cache_read += u.parts.cache_read;
+        all_parts.cache_write += u.parts.cache_write;
         per[today][a.id] = u;
     }
-    per[today]["*"] = {today, s.today_tokens, s.today_credits};
+    per[today]["*"] = {today, s.today_tokens, s.today_credits, all_parts, -1, -1};
     {
         std::ofstream f(p);
         for (const auto& [d, m] : per)
             for (const auto& [who, u] : m)
-                f << d << " " << who << " " << u.tokens << " " << u.credits << "\n";
+                f << d << " " << who << " " << u.tokens << " " << u.credits
+                  << " " << u.parts.input << " " << u.parts.output
+                  << " " << u.parts.cache_read << " " << u.parts.cache_write
+                  << " " << u.five_pct << " " << u.week_pct << "\n";
     }
-    // 快照带最近 8 天全局（柱图）+ 整份按工具表（时段分工具消耗用）。
+    // 快照带整份按工具表（时段分工具消耗用）。8 天截断是旧版柱图留下的，v5 的月图
+    // 要看到本月一号起，所以这里不截；历史行仍是 append-only，不回改。
     s.daily.clear();
     s.agent_daily = per;
     s.agent_today = per.count(today) ? per[today] : std::map<std::string, Snapshot::DayUse>{};
@@ -2262,7 +2723,6 @@ void roll_daily(Snapshot& s) {
         auto g = it->second.find("*");
         if (g == it->second.end()) continue;
         s.daily.push_back(g->second);
-        if (s.daily.size() >= 8) break;
     }
     std::reverse(s.daily.begin(), s.daily.end());
     std::time_t t = (std::time_t)s.window_start;

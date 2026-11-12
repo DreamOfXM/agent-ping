@@ -584,6 +584,12 @@ static const Key kStr[] = {
     // 10-29 新增：ZCode 一个窗口都没有时，这一跳会先替它把窗口要回来。实测 reopen 3 秒内出窗，
     // 但无障碍树还要长一会儿；面板一跳只等 2.4 秒（4 轮 ×600ms），没长出来就返回 5＝这一档。
     // 主行只说「正在打开」，不说「已经开好」——数到窗口不等于那棵树已经能点。
+    {"land_ocli",      {"终端里的会话：resume 命令已复制", "A terminal session: resume command copied",
+                        "Terminal-Sitzung: Resume-Befehl kopiert", "Sessione di terminale: comando resume copiato",
+                        "ターミナルのセッション：resume コマンドをコピー", "터미널 세션: resume 명령 복사됨"}},
+    {"land_ocli_sub",  {"粘进终端就回到那一条对话", "Paste it in a terminal to return to that session",
+                        "Ins Terminal einfügen, um dorthin zurückzukehren", "Incolla nel terminale per tornare alla sessione",
+                        "ターミナルに貼り付けるとそのセッションに戻る", "터미널에 붙여넣으면 그 세션으로 돌아감"}},
     {"land_wake",      {"ZCode 的窗口正在打开", "ZCode is opening its window",
                         "ZCode öffnet gerade ein Fenster", "ZCode sta aprendendo una finestra",
                         "ZCode がウィンドウを開いています", "ZCode 창을 여는 중입니다"}},
@@ -890,11 +896,11 @@ static const Key kStr[] = {
     {"r_last_read_at", {"上次读数 %s", "last read %s", "Letzter Stand %s", "ultima lettura %s",
                         "前回の読み値 %s", "마지막 판독 %s"}},
     {"r_balance_stale_note",
-                       {"日志里最后一次账户读数，此后源没有再写新的余额。",
-                        "Last account reading in the log; the source has not written a newer balance since.",
-                        "Letzter Kontostand im Log; die Quelle hat seither keinen neueren Stand geschrieben.",
-                        "Ultima lettura dell’account nel log; la fonte non ha scritto un saldo più recente.",
-                        "ログ内の最後のアカウント読み値です。以降、新しい残高は書かれていません。",
+                       {"日志里最后一次账户读数，此后日志里没有再写新的余额。",
+                        "Last account reading in the log; no newer balance has been logged since.",
+                        "Letzter Kontostand im Log; seither wurde kein neuerer Stand protokolliert.",
+                        "Ultima lettura dell’account nel log; da allora non è stato registrato un saldo più recente.",
+                        "ログ内の最後のアカウント読み値です。以降、新しい残高は記録されていません。",
                         "로그에 기록된 마지막 계정 판독값입니다. 이후 새로운 잔액은 기록되지 않았습니다."}},
     {"r_beyond",       {"已超过今日最长已完成会话", "Beyond today’s longest completed session",
                         "Länger als die längste heutige Sitzung", "Oltre la sessione più lunga di oggi",
@@ -1153,6 +1159,12 @@ static const Key kStr[] = {
     {"r_useg_yest",    {"昨天", "Yesterday", "Gestern", "Ieri", "昨日", "어제"}},
     {"r_useg_week",    {"本周", "This week", "Diese Woche", "Questa settimana", "今週", "이번 주"}},
     {"r_useg_month",   {"本月", "This month", "Diesen Monat", "Questo mese", "今月", "이번 달"}},
+    {"r_scan_at",      {"扫描 %s", "Scanned %s", "Scan %s", "Scansione %s",
+                        "スキャン %s", "스캔 %s"}},
+    {"r_useg_lastweek",{"上周", "Last week", "Letzte Woche", "Settimana scorsa",
+                        "先週", "지난주"}},
+    {"r_useg_year",    {"本年", "This year", "Dieses Jahr", "Quest'anno",
+                        "今年", "올해"}},
     {"r_useg_last7",   {"近 7 天", "Last 7 days", "Letzte 7 Tage", "Ultimi 7 giorni",
                         "直近7日", "최근 7일"}},
     {"r_useg_peak",    {"峰值 %s", "peak %s", "Spitze %s", "picco %s", "最大 %s", "최고 %s"}},
@@ -1173,6 +1185,19 @@ static const Key kStr[] = {
     {"r_relay_goto",   {"去会话列表接力 ›", "relay from the session list ›",
                         "aus der Sitzungsliste übergeben ›", "passa dalla lista sessioni ›",
                         "セッション一覧から引継ぎ ›", "세션 목록에서 인계 ›"}},
+    // N5 等待镜子：量「让它等了多久」，await 闭合到人接话为止；转 resting（人没来）不记。
+    {"r_mirror_line",  {"等待镜子（本周）：平均让它等 %s · 最长 %s · %d 次",
+                        "Waiting mirror (week): avg wait %s · longest %s · %d times",
+                        "Wartespiegel (Woche): Ø %s · max %s · %d-mal",
+                        "Specchio attesa (sett.): media %s · max %s · %d volte",
+                        "待ち時間ミラー（今週）：平均 %s · 最長 %s · %d 件",
+                        "대기 거울(이번 주): 평균 %s · 최장 %s · %d회"}},
+    {"r_mirror_note",  {"await 起到下一条人类指令 · 本地记录 · 人没来不算闭合",
+                        "from await until the next human message · local · abandoned waits don't count",
+                        "ab await bis nächste menschliche Nachricht · lokal",
+                        "dall'attesa al messaggio umano · locale",
+                        "await から次の指示まで・ローカル記録",
+                        "await부터 다음 인간 메시지까지 · 로컬 기록"}},
     {"r_hitrate",      {"缓存命中率（今日）", "Cache hit rate (today)", "Cache-Trefferquote (heute)",
                         "Tasso cache (oggi)", "キャッシュ命中率（今日）", "캐시 적중률 (오늘)"}},
     {"r_hitrate_note", {"命中率＝缓存读÷(输入+缓存读)，四档用量是各家日志里的现成字段。",
@@ -1188,6 +1213,103 @@ static const Key kStr[] = {
                         "input %s · output %s · lettura cache %s",
                         "入力 %s · 出力 %s · キャッシュ読み %s",
                         "입력 %s · 출력 %s · 캐시 읽기 %s"}},
+    // v5 · 双量纲账 / 分时段柱图 / 额度卡时段行。两本账各计小计，永不合加。
+    {"r_ledger_tk",    {"tokens 账", "tokens ledger", "tokens-Konto", "conto tokens",
+                        "tokens 勘定", "tokens 장부"}},
+    {"r_ledger_cr",    {"Credits 账", "Credits ledger", "Credits-Konto", "conto Credits",
+                        "Credits 勘定", "Credits 장부"}},
+    {"r_ledger_none_tk", {"本段没有 tokens 记录。", "No tokens recorded in this segment.",
+                          "In diesem Abschnitt keine tokens.",
+                          "Nessun tokens in questo intervallo.",
+                          "この期間に tokens の記録はありません。",
+                          "이 구간에 tokens 기록이 없습니다."}},
+    {"r_ledger_none_cr", {"本段没有 Credits 记录。", "No Credits recorded in this segment.",
+                          "In diesem Abschnitt keine Credits.",
+                          "Nessun Credits in questo intervallo.",
+                          "この期間に Credits の記録はありません。",
+                          "이 구간에 Credits 기록이 없습니다."}},
+    {"r_seg_idle",     {"本段无活动：", "Idle this segment: ", "Ohne Aktivität: ",
+                        "Inattivi: ", "本セグメント未活動：", "이번 구간 활동 없음: "}},
+    {"r_ledger_foot",  {"tokens 账 %d 工具 · Credits 账 %d 工具 · 本地记录统计",
+                        "tokens %d tool(s) · Credits %d tool(s) · local records",
+                        "tokens %d Tool(s) · Credits %d Tool(s) · lokale Aufzeichnung",
+                        "tokens %d strumento/i · Credits %d strumento/i · record locali",
+                        "tokens %d ツール · Credits %d ツール · ローカル記録",
+                        "tokens %d개 도구 · Credits %d개 도구 · 로컬 기록"}},
+    {"r_hit_short",    {"命中 %d%%", "%d%% hit", "Treffer %d%%", "hit %d%%",
+                        "命中 %d%%", "적중 %d%%"}},
+    {"r_parts_missing", {"本段只有合计，没有四档明细（日聚合扩列从今天起）。",
+                         "Totals only — four-part detail starts today.",
+                         "Nur Summe — Vierfach-Detail erst ab heute.",
+                         "Solo totale — dettaglio a quattro voci da oggi.",
+                         "合計のみ。四区分の明細は今日から。",
+                         "합계만. 네 항목 상세는 오늘부터."}},
+    {"r_parts_note",   {"命中率＝缓存读÷(输入+缓存读) · 四档来自用量明细",
+                        "hit = cache read ÷ (input + cache read) · four parts from usage detail",
+                        "Quote = Cache-Lesen ÷ (Input + Cache-Lesen) · Vier Teile aus den Nutzungsdetails",
+                        "hit = lettura cache ÷ (input + lettura cache) · quattro voci dal dettaglio d'uso",
+                        "命中率＝キャッシュ読み÷(入力+キャッシュ読み) · 四区分は利用明細から",
+                        "적중률=캐시 읽기÷(입력+캐시 읽기) · 네 항목은 사용 내역에서"}},
+    {"r_credit_src",   {"来源：日志逐条 credits · 本段 %d 天有记录 · tokens 另进 tokens 账，两账永不合加。",
+                        "Source: per-entry credits in logs · %d days in this segment · tokens go to the tokens ledger; units are never added.",
+                        "Quelle: credits je Log-Eintrag · %d Tage in diesem Abschnitt · tokens laufen ins tokens-Konto; Einheiten werden nie addiert.",
+                        "Fonte: credits per voce nei log · %d giorni in questo intervallo · i tokens vanno nel conto tokens; mai sommati tra unità.",
+                        "出所：ログの credits 逐条 · この期間に %d 日分 · tokens は tokens 勘定へ。単位をまたいで合算しません。",
+                        "출처: 로그의 credits 항목 · 이 구간 %d일 기록 · tokens는 tokens 장부로. 단위를 넘어 합산하지 않습니다."}},
+    {"r_chart_today_hours", {"今天 · 按小时", "Today · hourly", "Heute · stündlich",
+                             "Oggi · per ora", "本日 · 時間別", "오늘 · 시간별"}},
+    {"r_chart_yday_hours",  {"昨天 · 按小时", "Yesterday · hourly", "Gestern · stündlich",
+                             "Ieri · per ora", "昨日 · 時間別", "어제 · 시간별"}},
+    {"r_chart_week_days",   {"本周 · 按日（周一起，已过 %d 天）",
+                             "This week · daily (from Mon, %d days elapsed)",
+                             "Diese Woche · täglich (ab Mo, %d Tage)",
+                             "Questa settimana · per giorno (da lun, %d giorni)",
+                             "今週 · 日別（月曜から %d 日経過）",
+                             "이번 주 · 일별 (월요일부터 %d일 경과)"}},
+    {"r_chart_month_days",  {"本月 · 按日", "This month · daily", "Dieser Monat · täglich",
+                             "Questo mese · per giorno", "今月 · 日別", "이번 달 · 일별"}},
+    {"r_chart_peak_hour",   {"峰值 %02d 时 · %s", "peak %02d:00 · %s", "Spitze %02d Uhr · %s",
+                             "picco %02d · %s", "最大 %02d 時 · %s", "최고 %02d시 · %s"}},
+    {"r_chart_peak_day",    {"峰值 %s · %s", "peak %s · %s", "Spitze %s · %s",
+                             "picco %s · %s", "最大 %s · %s", "최고 %s · %s"}},
+    {"r_chart_empty_note",  {"虚线空心＝无记录；2px 实线＝有记录但为 0。",
+                             "dashed hollow = no record; 2px solid = recorded zero.",
+                             "gestrichelt hohl = keine Aufzeichnung; 2px solid = erfasst, aber 0.",
+                             "tratteggio vuoto = nessun record; 2px pieno = registrato ma 0.",
+                             "破線の空枠＝記録なし、2px 実線＝記録ありで 0。",
+                             "점선 빈칸=기록 없음, 2px 실선=기록 있음·0."}},
+    {"r_chart_nohours",     {"这一路没有小时级分档，只按日。",
+                             "No hourly split for this source — daily only.",
+                             "Keine stündliche Aufteilung — nur täglich.",
+                             "Nessuna suddivisione oraria — solo giornaliera.",
+                             "このソースには時間別の内訳がありません（日別のみ）。",
+                             "이 소스에는 시간별 분할이 없습니다(일별만)."}},
+    {"r_window_traj",  {"7 日窗口轨迹", "7-day window track", "7-Tage-Fensterverlauf",
+                        "traccia finestra 7 giorni", "7 日ウィンドウ軌跡", "7일 창 궤적"}},
+    {"r_roll_period",  {"滚动窗读数 · 非时段累计 · %s已耗 %s · 日聚合",
+                        "rolling-window reading · not period total · %s used %s · daily rollup",
+                        "Rollierendes Fenster · keine Periodensumme · %s verbraucht %s · Tages-Rollup",
+                        "lettura a finestra · non cumulo del periodo · %s usati %s · rollup giornaliero",
+                        "ローリング窓の読み · 期間累計ではありません · %s 消費 %s · 日次集計",
+                        "롤링 창 판독 · 기간 누적 아님 · %s 사용 %s · 일별 집계"}},
+    {"r_bal_period_cr", {"%s已耗 %s Credits · 日聚合 credits 列",
+                         "%s used %s Credits · daily credits column",
+                         "%s verbraucht %s Credits · Tages-credits-Spalte",
+                         "%s usati %s Credits · colonna credits giornaliera",
+                         "%s 消費 %s Credits · 日次 credits 列",
+                         "%s 사용 %s Credits · 일별 credits 열"}},
+    {"r_bal_period_tk", {"%s已耗 %s tokens · 日聚合 tokens 列",
+                         "%s used %s tokens · daily tokens column",
+                         "%s verbraucht %s tokens · Tages-tokens-Spalte",
+                         "%s usati %s tokens · colonna tokens giornaliera",
+                         "%s 消費 %s tokens · 日次 tokens 列",
+                         "%s 사용 %s tokens · 일별 tokens 열"}},
+    {"r_seg_note",     {"%s；列表与柱图跟时段、跟量纲一起换。",
+                        "%s; lists and chart follow the segment and unit.",
+                        "%s; Listen und Diagramm folgen Zeitraum und Einheit.",
+                        "%s; liste e grafico seguono periodo e unità.",
+                        "%s。一覧とグラフは期間・単位に追従。",
+                        "%s. 목록과 차트는 구간·단위를 따릅니다."}},
     {"set_quit",       {"退出", "Quit", "Beenden", "Esci", "終了", "종료"}},
     // 右缘手柄的预览卡：表头右端那句排序口径复用 r_longest_first（同一句话不存两份），
     // 这里只补脚注的新鲜度与入口、行悬停时顶掉年龄的动作。
@@ -1575,6 +1697,8 @@ static ImU32 HueFor(const std::string& name) {
     if (name == "Codex")      return IM_COL32(104, 156, 232, 255);  // oklch(.74 .13 250)
     if (name == "ZCode")      return IM_COL32(104, 205, 130, 255);  // oklch(.77 .13 152)
     if (name == "WorkBuddy")  return IM_COL32(222, 116, 137, 255);  // oklch(.68 .14 17)
+    if (name == "Pi")         return IM_COL32(186, 150, 232, 255);  // 紫：与现有五路错开
+    if (name == "QwenWork")   return IM_COL32(120, 180, 240, 255);  // 蓝：千问办公
     return kMutedFg;
 }
 
@@ -1874,6 +1998,9 @@ struct Tool {
     bool has_credits = false;
     std::vector<ap::ModelUse> models;
     std::array<long, 24> hourly{};
+    std::array<long, 24> yday_hourly{};
+    std::array<double, 24> credits_hourly{};
+    std::array<double, 24> yday_credits_hourly{};
     ap::Quota quota;
     /// 这一路的会话形态（IDE／CLI）。空＝没有正证，那一格整格不画。
     /// 值一律由 ClientTagOf 给，不在这里按名字猜。
@@ -1909,6 +2036,10 @@ struct PanelData {
     /// 按工具的日聚合：今日一份 + 整份历史（分工具的时段消耗从这来，11-12 起积累）。
     std::map<std::string, ap::Snapshot::DayUse> agent_today;
     std::map<long, std::map<std::string, ap::Snapshot::DayUse>> agent_daily;
+    /// N5 等待镜子（本周）：闭合等待的次数/平均/最长（秒）。
+    /// 与上面状态项计数 await_n 同名不同义——镜像这三枚带 mirror 前缀。
+    long mirror_n = 0;
+    double mirror_avg = 0, mirror_max = 0;
 };
 static PanelData g_pd;
 static long g_pd_seq = -1;
@@ -1951,6 +2082,8 @@ static std::string g_r31_detail_key;       // 详情屏那一行的 key（活数
 static std::string g_r31_relay;            // 详情屏「任务接力」模式看哪一行（key）；空＝常规详情
 static std::string g_r31_relay_brief;      // 接力简报原文（屏上预览/复制/导出共用这一份）
 static int g_r31_useg = 0;                 // M9 用量屏时段：0今天 1昨天 2本周 3本月
+static int g_r31_useg_unit = 0;            // v5 柱图量纲：0 tokens 1 Credits（两本账不合加）
+static std::set<std::string> g_r31_useg_open;   // v5 账本里展开着的行：seg:ledger:tool
 static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
 static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
 static int g_r31_hist_n = 12;               // 完成记录已加载到第几条（懒加载页大小 12）
@@ -2085,6 +2218,7 @@ static ImU64 g_brandTex36 = 0, g_brandTex68 = 0;
 static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
 /// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
 static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
+static ImU64 g_agent31TexQwenWork = 0, g_agent31TexPi = 0;
 /// 右缘窄柱那几枚剪影（edge_marks.h，白底＋形状覆盖度当 alpha）：稿子的
 /// `.cv-a .g i{background-color:…;mask:url(...)}` 只有贴纹理才认，画的时候乘墨色。
 static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0;
@@ -2483,7 +2617,9 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               //（详情屏内切到接力简报模式，再点一次返回常规详情）。
               HIT_EXPORTMD = 45, HIT_TASKRELAY = 46,
               // M9 用量屏时间维度那排筛选（今天/昨天/本周/本月），opt＝段号。
-              HIT_USEG = 47 };
+              HIT_USEG = 47,
+              // v5：柱图量纲切换（opt＝0 tokens / 1 Credits）与账本行展开（key＝seg:ledger:tool）。
+              HIT_USEGUNIT = 48, HIT_USEGROW = 49 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
@@ -3042,6 +3178,8 @@ static const char* ActName(int act) {
         case HIT_EXPORTMD:     return "导出摘要";
         case HIT_TASKRELAY:    return "任务接力";
         case HIT_USEG:         return "用量时段";
+        case HIT_USEGUNIT:     return "柱图量纲";
+        case HIT_USEGROW:      return "账本行展开";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -3089,6 +3227,8 @@ enum LandLevel { L_SESS = 0,   // 精确到那一条对话（托盘点中 / 侧�
                  L_APP,        // 只把客户端唤到前台，没到具体会话
                  L_DIR,        // 落到记录目录
                  L_AX,         // 挡在辅助功能授权前面——这一格只能他自己拨
+                 L_OCLI,       // opencode：会话活在终端里（恒 CLI），落点＝resume 命令进剪贴板。
+                               // 唤桌面客户端等于打开另一种形态，不是回到这条会话（2026-11-12 用户实测纠偏）
                  L_NONE };     // 一层都没落上
 struct Landing { int level = L_NONE; std::string why; };   // why＝平台原话，只进日志
 
@@ -3102,6 +3242,7 @@ static const char* LandName(int lv) {
         case L_APP:  return "只到 App";
         case L_DIR:  return "记录目录";
         case L_AX:   return "缺辅助功能";
+        case L_OCLI: return "resume 已复制";
         default:     return "落空";
     }
 }
@@ -3140,6 +3281,33 @@ static Landing JumpTo(const Hit& h) {
     char key[512], lad[512];
     key[0] = lad[0] = 0;
     const bool titled = !h.title.empty();
+    if (h.agent_id == "pi") {
+        // pi 同属终端形态（ClientTagOf 恒 CLI）：resume 命令进剪贴板，与 opencode 同一约定。
+        std::string cmd = "pi --session " + h.native_id;
+        if (!g_shot_to) ImGui::SetClipboardText(cmd.c_str());
+        out.level = L_OCLI;
+        out.why = "pi resume 命令已复制";
+        ShowPanel();
+        fprintf(stderr, "[落点] pi/%s → resume 已复制 ｜ %s\n", h.native_id.c_str(), cmd.c_str());
+        fflush(stderr);
+        return out;
+    }
+    if (h.agent_id == "opencode") {
+        // opencode 的会话都活在终端里（ClientTagOf 恒 CLI）：唤桌面客户端是打开另一种
+        // 形态，不是落回这条会话（2026-11-12 用户实测纠偏）。CLI 的会话级落点＝
+        // resume 命令进剪贴板——粘进终端就回到它，与「跳不进的历史会话给复制 resume
+        // 命令」同一约定，只是这次是故意复制而非退而求其次。
+        std::string cmd = "opencode --session " + h.native_id;
+        if (!h.cwd.empty()) cmd += " " + h.cwd;
+        if (!g_shot_to) ImGui::SetClipboardText(cmd.c_str());
+        out.level = L_OCLI;
+        out.why = "resume 命令已复制";
+        ShowPanel();
+        fprintf(stderr, "[落点] opencode/%s → resume 已复制 ｜ %s\n", h.native_id.c_str(),
+                cmd.c_str());
+        fflush(stderr);
+        return out;
+    }
     // tried 必须单独记：会话级那两把钥匙只有 Qoder/ZCode 有，其余那几路压根没试。
     // 早期版本用「rc 初值 1」当没试的哨兵，结果 Claude 的行也被判成「托盘没列它」。
     bool tried = false;
@@ -3240,10 +3408,12 @@ static void LandingToast(const Landing& ld, const Hit& h, bool copy_title = true
                     : ld.level == L_MISS ? "land_miss"
                     : ld.level == L_NEWRUN ? "land_newrun"
                     : ld.level == L_WAKE ? "land_wake"
+                    : ld.level == L_OCLI ? "land_ocli"
                     : ld.level == L_APP ? "land_app" : ld.level == L_DIR ? "land_dir" : "land_none";
     Toast(fill(T(key, loc)),
           T(ld.level == L_AX ? "land_ax_sub" : ld.level == L_DIR ? "land_dir_sub"
             : ld.level == L_WAKE ? "land_wake_sub" : ld.level == L_NEWRUN ? "land_newrun_sub"
+            : ld.level == L_OCLI ? "land_ocli_sub"
             : "land_copy",
             loc));
     g_toast_icon = 4;   // 回执是「跳到了哪儿」，图标该用箭头而不是剪贴板
@@ -3569,6 +3739,16 @@ static void DoAction(const Hit& h, const ImVec2& at) {
         }
         case HIT_USEG: {                      // M9 用量屏时段筛选
             g_r31_useg = h.opt;
+            g_r31_useg_open.clear();          // 稿子：换时段清空展开行（键里带段号，不清会残留）
+            return;
+        }
+        case HIT_USEGUNIT: {                  // v5 柱图量纲：tokens / Credits 各算各的
+            g_r31_useg_unit = (h.opt == 1) ? 1 : 0;
+            return;
+        }
+        case HIT_USEGROW: {                   // v5 账本行展开/收起
+            if (g_r31_useg_open.count(h.key)) g_r31_useg_open.erase(h.key);
+            else g_r31_useg_open.insert(h.key);
             return;
         }
         case HIT_HOOKINST: {                    // 接线屏那颗「写入 / 重写」：真改本机配置
@@ -5483,6 +5663,9 @@ static void RebuildPanel(const ap::Snapshot& s) {
         tl.has_credits = tl.credits > 0;
         tl.models = ag.models;
         tl.hourly = ag.hourly;
+        tl.yday_hourly = ag.yday_hourly;
+        tl.credits_hourly = ag.credits_hourly;
+        tl.yday_credits_hourly = ag.yday_credits_hourly;
         tl.quota = ag.quota;
         // 形态签按这一路今天真摆出来的会话给：Qoder 只要有一条被 App 的会话库索引到就写
         // IDE，一条都没有就留空（留空＝不知道，不等于「它是 CLI」）。屏上那颗小签只念这一件事。
@@ -5497,6 +5680,9 @@ static void RebuildPanel(const ap::Snapshot& s) {
     pd.month_tokens = s.month_tokens;
     pd.agent_today = s.agent_today;
     pd.agent_daily = s.agent_daily;
+    pd.mirror_n = s.await_n;
+    pd.mirror_avg = s.await_avg;
+    pd.mirror_max = s.await_max;
     // 组内按「多久以前」升序：稿子 done 组就是 4 分钟前排在 14 小时前前面
     std::sort(pd.rows.begin(), pd.rows.end(), [](const UIRow& a, const UIRow& b) {
         int ga = GroupOf(a.state), gb = GroupOf(b.state);
@@ -7341,28 +7527,8 @@ static void LoadProbeFixture() {
         t->quota.week.window_min = 10080;
         t->quota.week.seen_at = now - 120.0;
     }
-    // M9 样例日聚合：近 7 天（末位=今天）。真机 daily.txt 第一天只有一行，柱图如实少几根；
-    // fixture 摆满是为了把柱图版式本身拍全。
-    {
-        const long d0 = (long)(midnight - 6 * 86400.0);
-        std::time_t tt0 = (std::time_t)d0;
-        std::tm tv0;
-        localtime_r(&tt0, &tv0);
-        const long sample[7] = {3400000, 890000, 610000, 5200000, 6100000, 9800000, 7390000};
-        for (int i = 0; i < 7; i++) {
-            std::time_t td = (std::time_t)(midnight - (double)(6 - i) * 86400.0);
-            std::tm tvd;
-            localtime_r(&td, &tvd);
-            ap::Snapshot::DayUse du;
-            du.day = (long)tvd.tm_year * 10000 + (tvd.tm_mon + 1) * 100 + tvd.tm_mday;
-            du.tokens = sample[i];
-            du.credits = sample[i] / 20000.0;
-            pd.daily.push_back(du);
-        }
-        pd.week_tokens = 3400000 + 890000 + 610000 + 5200000 + 6100000 + 9800000 + 7390000;
-        pd.month_tokens = pd.week_tokens + 2100000;
-        pd.yday_tokens = 9800000;
-    }
+    // M9/v5 样例日聚合在六路工具都建好之后统一摆（见 OpenCode 那段后面）：
+    // 12 天 × 逐工具，含四档、额度快照、一天无记录、一天 Credits 为 0。
     {
         Tool* t = tool("codex", "Codex", true, false, 0);
         t->usage.input = 89012;
@@ -7406,6 +7572,163 @@ static void LoadProbeFixture() {
         t->usage.cache_write = 51200;
         t->models = {{"qwen3-coder-plus", 51200}};
         t->hourly[20] = 51200;
+    }
+    // v5 样例日聚合：12 天 × 逐工具（今天 11-12）。11-08 整天没有行 → 月图空心槽；
+    // 11-04 Qoder 的 Credits 行是 0 → 月图 2px 实线零槽。四档逐日拆开且和 tokens 恒等，
+    // 老行没有四列的情况由 UI 自己说「只有合计」，这里不混。
+    {
+        auto toolp = [&](const char* id) -> Tool* {
+            for (auto& t : pd.tools) if (t.id == id) return &t;
+            return nullptr;
+        };
+        const long todayKey = day_key_ui((std::time_t)midnight);
+        const long ydayKey = R31AddDays(todayKey, -1);
+        // 列：claude, codex, zcode, workbuddy, opencode
+        const long kTk[12][5] = {
+            {2100000, 1200000, 40200000, 2600000, 1800000},
+            {3200000,  890000, 36000000, 1500000, 1400000},
+            {1800000,  450000, 28000000, 2800000,  900000},
+            {2400000,  980000, 52000000, 3200000, 1200000},
+            {5200000,  610000, 44000000, 4100000, 2100000},
+            {6100000, 1100000, 39000000, 2800000, 2500000},
+            {4200000,  760000, 16000000, 3600000, 1700000},
+            {0, 0, 0, 0, 0},                                   // 11-08 无记录
+            {2600000,  880000, 41000000, 1800000, 1600000},
+            {6600000, 1200000, 47900000, 2400000, 2200000},
+            {4200000,  980000, 35400000, 2900000, 1900000},
+            {7208963,  132222,        0,       0,   51200},
+        };
+        const double kQoderCr[12] = {30.5, 21.0, 36.2, 0.0, 44.8, 39.1,
+                                     16.6, 0.0, 41.3, 47.9, 35.4, 4.21};
+        const int kClaudeWk[12] = {96, 95, 94, 92, 91, 90, 89, -1, 86, 85, 84, 88};
+        const int kClaude5[12] = {80, 78, 76, 74, 70, 66, 60, -1, 58, 54, 50, 66};
+        const int kWorkWk[12] = {74, 72, 70, 68, 66, 64, 62, -1, 60, 58, 57, 56};
+        const int kWork5[12] = {26, 28, 30, 32, 35, 37, 40, -1, 42, 44, 46, 29};
+        auto split = [](long total, int pin, int pout, int prd) {
+            ap::UsageParts p;
+            p.input = (long)std::llround((double)total * pin / 100.0);
+            p.output = (long)std::llround((double)total * pout / 100.0);
+            p.cache_read = (long)std::llround((double)total * prd / 100.0);
+            p.cache_write = std::max(0L, total - p.input - p.output - p.cache_read);
+            return p;
+        };
+        for (int i = 0; i < 12; i++) {
+            if (i == 7) continue;
+            const long day = R31AddDays(todayKey, i - 11);
+            std::map<std::string, ap::Snapshot::DayUse> m;
+            auto put = [&](const char* id, long tk, double cr, ap::UsageParts parts,
+                           int five, int week) {
+                ap::Snapshot::DayUse du;
+                du.day = day;
+                du.tokens = tk;
+                du.credits = cr;
+                du.parts = parts;
+                du.five_pct = five;
+                du.week_pct = week;
+                m[id] = du;
+            };
+            put("claude", kTk[i][0], 0.0, split(kTk[i][0], 18, 12, 65), kClaude5[i], kClaudeWk[i]);
+            put("codex", kTk[i][1], 0.0, split(kTk[i][1], 60, 40, 0), -1, -1);
+            put("zcode", kTk[i][2], 0.0, split(kTk[i][2], 20, 5, 70), -1, -1);
+            put("workbuddy", kTk[i][3], 0.0, split(kTk[i][3], 50, 20, 25), kWork5[i], kWorkWk[i]);
+            put("opencode", kTk[i][4], 0.0, split(kTk[i][4], 20, 10, 65), -1, -1);
+            put("qoder", 0, kQoderCr[i], ap::UsageParts{}, -1, -1);
+            if (i == 11) {
+                // 今天以现场账为准：展开口径必须和 tokens 账一模一样。
+                for (const char* id : {"claude", "codex", "opencode"}) {
+                    if (Tool* t = toolp(id)) {
+                        m[id].tokens = t->usage.total();
+                        m[id].parts = t->usage;
+                    }
+                }
+                if (Tool* q = toolp("qoder")) m["qoder"].credits = q->credits;
+            }
+            pd.agent_daily[day] = m;
+            ap::Snapshot::DayUse g;
+            g.day = day;
+            for (const auto& [id, du] : m) {
+                g.tokens += du.tokens;
+                g.credits += du.credits;
+                g.parts.input += du.parts.input;
+                g.parts.output += du.parts.output;
+                g.parts.cache_read += du.parts.cache_read;
+                g.parts.cache_write += du.parts.cache_write;
+            }
+            pd.daily.push_back(g);
+        }
+        auto norm = [](std::array<long, 24>& a, long total) {
+            long s = 0;
+            for (long v : a) s += v;
+            if (s <= 0 || total <= 0) return;
+            long acc = 0;
+            for (int h = 0; h < 24; h++) {
+                a[(size_t)h] = (long)std::llround((double)a[(size_t)h] / (double)s * (double)total);
+                acc += a[(size_t)h];
+            }
+            if (acc != total)
+                for (int h = 23; h >= 0; h--)
+                    if (a[(size_t)h] > 0) { a[(size_t)h] += total - acc; break; }
+        };
+        auto fill = [&](Tool* t, bool yday, long total, int from, int to, int peak) {
+            if (!t || total <= 0) return;
+            auto& a = yday ? t->yday_hourly : t->hourly;
+            for (int h = from; h <= to; h++)
+                a[(size_t)h] = (long)(1000.0 + 1000.0 * std::exp(-std::abs(h - peak) / 3.0));
+            norm(a, total);
+        };
+        auto filld = [&](Tool* t, bool yday, double total, int from, int to, int peak) {
+            if (!t || total <= 0.0) return;
+            auto& a = yday ? t->yday_credits_hourly : t->credits_hourly;
+            double s = 0.0;
+            for (int h = from; h <= to; h++) {
+                a[(size_t)h] = 1000.0 + 1000.0 * std::exp(-std::abs(h - peak) / 3.0);
+                s += a[(size_t)h];
+            }
+            if (s > 0.0)
+                for (int h = 0; h < 24; h++) a[(size_t)h] = a[(size_t)h] / s * total;
+        };
+        Tool* claude = toolp("claude");
+        Tool* codex = toolp("codex");
+        Tool* zcode = toolp("zcode");
+        Tool* work = toolp("workbuddy");
+        Tool* open = toolp("opencode");
+        Tool* qoder = toolp("qoder");
+        if (claude) {
+            fill(claude, false, claude->usage.total(), 9, 22, 14);
+            fill(claude, true, kTk[10][0], 9, 22, 14);
+        }
+        if (codex) {
+            fill(codex, false, codex->usage.total(), 11, 13, 12);
+            fill(codex, true, kTk[10][1], 10, 14, 12);
+        }
+        if (zcode) fill(zcode, true, kTk[10][2], 8, 23, 14);
+        if (work) fill(work, true, kTk[10][3], 9, 22, 15);
+        if (open) {
+            fill(open, false, open->usage.total(), 18, 22, 20);
+            fill(open, true, kTk[10][4], 10, 23, 15);
+        }
+        if (qoder) {
+            filld(qoder, false, qoder->credits, 9, 21, 13);
+            filld(qoder, true, kQoderCr[10], 9, 21, 13);
+        }
+        std::tm mt{};
+        const std::time_t tt = (std::time_t)midnight;
+        localtime_r(&tt, &mt);
+        const long monday = R31AddDays(todayKey, -(mt.tm_wday == 0 ? 6 : mt.tm_wday - 1));
+        const long monthFirst = todayKey / 100 * 100 + 1;
+        long week = 0, month = 0, yday = 0;
+        double ydayCr = 0.0;
+        for (const auto& du : pd.daily) {
+            if (du.day >= monday) week += du.tokens;
+            if (du.day >= monthFirst) month += du.tokens;
+            if (du.day == ydayKey) { yday += du.tokens; ydayCr += du.credits; }
+        }
+        pd.week_tokens = week;
+        pd.month_tokens = month;
+        pd.yday_tokens = yday;
+        pd.yday_credits = ydayCr;
+        auto it = pd.agent_daily.find(todayKey);
+        if (it != pd.agent_daily.end()) pd.agent_today = it->second;
     }
     // Codex 也要一条完成记录：完成记录屏 / 详情屏才有第二个工具可点。
     row(ap::ST_RESTING, "kitchen-timer", "Codex", "codex", "h9", at(11, 8), 9);
@@ -7468,7 +7791,7 @@ static void LoadProbeFixture() {
     pd.await_n = 2;
     pd.run = getenv("AGENTPING_EDGE_F_FIXTURE") ? 2 : 1;   // F 夹具多一条 codex 在跑
     pd.live = 6;
-    pd.credits = 469.72;    // Qoder 一路自记计数（不是金额），口径说明沿用 cost_note
+    pd.credits = 4.21;      // Qoder 今日消耗；469.72 是余额，在余额卡里，不混进今日账
     // 空态探针：只留完成记录，队列真空才有得验（AGENTPING_EMPTY=1，仅探针路径）。
     if (getenv("AGENTPING_EMPTY")) {
         pd.rows.erase(std::remove_if(pd.rows.begin(), pd.rows.end(),
@@ -7647,6 +7970,23 @@ int main(int argc, char** argv) {
     }
     // 取证：把来源导轨钉在某一家的屏上（"all" 仍是不给这个变量的默认）。
     if (const char* src = getenv("AGENTPING_SRC"); src && *src) g_r31_src = src;
+    // 取证（v5 用量屏）：钉时段/量纲/展开行，省得合成点击在多语并排轮里被语言差异卡住。
+    // 正常窗口路径不读这三颗；它们只改初始状态，点一下仍是同一套 DoAction。
+    if (const char* s = getenv("AGENTPING_USEG"); s && *s)
+        g_r31_useg = std::max(0, std::min(3, atoi(s)));
+    if (const char* u = getenv("AGENTPING_USEG_UNIT"); u && *u)
+        g_r31_useg_unit = atoi(u) == 1 ? 1 : 0;
+    if (const char* o = getenv("AGENTPING_USEG_OPEN"); o && *o) {
+        std::string all = o;
+        size_t p = 0;
+        while (p <= all.size()) {
+            const size_t q = all.find(',', p);
+            const std::string key = all.substr(p, q == std::string::npos ? std::string::npos : q - p);
+            if (!key.empty()) g_r31_useg_open.insert(key);
+            if (q == std::string::npos) break;
+            p = q + 1;
+        }
+    }
     // 真启动（访达双击 / open / launchd 拉起，一个参数都没有）才对齐开机项。
     // 取证的跑法不许碰 ~/Library —— 那会儿在跑的可能是开发构建，
     // 写进去等于把刚修好的问题再种回去。只带环境变量、不带参数的跑法以前会漏进来
@@ -7738,6 +8078,10 @@ int main(int argc, char** argv) {
             if (!FaceUsed(t, f)) continue;
             snprintf(path, sizeof path, "%s/%s", dir, kFace[f]);
             ImFontConfig fc; fc.SizePixels = Bake(t, f);
+            // LightHinting＝ClearType 式纵向吸附：只竖向对齐像素格，横向保形。
+            // 面板里大量文字画在分数 Y 上（TextMid 的居中算式），完全无吸附会让
+            // 横向笔画落在两行像素之间——灰底小字发虚一半是它。
+            fc.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
             g_font[t][f] = io.Fonts->AddFontFromFileTTF(path, Bake(t, f), &fc, ranges.Data);
             if (!g_font[t][f]) { fprintf(stderr, "字体加载失败 %s @%.1fpx\n", path, Bake(t, f)); return 2; }
             baked++;

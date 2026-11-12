@@ -154,6 +154,9 @@ struct AgentSnap {
     UsageParts usage;
     std::vector<ModelUse> models;        // 今日按模型，降序
     std::array<long, 24> hourly{};       // 今日本机 0–23 点各小时的总 token
+    std::array<long, 24> yday_hourly{};  // 昨天同一套小时格：只给「昨天 · 按小时」柱图
+    std::array<double, 24> credits_hourly{};       // 今天各小时的 Credits（只有 Qoder 这类日志会写）
+    std::array<double, 24> yday_credits_hourly{};  // 昨天的 Credits 小时格
     Quota quota;                         // 账户级；空 = 这一路没有可用的额度源
     std::string client = "CLI";          // CLI / IDE（稿子的身份行）
 };
@@ -164,10 +167,25 @@ struct Snapshot {
     double window_start = 0;    // 今天零点，三格统计与「今天没活动」共用同一个窗
     /// M9 日聚合（append-only 的 daily.txt，与 N5 等待镜子共用一个文件）：最近 N 天每日 tokens。
     /// 只由本机逐日落盘累计，不回填历史——第一天上线只有一行，柱图如实少几根。
-    struct DayUse { long day = 0; long tokens = 0; double credits = 0; };
+    struct DayUse {
+        long day = 0;
+        long tokens = 0;
+        double credits = 0;
+        /// v5：四档明细。旧文件没有这四列时保持全 0，界面只说「本段没有四档记录」，
+        /// 不拿总量按比例拆一个假明细。
+        UsageParts parts;
+        /// v5：这一天的最后一轮额度快照（剩余%，-1＝这一路当天没给这一档）。
+        /// 只用来画「7 日窗口轨迹」；额度本身仍以现场读数为准，不拿历史快照冒充当前。
+        int five_pct = -1, week_pct = -1;
+    };
     std::vector<DayUse> daily;
     long week_tokens = 0;       // 本周一零点起（从日聚合累加，含今天这一行）
     long month_tokens = 0;      // 本月一号起
+    /// N5 等待镜子（本周）：await.txt 里落在当前周的已闭合等待。
+    /// 闭＝人接了话（转 WORKING）或等待中以失败收场；转 resting（人一直没来）不算闭合，
+    /// 不记——把「他没来」混进「平均让它等」就是编数。
+    long await_n = 0;
+    double await_avg = 0, await_max = 0;
     /// 按工具的日聚合（2026-11-12 起的格式：一行一天一工具）。昨天/周/月的分工具消耗从这来；
     /// 上线首日只有今天一行，切换时段时没有分工具历史——如实显示，不拿今天的冒充。
     /// key＝agent id；全局量仍在 daily/week_tokens（旧格式行折算成 "*" 行读回）。
@@ -229,12 +247,18 @@ std::string snapshot_dump(const Snapshot& s);
 /// 口径逐条对齐 Swift 侧 HookInbox.swift。
 void apply_hook_signals(Snapshot& snap, double now);
 
+/// pi（~/.pi/agent/sessions）与千问办公（~/.qwenworkcn/projects）：message 信封式 JSONL。
+AgentSnap scan_pi(const std::string& name, const std::string& root, double now, double since);
+AgentSnap scan_qwenwork(const std::string& name, const std::string& root, double now, double since);
+
 /// N7 进程哨兵：回合未收尾但这一路 CLI 已无同名进程（只读 comm/pid）→ Session.proc_dead。
 /// 只对 comm 可辨的路判（本轮 codex）；只标不响。
 void apply_proc_sentinel(Snapshot& snap);
 
 /// M9 日聚合落盘（daily.txt，append-only 语义）并填 snap.daily/week/month。
 void roll_daily(Snapshot& s);
+/// N5 等待镜子：跨扫描等待状态机 + await.txt 周聚合 → Snapshot.await_*。
+void roll_await(Snapshot& s);
 
 /// M2 5h 窗剩余%的进程内差分 → snap.trend5（估算，只给速率不给预测）。
 void compute_trends(Snapshot& s);
