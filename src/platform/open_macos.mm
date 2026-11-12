@@ -10,7 +10,9 @@
 // 但退到哪儿必须由调用方把话说清（ap_open3 的 layer），不许把「打开了文件夹」说成「跳到了会话」。
 // 终端恢复（Swift: Resume.run）没搬：用户用客户端就跳客户端，把会话塞进另一个终端进程是帮倒忙。
 #import <AppKit/AppKit.h>
+#include <unistd.h>
 #import <Foundation/Foundation.h>
+#include <sys/stat.h>
 #import <ApplicationServices/ApplicationServices.h>   // AXIsProcessTrusted / CGEvent（托盘收起时补一发 Escape）
 #include <cstring>
 #include <vector>
@@ -843,24 +845,21 @@ static NSString *ShQ(NSString *s) {
     NSString *inner = [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
     return [[@"'" stringByAppendingString:inner] stringByAppendingString:@"'"];
 }
-// 在 iTerm2（在跑/装了都认，activate 会顺手拉起）新开 tab 跑命令；没 iTerm2 用 Terminal
-// 新开窗口。返回 YES＝命令已经交代给一个真终端。
-static BOOL RunInTerminal(NSString *cmd) {
-    NSString *esc = [cmd stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-    NSRunningApplication *it = [[NSRunningApplication runningApplicationsWithBundleIdentifier:
-        @"com.googlecode.iterm2"] firstObject];
-    BOOL itermInstalled = [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm.app"];
-    if (it || itermInstalled) {
-        NSString *sc = [NSString stringWithFormat:
-            @"tell application \"iTerm2\"\nactivate\n"
-             "if (count of windows) = 0 then\n create window with default profile\n"
-             "else\n tell current window to create tab with default profile\n end if\n"
-             "tell current session of current window to write text \"%@\"\nend tell", esc];
-        if (RunOSA(sc)) return YES;
-    }
-    NSString *sc2 = [NSString stringWithFormat:
-        @"tell application \"Terminal\"\nactivate\ndo script \"%@\"\nend tell", esc];
-    return RunOSA(sc2);
+// 在 iTerm2 新开 tab / Terminal 新开窗口执行一个「脚本文件路径」——命令本体写在
+// 文件里（ObjC 直写，不过 AppleScript 字符串这一层），AS 只看到一句纯 ASCII 的
+// sh /tmp/xxx.sh，uuid/中文路径/引号都没有被打乱的面（2026-11-12：之前把整条命令
+// 内插进 do script，uuid 被打烂成 I'⁺^A 卡在 zsh 续行提示上，实拍）。
+// iTerm2 永远优先（在跑或装了都试，activate 顺手拉起），它的 AS 报错才退 Terminal。
+static BOOL RunInTerminal(NSString *scriptPath) {
+    NSString *itTab = [NSString stringWithFormat:
+        @"tell application \"iTerm2\"\nactivate\n"
+         "if (count of windows) = 0 then\n create window with default profile\n"
+         "else\n tell current window to create tab with default profile\n end if\n"
+         "tell current session of current window to write text \"sh %@\"\nend tell", scriptPath];
+    if (RunOSA(itTab)) return YES;
+    NSString *teScr = [NSString stringWithFormat:
+        @"tell application \"Terminal\"\nactivate\ndo script \"sh %@\"\nend tell", scriptPath];
+    return RunOSA(teScr);
 }
 // 活终端切前台：iTerm2 在跑切 iTerm2，否则 Terminal 在跑切 Terminal；都没有 NO。
 static BOOL WakeTerminalFront(void) {
@@ -876,12 +875,28 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
                                   char* reason, int out_len, int* layer) {
     const Target* t = Find(agent_id);
     if (!t || !t->cli_fmt[0]) { Say(reason, out_len, @"这一路没有配置终端 resume 命令"); return 1; }
-    NSString *cli = [NSString stringWithFormat:@(t->cli_fmt),
-                     ShQ(session_id ? @(session_id) : @"")];
-    NSString *full = (cwd && *cwd)
-        ? [NSString stringWithFormat:@"cd %@ && %@", ShQ(@(cwd)), cli] : cli;
+    // 命令本体写进临时脚本（ObjC 直写文件），终端只收到 sh <路径>——
+    // uuid/中文 cwd 的引号都不再经过 AppleScript 字符串层。
+    char pathp[64];
+    snprintf(pathp, sizeof pathp, "/tmp/ap-resume-%lld.sh", (long long)time(nil));
+    FILE *f = fopen(pathp, "w");
+    if (!f) { Say(reason, out_len, @"写 resume 脚本失败（/tmp 不可写）"); return 1; }
+    fprintf(f, "#!/bin/sh\n");
+    if (cwd && *cwd) {
+        // 单引号 POSIX 转义：' → '\''
+        fprintf(f, "cd '");
+        for (const char *c = cwd; *c; c++)
+            if (*c == '\'') fprintf(f, "'\\''"); else fputc(*c, f);
+        fprintf(f, "'\n");
+    }
+    fprintf(f, "exec ");
+    fprintf(f, t->cli_fmt, session_id ? session_id : "");
+    fprintf(f, "\n");
+    fclose(f);
+    chmod(pathp, 0755);
     if (layer) *layer = 4;
-    if (RunInTerminal(full)) {
+    NSString *path = [NSString stringWithUTF8String:pathp];
+    if (RunInTerminal(path)) {
         Say(reason, out_len, @"已在新终端窗口续上这条会话");
         return 0;
     }
