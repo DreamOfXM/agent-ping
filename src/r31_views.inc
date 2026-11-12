@@ -2032,12 +2032,17 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
         // M9：今天/昨天/本周/本月 四颗筛选。昨天有整轮快照；周/月来自 daily.txt 日聚合
         //（第一天上线只有今天一行——不回填，不编）。
         struct Seg { const char* key; long tokens; bool has; };
+        // 周/月的数字来自 daily.txt 日聚合：上线第一天只有今天一行，周=月=今天，
+        // 点过去数字纹丝不动，看着像坏了。行数不足 2 时这两颗置灰不可点——不装有多天。
+        const bool hist = g_pd.daily.size() >= 2;
         const Seg segs[4] = {
             {"r_today", (long)g_pd.today_tokens, g_pd.has_today_tokens},
             {"r_useg_yest", g_pd.yday_tokens, g_pd.yday_tokens > 0},
-            {"r_useg_week", g_pd.week_tokens, g_pd.week_tokens > 0},
-            {"r_useg_month", g_pd.month_tokens, g_pd.month_tokens > 0},
+            {"r_useg_week", g_pd.week_tokens, hist && g_pd.week_tokens > 0},
+            {"r_useg_month", g_pd.month_tokens, hist && g_pd.month_tokens > 0},
         };
+        // 自愈：当前段数据没了（比如昨天滚出窗）就回落到今天，高亮与数字永远一致。
+        if (g_r31_useg != 0 && !segs[g_r31_useg].has) g_r31_useg = 0;
         {
             float fx = hx;
             for (int i = 0; i < 4; i++) {
@@ -2052,8 +2057,10 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                                     k31Line, 8.0f, 0, 1.0f);
                 DrawTextRun(dl, fx + 9.0f, TextMid(cy + 12.0f, T_S10, loc), lab, loc,
                             on ? k31Fg : (segs[i].has ? k31Sec : k31Faint), T_S10);
-                AddHit(g_hits, fx, cy + 2.0f, fx + tw + 18.0f, cy + 22.0f, HIT_USEG, 2300 + i, i,
-                       loc, lab, i);
+                // 没数据的段不注册命中区：置灰的点了弹回，看着像死按钮。
+                if (segs[i].has || on)
+                    AddHit(g_hits, fx, cy + 2.0f, fx + tw + 18.0f, cy + 22.0f, HIT_USEG, 2300 + i,
+                           i, loc, lab, i);
                 fx += tw + 18.0f + 7.0f;
             }
         }
@@ -2080,8 +2087,9 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             if (inSrc(t) && (R31HasUsage(t) || R31QuotaAny(t))) n++;
         R31Mid(dl, hx, cy + 107.5f, RFmt(T("r_tools_log", loc), n), loc, k31Muted, T_S10);
         cy += 133.0f;
-        // M9 近 7 天柱图：数据是 daily.txt 的既有行，第一天上线少几根就少几根。
-        if (!one && g_pd.daily.size() >= 2) {
+        // M9 近 7 天柱图：数据是 daily.txt 的既有行。第一天只有 1 根也照画——
+        // 整块消失会让「柱图在哪」变成疑问；1 根就是今天的真实形状，不装满。
+        if (!one && !g_pd.daily.empty()) {
             const float bh = 84.0f;
             R31Glass(dl, L, cy, listW, bh, 12.0f);
             long peak = 1;
