@@ -917,10 +917,15 @@ static BOOL RunInTerminal(NSString *cmdBody) {
         [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm.app"] ||
         [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/iTerm2.app"];
     if (itermInstalled) {
+        // ignoring application responses：create-window-command 这个事件在会话命令
+        // 持续运行时不回执（实测 8s 仍挂）——同步等它必被 5s 超时误判成失败、再去开
+        // Terminal（双开）。发完即返回，窗口照开；结果由后续进程检查兜底。
         NSString *it = [NSString stringWithFormat:
-            @"tell application \"iTerm2\"\nactivate\n"
-             "create window with default profile command \"sh %@\"\nend tell", path];
-        if (RunOSC(it, 5.0)) return YES;
+            @"ignoring application responses\n"
+             "tell application \"iTerm2\"\nactivate\n"
+             "create window with default profile command \"sh %@\"\nend tell\n"
+             "end ignoring", path];
+        if (RunOSC(it, 3.0)) return YES;
         fprintf(stderr, "[终端] iTerm2 脚本失败，退 Terminal 兜底 ｜ %s\n",
                 g_lastOscErr.UTF8String ?: "");
         fflush(stderr);
