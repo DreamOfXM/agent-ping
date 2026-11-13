@@ -3417,11 +3417,11 @@ void roll_daily(Snapshot& s) {
 // ── M2 趋势（估算）─────────────────────────────────────────────────────────
 // 只做差分：每工具保留最近 ~6 分钟的 (seen_at, 5h窗剩余%) 读数，取首尾差算每小时几个点。
 // 标「估算」且不预测耗尽时刻。读数不足两根（刚启动/读数不更新）known=false 整行不画。
-namespace {
-std::map<std::string, std::deque<std::pair<double, double>>>& trend_buf() {
+// 全局作用域（static＝TU 内私有）：GCC 12 从 namespace 外的 compute_trends 调用
+// 匿名 ns 成员会报 not declared（11-13 Linux CI 实测），提出来就稳。
+static std::map<std::string, std::deque<std::pair<double, double>>>& trend_buf() {
     static std::map<std::string, std::deque<std::pair<double, double>>> m;
     return m;
-}
 }
 
 void compute_trends(Snapshot& s) {

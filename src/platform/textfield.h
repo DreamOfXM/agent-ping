@@ -22,6 +22,8 @@ void ap_field_set_change_cb(void (*cb)(const char* text, int tag));
 void ap_field_set_done_cb(void (*cb)(bool commit, int tag));
 #else
 // 非 Apple 平台没有这一档（Linux 搜索框继续走字符队列直收）。
+inline void ap_field_show(void*, float, float, float, float, float,
+                          const char*, const char*, int) {}
 inline void ap_field_hide(void) {}
 inline void ap_field_frame(void*, float, float, float, float) {}
 inline void ap_field_set_text(const char*) {}
