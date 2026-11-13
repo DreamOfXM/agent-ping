@@ -2835,195 +2835,162 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                     k31Muted, 1);
         cy += chartH + 10.0f;
     }
-    // 额度：单卡三行（v7 M12）。滚动窗读数不是时段累计；余额按余额单位报本段已耗。
-    // 每行：头（brand+名+更新时刻）/ 条（5h·周 两列，或余额单列）/ 注（重置·已耗·stale·用尽+接力）。
+    // 额度（v8·M15 重做）：两列卡，照稿——左 48px 环（双环＝外 5h / 内 周；单环＝活期
+    // 余额；没写的窗＝虚线环 + 「—」），右列 名 + 两行（窗口行右侧挂重置时刻，余额行挂
+    // 到期）。热色：已用 ≥75% 琥珀、≥90% 红。Claude 没接额度源 → 虚线双环 + 「未接线」。
     {
         std::vector<const Tool*> qs;
-        for (const Tool& t : g_pd.tools)
+        const Tool* claudeTool = nullptr;
+        for (const Tool& t : g_pd.tools) {
+            if (t.id == "claude" && t.available) claudeTool = &t;
             if (inSrc(t) && R31QuotaAny(t)) qs.push_back(&t);
+        }
+        if (claudeTool && !R31QuotaAny(*claudeTool)) qs.push_back(claudeTool);   // 未接线卡垫底
         if (!qs.empty()) {
-            // 预计算每行高度：用尽/待更新注行会把该行撑到 68，常规 54。
-            float cardH = 10.0f + 6.0f;
-            for (const Tool* tp : qs) {
-                const bool sw2 =
-                    R31QuotaStale(tp->quota.five, now) || R31QuotaStale(tp->quota.week, now) ||
-                    (tp->quota.balance.known && R31BalanceStale(tp->quota.balance, now));
-                const bool ex2 = tp->quota.balance.known && tp->quota.balance.exceeded;
-                cardH += 66.0f + ((ex2 || sw2) ? 14.0f : 0.0f);
-            }
-            const float cardY = cy;
-            R31Glass(dl, L, cardY, listW, cardH, 13.0f);
-            float ry = cardY + 6.0f;
+            const float cardW = (listW - 6.0f) / 2.0f;
+            const float cardH = 64.0f;
+            const int nRows = (int)((qs.size() + 1) / 2);
+            const float gridH = (float)nRows * 70.0f + 6.0f;
+            const float cardY0 = cy;
+            R31Glass(dl, L, cardY0, listW, gridH, 13.0f);
+            auto heatCol = [](int used, ImU32 base) {
+                if (used >= 90) return WithA(k31Red, 255);
+                if (used >= 75) return WithA(k31Amber, 255);
+                return base;
+            };
             for (size_t qi = 0; qi < qs.size(); qi++) {
                 const Tool& t = *qs[qi];
-                if (qi > 0) RHair(dl, L + 12.0f, ry, L + listW - 12.0f, k31Line);
+                const bool unwired = (&t == claudeTool) && !R31QuotaAny(t);
+                const float cx0 = L + (float)(qi % 2) * (cardW + 6.0f) + 4.0f;
+                const float cy0 = cardY0 + 6.0f + (float)(qi / 2) * (cardH + 6.0f);
+                dl->AddRectFilled(ImVec2(cx0, cy0), ImVec2(cx0 + cardW - 8.0f, cy0 + cardH),
+                                  k31Badge, 10.0f);
+                dl->AddRect(ImVec2(cx0 + 0.5f, cy0 + 0.5f),
+                            ImVec2(cx0 + cardW - 8.5f, cy0 + cardH - 0.5f), k31Line, 10.0f, 0,
+                            1.0f);
                 const bool staleF = R31QuotaStale(t.quota.five, now);
                 const bool staleW = R31QuotaStale(t.quota.week, now);
                 const bool f5 = t.quota.five.known, wk = t.quota.week.known;
                 const bool hasWin = f5 || wk;
-                const bool staleWin = (f5 && staleF) || (wk && staleW);
                 const ap::Balance bal = R31BalanceOf(t);
                 const bool staleBal = bal.known && R31BalanceStale(bal, now);
-                const bool staleAny = staleWin || staleBal;
-                // 头行（22px）
-                Brand31(dl, L + 12.0f, ry + 3.0f, 18.0f, t.id, loc);
-                DrawTextRun(dl, L + 38.0f, TextMid(ry + 12.0f, T_S11B, loc),
-                            R31Agent(t.id, loc), loc, k31Fg, T_S11B);
-                const double seenWin =
-                    hasWin ? std::fmax(t.quota.five.seen_at, t.quota.week.seen_at) : 0;
-                const double seenBal = bal.known ? bal.seen_at : 0;
-                const double seen =
-                    staleWin ? seenWin : (staleBal ? seenBal : std::fmax(seenWin, seenBal));
-                {
-                    int hh = 0, mm = 0;
-                    RTimeOfDay(seen, &hh, &mm);
-                    char sb[8];
-                    snprintf(sb, sizeof sb, "%02d:%02d", hh, mm);
-                    const std::string fresh = RFmt(T("r_updated", loc), sb);
-                    DrawTextRight(dl, L + listW - 12.0f, TextMid(ry + 12.0f, T_S9, loc), fresh,
-                                  loc, staleAny ? k31Red : k31Muted, T_S9);
-                    AddHit(g_hits, L, ry, L + listW, ry + 24.0f, HIT_ACCOUNT31, 1110, 0, loc,
-                           t.name, 0);
-                    g_hits.back().key = t.id;
-                }
-                // 环行（v8·M15）：双环＝外 5h / 内 周（弧长与中心数都是「已用」口径，
-                // ≥75% 琥珀、≥90% 红；重置时刻来自 resets_at，stale 换「上次读取」）。
-                // 单环＝活期余额（弧长与中心数都是「剩余」，exceeded 整环红）。
-                {
-                    const float by = ry + 24.0f;
-                    const float rcx = L + 40.0f, rcy = by + 20.0f;
-                    const float tx0 = L + 66.0f;
-                    const float txR = L + listW - 12.0f;
-                    auto heatCol = [](int used, ImU32 base) {
-                        if (used >= 90) return WithA(k31Red, 255);
-                        if (used >= 75) return WithA(k31Amber, 255);
-                        return base;
-                    };
-                    if (hasWin) {
-                        const int u5 = 100 - R31RemainPct(t.quota.five);
-                        const int uW = 100 - R31RemainPct(t.quota.week);
-                        dl->AddCircle(ImVec2(rcx, rcy), 17.0f, k31Line, 40, 3.0f);
-                        dl->AddCircle(ImVec2(rcx, rcy), 10.5f, k31Line, 32, 3.0f);
-                        if (f5) {
-                            dl->PathArcTo(ImVec2(rcx, rcy), 17.0f, -1.5707963f,
-                                          -1.5707963f + 6.2831853f * (float)u5 / 100.0f, 40);
-                            dl->PathStroke(heatCol(u5, WithA(k31Blue, 235)), 0, 3.0f);
+                const bool staleAny = (f5 && staleF) || (wk && staleW) || staleBal;
+                // 环（左，48px 盒）：稿 rc 21/14、描 4.4
+                const float rcx = cx0 + 32.0f, rcy = cy0 + 32.0f;
+                auto ringArc = [&](float r, float frac, ImU32 col) {
+                    if (frac < 0.0f) {
+                        for (int i = 0; i < 12; i++) {
+                            const float a0 = (float)i * (6.2831853f / 12.0f);
+                            dl->PathArcTo(ImVec2(rcx, rcy), r, a0,
+                                          a0 + (6.2831853f / 12.0f) * 0.52f, 8);
+                            dl->PathStroke(col, 0, 4.4f);
                         }
-                        if (wk) {
-                            dl->PathArcTo(ImVec2(rcx, rcy), 10.5f, -1.5707963f,
-                                          -1.5707963f + 6.2831853f * (float)uW / 100.0f, 32);
-                            dl->PathStroke(heatCol(uW, WithA(k31Violet, 235)), 0, 3.0f);
-                        }
-                        char c1[8], c2[8];
+                        return;
+                    }
+                    dl->PathArcTo(ImVec2(rcx, rcy), r, -1.5707963f,
+                                  -1.5707963f + 6.2831853f * frac, 48);
+                    dl->PathStroke(col, 0, 4.4f);
+                };
+                dl->AddCircle(ImVec2(rcx, rcy), 21.0f, WithA(k31Fg, 15), 48, 4.4f);
+                char c1[8] = "—", c2[8] = "—";
+                ImU32 col1 = WithA(k31Fg, 140), col2 = WithA(k31Fg, 140);
+                if (unwired) {
+                    ringArc(21.0f, -1.0f, WithA(k31Fg, 60));
+                    ringArc(14.0f, -1.0f, WithA(k31Fg, 60));
+                } else if (hasWin) {
+                    const int u5 = f5 ? 100 - R31RemainPct(t.quota.five) : -1;
+                    const int uW = wk ? 100 - R31RemainPct(t.quota.week) : -1;
+                    if (f5) {
+                        ringArc(21.0f, (float)u5 / 100.0f, heatCol(u5, WithA(k31Blue, 255)));
                         snprintf(c1, sizeof c1, "%d", u5);
+                        col1 = staleF ? k31Muted : heatCol(u5, k31Sec);
+                    }
+                    if (wk) {
+                        ringArc(14.0f, (float)uW / 100.0f, heatCol(uW, WithA(k31Violet, 255)));
                         snprintf(c2, sizeof c2, "%d", uW);
-                        DrawTextRun(dl, rcx - TextWidth(c1, loc, T_S9) * 0.5f,
-                                    TextMid(rcy - 5.0f, T_S9, loc), c1, loc,
-                                    staleF ? k31Muted : k31Sec, T_S9);
-                        DrawTextRun(dl, rcx - TextWidth(c2, loc, T_S9) * 0.5f,
-                                    TextMid(rcy + 6.0f, T_S9, loc), c2, loc,
-                                    staleW ? k31Muted : k31Sec, T_S9);
-                        const std::string l1 =
-                            std::string("5h ") + std::to_string(u5) + "% · " +
-                            (staleF ? T("r_last_reading", loc)
-                                    : (t.quota.five.resets_at > now
-                                           ? RFmt(T("r_after_reset", loc),
-                                                  Dur(t.quota.five.resets_at - now, loc).c_str())
-                                           : std::string("—")));
-                        const std::string l2 =
-                            std::string(T("r_week", loc)) + " " + std::to_string(uW) + "% · " +
-                            (staleW ? T("r_last_reading", loc)
-                                    : (t.quota.week.resets_at > now
-                                           ? R31LimitStamp(t.quota.week.resets_at)
-                                           : std::string("—")));
-                        DrawTextRun(dl, tx0, TextMid(by + 8.0f, T_S9, loc),
-                                    ClipToWidth(l1, txR - tx0, loc, T_S9), loc,
-                                    heatCol(u5, k31Sec), T_S9);
-                        DrawTextRun(dl, tx0, TextMid(by + 26.0f, T_S9, loc),
-                                    ClipToWidth(l2, txR - tx0, loc, T_S9), loc,
-                                    heatCol(uW, k31Sec), T_S9);
-                    } else if (bal.known) {
-                        const int bp = R31BalancePct(bal);
-                        dl->AddCircle(ImVec2(rcx, rcy), 17.0f, k31Line, 40, 3.0f);
-                        if (bp > 0) {
-                            dl->PathArcTo(ImVec2(rcx, rcy), 17.0f, -1.5707963f,
-                                          -1.5707963f + 6.2831853f * (float)bp / 100.0f, 40);
-                            dl->PathStroke(bal.exceeded ? WithA(k31Red, 235) : WithA(k31Green, 235),
-                                           0, 3.0f);
-                        }
-                        char cb[8];
-                        snprintf(cb, sizeof cb, "%d", bp >= 0 ? bp : 0);
-                        DrawTextRun(dl, rcx - TextWidth(cb, loc, T_S9) * 0.5f,
-                                    TextMid(rcy, T_S9, loc), cb, loc,
-                                    staleBal ? k31Muted : k31Sec, T_S9);
-                        std::string l1 = T("r_remaining", loc);
-                        if (bal.exceeded) {
-                            l1 = T("r_used_up", loc);
-                        } else {
-                            std::string abs = R31Compact(bal.remaining);
-                            if (bal.total > 0) abs += "/" + R31Compact(bal.total);
-                            if (!bal.unit.empty()) abs += " " + bal.unit;
-                            l1 += " " + abs;
-                        }
-                        const std::string l2 =
-                            staleBal
-                                ? std::string(T("r_last_reading", loc)) + " " +
-                                      R31LimitStamp(bal.seen_at)
-                                : (bal.period_end > now
-                                       ? RFmt(T("r_ends_at", loc),
-                                              R31LimitStamp(bal.period_end).c_str())
-                                       : std::string(T("r_local_usage", loc)));
-                        DrawTextRun(dl, tx0, TextMid(by + 8.0f, T_S9, loc),
-                                    ClipToWidth(l1, txR - tx0, loc, T_S9), loc,
-                                    bal.exceeded ? k31Red : (staleBal ? k31Muted : k31Sec), T_S9);
-                        DrawTextRun(dl, tx0, TextMid(by + 26.0f, T_S9, loc),
-                                    ClipToWidth(l2, txR - tx0, loc, T_S9), loc, k31Muted, T_S9);
+                        col2 = staleW ? k31Muted : heatCol(uW, k31Sec);
                     }
+                } else if (bal.known) {
+                    const int bp = R31BalancePct(bal);
+                    if (bp > 0)
+                        ringArc(21.0f, (float)bp / 100.0f,
+                                bal.exceeded ? WithA(k31Red, 255) : WithA(k31Green, 255));
+                    snprintf(c1, sizeof c1, "%d", bp >= 0 ? bp : 0);
+                    col1 = staleBal ? k31Muted : (bal.exceeded ? k31Red : k31Sec);
                 }
-                // 注行（14px）：重置摘要 / 本段已耗 / stale / 用尽+接力——一行说得完的才上。
-                {
-                    const float ny = ry + 58.0f;
-                    float noteY = ry + 58.0f;
-                    const std::string extra = staleAny ? T("r_stale_note", loc) : "";
-                    const R31UseRow* tr = nullptr;
-                    const R31UseRow* crr = nullptr;
-                    for (const auto& r : seg.tk) if (r.tool && r.tool->id == t.id) tr = &r;
-                    for (const auto& r : seg.cr) if (r.tool && r.tool->id == t.id) crr = &r;
-                    const std::string segLab = R31SegLabel(g_r31_useg, loc);
-                    if (!extra.empty() && !(bal.known && bal.exceeded))
-                        DrawTextRun(dl, L + 12.0f, TextMid(ny + 8.0f, T_S9, loc), extra, loc,
-                                    k31Faint, T_S9);
-                    if (bal.known && bal.exceeded) {
-                        DrawTextRun(dl, L + 12.0f, TextMid(ny + 8.0f, T_S9, loc),
-                                    T("r_exhausted", loc), loc, k31Red, T_S9);
-                        const std::string go = T("r_relay_goto", loc);
-                        const float gw = TextWidth(go, loc, T_S9);
-                        const float gx = L + listW - 12.0f - gw;
-                        DrawTextRun(dl, gx, TextMid(ny + 8.0f, T_S9, loc), go, loc, k31Blue, T_S9);
-                        AddHit(g_hits, gx - 6.0f, ny, L + listW - 12.0f, ny + 15.0f, HIT_TAB31,
-                               2420, 0, loc, go, 0);
-                        noteY = ny + 16.0f;
-                    } else if (f5 && t.quota.five.resets_at > now) {
-                        char rnb[40];
-                        snprintf(rnb, sizeof rnb, "5h %s",
-                                 Dur(t.quota.five.resets_at - now, loc).c_str());
-                        std::string rn = rnb;
-                        if (wk && t.quota.week.resets_at > now)
-                            rn += std::string(" · ") + RFmt(T("r_after_reset", loc),
-                                                            Dur(t.quota.week.resets_at - now, loc).c_str());
-                        DrawTextRight(dl, L + listW - 12.0f, TextMid(ny + 8.0f, T_S9, loc), rn,
-                                      loc, k31Faint, T_S9);
-                    }
-                    if (!extra.empty()) noteY = std::fmax(noteY, ny + 14.0f);
-                    (void)tr; (void)crr; (void)segLab;
-                    ry = noteY + 2.0f;
+                DrawTextRun(dl, rcx - TextWidth(c1, loc, T_S9) * 0.5f,
+                            TextMid(rcy - 5.0f, T_S9, loc), c1, loc, col1, T_S9);
+                DrawTextRun(dl, rcx - TextWidth(c2, loc, T_S9) * 0.5f,
+                            TextMid(rcy + 6.0f, T_S9, loc), c2, loc, col2, T_S9);
+                // 右列：名（+stale 点）/ 两行
+                const float tx0 = cx0 + 64.0f;
+                const float txR = cx0 + cardW - 16.0f;
+                R31Mid(dl, tx0, cy0 + 11.0f, R31Agent(t.id, loc), loc, k31Fg, T_S11B);
+                if (staleAny && !unwired)
+                    dl->AddCircleFilled(ImVec2(tx0 + TextWidth(R31Agent(t.id, loc), loc, T_S11B) + 7.0f,
+                                               cy0 + 10.0f), 2.5f, k31Amber, 10);
+                if (unwired) {
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc), T("r_unwired", loc),
+                                loc, k31Blue, T_S9);
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc), T("r_hook_hint", loc),
+                                loc, k31Muted, T_S9);
+                } else if (hasWin) {
+                    const int u5 = f5 ? 100 - R31RemainPct(t.quota.five) : -1;
+                    const int uW = wk ? 100 - R31RemainPct(t.quota.week) : -1;
+                    std::string r1 = std::string("5h ") + (f5 ? std::to_string(u5) + "%" : "—");
+                    std::string rs1 = "—";
+                    if (staleF) rs1 = T("r_last_reading", loc);
+                    else if (f5 && t.quota.five.resets_at > now)
+                        rs1 = R31LimitStamp(t.quota.five.resets_at);
+                    std::string r2 =
+                        std::string(T("r_week", loc)) + " " + (wk ? std::to_string(uW) + "%" : "—");
+                    std::string rs2 = "—";
+                    if (staleW) rs2 = T("r_last_reading", loc);
+                    else if (wk && t.quota.week.resets_at > now)
+                        rs2 = R31LimitStamp(t.quota.week.resets_at);
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc), r1, loc,
+                                heatCol(u5 < 0 ? 0 : u5, k31Sec), T_S9);
+                    DrawTextRight(dl, txR, TextMid(cy0 + 26.0f, T_S9, loc),
+                                  ClipToWidth(rs1, txR - tx0 - TextWidth(r1, loc, T_S9) - 8.0f,
+                                              loc, T_S9),
+                                  loc, k31Faint, T_S9);
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc), r2, loc,
+                                heatCol(uW < 0 ? 0 : uW, k31Sec), T_S9);
+                    DrawTextRight(dl, txR, TextMid(cy0 + 41.0f, T_S9, loc),
+                                  ClipToWidth(rs2, txR - tx0 - TextWidth(r2, loc, T_S9) - 8.0f,
+                                              loc, T_S9),
+                                  loc, k31Faint, T_S9);
+                } else if (bal.known) {
+                    std::string r1 = bal.exceeded
+                                         ? T("r_used_up", loc)
+                                         : (std::string(T("r_remaining", loc)) + " " +
+                                            R31Compact(bal.remaining) +
+                                            (bal.total > 0 ? "/" + R31Compact(bal.total) : "") +
+                                            (bal.unit.empty() ? "" : " " + bal.unit));
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc),
+                                ClipToWidth(r1, txR - tx0, loc, T_S9), loc,
+                                bal.exceeded ? k31Red : (staleBal ? k31Muted : k31Sec), T_S9);
+                    const std::string r2 =
+                        staleBal
+                            ? std::string(T("r_last_reading", loc)) + " " +
+                                  R31LimitStamp(bal.seen_at)
+                            : (bal.period_end > now
+                                   ? RFmt(T("r_ends_at", loc),
+                                          R31LimitStamp(bal.period_end).c_str())
+                                   : std::string(T("r_local_usage", loc)));
+                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc),
+                                ClipToWidth(r2, txR - tx0, loc, T_S9), loc, k31Muted, T_S9);
                 }
-                ry += 6.0f;
+                // 点卡＝账户页（与旧行同一落点）
+                AddHit(g_hits, cx0, cy0, cx0 + cardW - 8.0f, cy0 + cardH, HIT_ACCOUNT31, 1110, 0,
+                       loc, t.name, 0);
+                g_hits.back().key = t.id;
             }
-            cy = cardY + cardH + 10.0f;
+            cy = cardY0 + gridH + 10.0f;
         }
     }
-    // N5 等待镜子（本周）：闭合等待才有数——人没来不算闭合，不编。没有闭合整行不画。
+
+        // N5 等待镜子（本周）：闭合等待才有数——人没来不算闭合，不编。没有闭合整行不画。
     if (g_pd.mirror_n > 0) {
         const std::string avgS = Dur(g_pd.mirror_avg, loc);
         const std::string maxS = Dur(g_pd.mirror_max, loc);
@@ -4266,6 +4233,12 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         g_bodyTop[view] = ImVec2(x + 16.0f, bodyTop);
         g_bodyBot[view] = ImVec2(x + w - 16.0f, bodyBot);
         g_bodyValid[view] = true;
+        // 离屏取证不走 HandleInput：SHOT 轮的滚动偏移在这里直接吃，否则柱图以下的
+        // 额度卡永远画不进画面（真窗口不受影响——那边由滚轮/拖动写 g_scroll）。
+        if (g_shot_to) {
+            static const char* kScrollShot = getenv("AGENTPING_SCROLL");
+            if (kScrollShot) g_scroll[view] = g_scrollTarget[view] = (float)atof(kScrollShot);
+        }
         if (g_scroll[view] > g_scrollMax[view]) g_scroll[view] = g_scrollMax[view];
         const size_t hits0 = g_hits.size();
         dl->PushClipRect(ImVec2(x + 16.0f, bodyTop), ImVec2(x + w - 16.0f, bodyBot), true);

@@ -653,6 +653,11 @@ static const Key kStr[] = {
                         "使用量と上限", "사용량 및 한도"}},
     // ── 权益领取（view 9）：全部字段来自各家写在自己磁盘上的读数 ──────────────
     {"r_claim_tab",    {"权益", "Rewards", "Vorteile", "Vantaggi", "特典", "혜택"}},
+    {"r_unwired",      {"未接线", "Not wired", "Nicht angebunden", "Non collegato",
+                        "未接続", "미연결"}},
+    {"r_hook_hint",    {"statusLine hook 可补", "a statusLine hook can fill it",
+                        "Ein statusLine-Hook kann es liefern", "uno statusLine hook può fornirlo",
+                        "statusLine hook で補える", "statusLine hook 으로 보강 가능"}},
     {"r_models_tab",   {"模型", "Models", "Modelle", "Modelli", "モデル", "모델"}},
     {"r_models_note",  {"模型明细只有当日窗——账本只落工具级，历史天没有分模型。",
                         "Per-model detail is today-window only; the ledger stores tool-level days.",
@@ -3349,6 +3354,8 @@ static void ShowPanel() {
 /// 上一版复用同一个 why，ap_open 一把盖掉了「未授权辅助功能」那句，屏幕上就只剩「打开了文件夹」。
 static const UIRow* RowByKey(const std::string& key);
 static Landing JumpTo(const Hit& h) {
+    // 打开＝看过：进落点就 ack（待处理里那张卡随之退场；DONE 行的「待查看」同语义）。
+    g_ack.insert(h.key);
     const UIRow* jrow = RowByKey(h.key);
     const bool row_client_is_app = jrow && jrow->client == "App";
     Landing out;
@@ -4054,6 +4061,7 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             GotoView(g_tab);
             return;
         case HIT_INFO31: {                      // 行上的 ⓘ：进详情，不动跳转
+            g_ack.insert(h.key);
             const UIRow* r = SelectedRow(h.key);
             if (!r) return;
             MarkSeen(*r);
@@ -4734,6 +4742,9 @@ static ImU32 GrpColor(int g) {
 /// runtimeState:"running"。这一条以后仍留在会话列表里，标「疑似等你授权」，
 /// 但不进任何计数、不进待处理清单、不响铃（响铃那侧本来就拦着）。
 static bool DemandsYou(const UIRow& r) {
+    // 已读的不催（2026-11-13 用户重申「人看后就不展示」）：双击/ⓘ 看过即 ack，
+    // 失败/授权卡从待处理退场——源头不变化就一直挂着、看过还挂着，等于惩罚来看的人。
+    if (r.acked) return false;
     const int g = GroupOf(r.state);
     return g == G_FAIL || (g == G_AWAIT && !r.inferred);
 }
@@ -5902,8 +5913,8 @@ static void RebuildPanel(const ap::Snapshot& s) {
     for (const auto& r : pd.rows) {
         int g = GroupOf(r.state);
         // 「介入」这一档只数有正证的：反推那条仍画在会话列表里，但不推计数（见 DemandsYou）。
-        if (g == G_AWAIT) { if (!r.inferred) { pd.needs++; pd.await_n++; } }
-        else if (g == G_FAIL) { pd.needs++; pd.fail_n++; }
+        if (g == G_AWAIT) { if (!r.inferred && !r.acked) { pd.needs++; pd.await_n++; } }
+        else if (g == G_FAIL) { if (!r.acked) { pd.needs++; pd.fail_n++; } }
         else if (g == G_RUN) pd.run++;
         else if (g == G_QUEUE) { pd.run++; pd.queue_n++; }
         else if (g == G_DONE && r.unseen) pd.unseen_n++;   // 跑完但没人看过：待处理清单的第二段
