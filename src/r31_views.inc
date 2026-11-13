@@ -2499,7 +2499,15 @@ static float R31ToolUsageCard(ImDrawList* dl, float x, float y, float w, int loc
     const std::string name = r.tool ? R31Agent(r.id, loc) : T("r_all_tools", loc);
     R31Mid(dl, x + 50.0f, y + 27.0f, name, loc, k31Fg, T_S14B);
     if (expandable) {
-        I31(dl, open ? I31_DOWN : I31_RIGHT, x + w - 29.0f, y + 20.0f, 14.0f, k31Sec);
+        // 展开态手绘上收 chevron：I31_DOWN/UP 是四档「输入/输出」的桶图标，角标再用
+        // 同形混淆（11-13 用户实拍：展开卡角上的 ↓ 和输入格的 ↓ 撞形）。收起态仍是 ›。
+        if (open) {
+            const float ccx = x + w - 26.0f, ccy = y + 27.0f;
+            dl->AddLine(ImVec2(ccx - 5.0f, ccy + 3.0f), ImVec2(ccx, ccy - 3.0f), k31Sec, 1.8f);
+            dl->AddLine(ImVec2(ccx, ccy - 3.0f), ImVec2(ccx + 5.0f, ccy + 3.0f), k31Sec, 1.8f);
+        } else {
+            I31(dl, I31_RIGHT, x + w - 29.0f, y + 20.0f, 14.0f, k31Sec);
+        }
         AddHit(g_hits, x, y, x + w, y + headerH, HIT_USEGROW, 2400 + index, 0, loc, name, open);
         g_hits.back().key = key;
     }

@@ -2357,7 +2357,8 @@ Balance read_zcode_balance() {
             b.total = (double)limit;
             b.unit = "";   // 不标 credits：这是套餐的每日额度计数，不是 credits 池
             if (const Json* lv = data->at("level"))
-                if (lv->kind == Json::STR) b.label = lv->str;
+                if (lv->kind == Json::STR) b.label = "MCP 日额度 · " + lv->str;
+                else b.label = "MCP 日额度";   // 这窗是预置插件的每日合计，不是套餐余额
             const long nref = num_at(data, "next_refresh_at", &gn);
             if (gn && nref > 0) b.period_end = (double)nref;
             b.seen_at = parse_bracket_local(ln);
