@@ -158,6 +158,10 @@ struct AgentSnap {
     std::vector<ModelUse> models;        // 今日按模型，降序
     std::array<long, 24> hourly{};       // 今日本机 0–23 点各小时的总 token
     std::array<long, 24> yday_hourly{};  // 昨天同一套小时格：只给「昨天 · 按小时」柱图
+    /// 昨天本地日窗的四档合计（zcode/workbuddy 直接填；claude/qoder 走 scan_transcript
+    /// 的出参，这两个字段留零）。scan_all 汇总进 Snapshot.yesterday_*。
+    long yday_tokens = 0;
+    double yday_credits = 0;
     std::array<double, 24> credits_hourly{};       // 今天各小时的 Credits（只有 Qoder 这类日志会写）
     std::array<double, 24> yday_credits_hourly{};  // 昨天的 Credits 小时格
     Quota quota;                         // 账户级；空 = 这一路没有可用的额度源

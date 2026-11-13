@@ -1019,6 +1019,134 @@ bool parse_question_block(const Json& box, const std::string* fallback, std::str
     return true;
 }
 
+// ── 历史窗合计（昨天小时桶 + 账本缺日回填共用）────────────────────────
+// 账本（daily.txt）只在 app 跑着的那天积累：上线首日/没开机的那天永远空着，
+// 但每家的原始源都带时间戳，历史窗口问得到。柱图的「昨天」与 roll_daily 的缺日
+// 回填都从这里取数。codex 不跟：它的会话词元要 resume 分段做差分，历史窗口径
+// 不同（本机 codex 用量也≈0）；pi/opencode/qwenwork 同批跳过，如实「无记录」。
+namespace {
+
+struct HistSum {
+    UsageParts parts;
+    double credits = 0;
+    std::array<long, 24> hourly{};
+};
+
+/// [d0,d1) 本地窗内 root/<proj>/*.jsonl 的用量合计。
+/// subtract_cache=true：input 含缓存命中，进账前做差（WorkBuddy，同 1416 行口径）；
+/// false = 纯输入（Claude/Qoder，同 402 行口径）。needle 与两处现行扫描一致。
+void sum_jsonl_window(const std::string& root, double d0, double d1,
+                      bool subtract_cache, HistSum& out) {
+    FStat rs = fst(root);
+    if (!rs.ok || !rs.dir) return;
+    for (const std::string& dir : list_dir(root)) {
+        std::string dpath = join(root, dir);
+        FStat ds = fst(dpath);
+        if (!ds.ok || !ds.dir) continue;
+        for (const std::string& f : list_dir(dpath)) {
+            if (f.size() < 7 || f.compare(f.size() - 6, 6, ".jsonl") != 0) continue;
+            scan_window(join(dpath, f), d0, "\"usage\"", [&](const Json& rec, double ts) {
+                if (!(ts >= d0 && ts < d1)) return;   // scan_window 只兜下界，上界自己滤
+                const Json* msg = rec.at("message");
+                const Json* u = msg ? msg->at("usage") : nullptr;
+                if (!u) return;
+                auto num = [&](const char* k) -> long {
+                    const Json* v = u->at(k);
+                    return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+                };
+                UsageParts p;
+                p.output = num("output_tokens");
+                if (subtract_cache) {
+                    p.cache_read = num("cache_read_input_tokens");
+                    const long raw = num("input_tokens");
+                    p.input = raw > p.cache_read ? raw - p.cache_read : 0;
+                    p.cache_write = num("cache_write_input_tokens");
+                } else {
+                    p.input = num("input_tokens");
+                    p.cache_read = num("cache_read_input_tokens");
+                    p.cache_write = num("cache_creation_input_tokens");
+                }
+                const Json* c = u->at("credits");
+                if (c && c->kind == Json::NUM) out.credits += c->num;
+                out.parts.input += p.input;
+                out.parts.output += p.output;
+                out.parts.cache_read += p.cache_read;
+                out.parts.cache_write += p.cache_write;
+                std::time_t tt = (std::time_t)ts;
+                std::tm tv;
+                localtime_r(&tt, &tv);
+                if (tv.tm_hour >= 0 && tv.tm_hour < 24) out.hourly[tv.tm_hour] += p.total();
+            });
+        }
+    }
+}
+
+/// zcode 某本地窗 [d0,d1) 的四档+小时桶。tokens.input 实测含缓存命中，做差同
+/// scan_zcode 今日两查；只算主会话（子代理完工会并回主会话，口径一致）。
+bool zcode_day_sum(const std::string& db_path, double d0, double d1, HistSum& out) {
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
+                        nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return false;
+    }
+    sqlite3_busy_timeout(db, 250);
+    sqlite3_exec(db, "PRAGMA query_only=1;", nullptr, nullptr, nullptr);
+    bool ok = false;
+    {
+        std::ostringstream q;
+        q << "select cast(strftime('%H', m.time_created/1000,'unixepoch','localtime') as integer) h, "
+             "sum(max(coalesce(json_extract(data,'$.tokens.input'),0)"
+             " - coalesce(json_extract(data,'$.tokens.cache.read'),0), 0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.output'),0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.cache.read'),0)), "
+             "sum(coalesce(json_extract(data,'$.tokens.cache.write'),0)), "
+             "sum(max(coalesce(json_extract(data,'$.tokens.input'),0)"
+             " - coalesce(json_extract(data,'$.tokens.cache.read'),0), 0)"
+             " + coalesce(json_extract(data,'$.tokens.output'),0)"
+             " + coalesce(json_extract(data,'$.tokens.cache.read'),0)"
+             " + coalesce(json_extract(data,'$.tokens.cache.write'),0)) "
+             "from message m join session s on m.session_id = s.id"
+             " where coalesce(s.task_type,'') != 'subagent_child'"
+             " and m.time_created >= " << (long long)(d0 * 1000)
+          << " and m.time_created < " << (long long)(d1 * 1000) << " group by h;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            ok = true;
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const int h = (int)sqlite3_column_int64(st, 0);
+                out.parts.input += (long)sqlite3_column_double(st, 1);
+                out.parts.output += (long)sqlite3_column_double(st, 2);
+                out.parts.cache_read += (long)sqlite3_column_double(st, 3);
+                out.parts.cache_write += (long)sqlite3_column_double(st, 4);
+                if (h >= 0 && h < 24) out.hourly[h] += (long)sqlite3_column_double(st, 5);
+            }
+            sqlite3_finalize(st);
+        }
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+/// 本地「今天零点 − i 天」的 [起点,终点) 与日期键。用 tm_mday 递减过 DST，不拿 86400 硬减。
+void local_day_before(double now, int i, long& key, double& d0, double& d1) {
+    std::time_t tt = (std::time_t)now;
+    std::tm tv;
+    localtime_r(&tt, &tv);
+    tv.tm_hour = 0;
+    tv.tm_min = 0;
+    tv.tm_sec = 0;
+    tv.tm_mday -= i;
+    const std::time_t start = mktime(&tv);
+    d0 = (double)start;
+    d1 = d0 + 86400;
+    // 与下方 day_key 同式（tm_year 是 126 这类偏移年，不 +1900）；day_key 定义在
+    // roll_daily 附近，这里不能引用，只能同式复算。
+    key = (long)tv.tm_year * 10000 + (long)(tv.tm_mon + 1) * 100 + (long)tv.tm_mday;
+}
+
+}  // namespace
+
 AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double now, double since) {
     AgentSnap snap;
     snap.id = "zcode";
@@ -1283,6 +1411,19 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     sqlite3_close(db);
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
+    // 昨天（本地日）四档与小时桶：「昨天 · 按小时」柱图和昨日小计的 zcode 份。
+    // 每轮都查（一条 group by，ms 级）；账本里昨天的行由 roll_daily 的缺日回填写。
+    {
+        long key = 0;
+        double d0 = 0, d1 = 0;
+        local_day_before(now, 1, key, d0, d1);
+        HistSum ys;
+        if (zcode_day_sum(db_path, d0, d1, ys)) {
+            snap.yday_tokens = ys.parts.total();
+            snap.yday_credits = ys.credits;
+            snap.yday_hourly = ys.hourly;
+        }
+    }
     return snap;
 }
 
@@ -1463,6 +1604,17 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
     sqlite3_close(db);
     std::sort(snap.sessions.begin(), snap.sessions.end(),
               [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
+    // 昨天窗（本地日）：「昨天 · 按小时」柱图的 workbuddy 份；input 含缓存，做差同上。
+    {
+        long key = 0;
+        double d0 = 0, d1 = 0;
+        local_day_before(now, 1, key, d0, d1);
+        HistSum ys;
+        sum_jsonl_window(projects_root, d0, d1, true, ys);
+        snap.yday_tokens = ys.parts.total();
+        snap.yday_credits = ys.credits;
+        snap.yday_hourly = ys.hourly;
+    }
     return snap;
 }
 
@@ -2205,6 +2357,11 @@ Snapshot scan_all(double now_epoch) {
     for (const AgentSnap& a : snap.agents)
         for (const Session& s : a.sessions)
             if (s.last_activity >= since) { snap.today_tokens += s.tokens; snap.today_credits += s.credits; }
+    // 昨日小计：claude/qoder 由 scan_transcript 出参已累；zcode/workbuddy 的份在 AgentSnap。
+    for (const AgentSnap& a : snap.agents) {
+        snap.yesterday_tokens += a.yday_tokens;
+        snap.yesterday_credits += a.yday_credits;
+    }
     // 先盖 App 亲口报的运行状态，再让 hook 收件箱盖它：两家都是「它自己写的」，
     // 但 hook 那条带问句原文与落点更具体。
     snap.live_landed = apply_qoder_live(snap, read_qoder_live(), now);
@@ -2686,14 +2843,93 @@ void roll_daily(Snapshot& s) {
                 u.five_pct = f5;
                 u.week_pct = wk;
                 if (d != today) per[d][who] = u;                 // 今天整段重写
-            } else {
-                // 旧三列格式：day tokens credits → "*" 行
-                std::istringstream is2(line);
-                long d2; long tk; double cr;
-                if (is2 >> d2 >> tk >> cr && d2 != today)
-                    per[d2]["*"] = {d2, tk, cr};
+        } else {
+            // 旧三列格式：day tokens credits → "*" 行
+            std::istringstream is2(line);
+            long d2; long tk; double cr;
+            if (is2 >> d2 >> tk >> cr && d2 != today)
+                per[d2]["*"] = {d2, tk, cr};
+        }
+    }
+    // ── 缺日回填：账本当缓存，缺的天从原始源补齐 ─────────────────────
+    // 近 30 天（不含今天；更早的本年天仍「自首个记录」如实缺着）。某天缺哪家的行
+    // 就只补哪家，补过一次就落在文件里不再碰；回填日全零＝「当天记录为 0」，
+    // 不是「无记录」——四家的源本机都在，问过就是答过。codex/pi/opencode/qwenwork
+    // 不回填（见文件头注释），它们的行缺着就如实缺着。
+    {
+        const std::string h = home();
+        struct Bk { const char* id; const char* root; bool subtract; };
+        const Bk kSrc[3] = {
+            {"claude", ".claude/projects", false},
+            {"qoder", ".qoder/projects", false},
+            {"workbuddy", ".workbuddy/projects", true},
+        };
+        const std::string zdb = join(h, ".zcode/cli/db/db.sqlite");
+        for (int i = 1; i <= 30; ++i) {
+            long key = 0;
+            double d0 = 0, d1 = 0;
+            local_day_before((double)s.window_start, i, key, d0, d1);
+            auto has = [&](const char* id) {
+                auto it = per.find(key);
+                return it != per.end() && it->second.count(id) > 0;
+            };
+            bool need = false;
+            for (const Bk& b : kSrc) if (!has(b.id)) { need = true; break; }
+            if (!need && !has("zcode")) need = true;
+            if (!need) continue;
+            bool any = false;
+            for (const Bk& b : kSrc) {
+                if (has(b.id)) continue;
+                FStat rs = fst(join(h, b.root));
+                if (!rs.ok || !rs.dir) continue;   // 本机没这个源：不写 0 行，如实「无记录」
+                HistSum ys;
+                sum_jsonl_window(join(h, b.root), d0, d1, b.subtract, ys);
+                Snapshot::DayUse u;
+                u.day = key;
+                u.tokens = ys.parts.total();
+                u.credits = ys.credits;
+                u.parts = ys.parts;
+                u.five_pct = -1;
+                u.week_pct = -1;
+                per[key][b.id] = u;
+                any = true;
+            }
+#ifdef AP_HAVE_SQLITE
+            if (!has("zcode")) {
+                HistSum ys;
+                if (zcode_day_sum(zdb, d0, d1, ys)) {
+                    Snapshot::DayUse u;
+                    u.day = key;
+                    u.tokens = ys.parts.total();
+                    u.credits = ys.credits;
+                    u.parts = ys.parts;
+                    u.five_pct = -1;
+                    u.week_pct = -1;
+                    per[key]["zcode"] = u;
+                    any = true;
+                }
+            }
+#endif
+            if (any) {
+                // 全局行从当天的全部工具行重建（不能只记本次增量：分次补进来的
+                // 工具行——昨天先补了 workbuddy、今天补 zcode——都会被漏掉）。
+                Snapshot::DayUse g;
+                g.day = key;
+                for (const auto& [who, u] : per[key]) {
+                    if (who == "*") continue;
+                    g.tokens += u.tokens;
+                    g.credits += u.credits;
+                    g.parts.input += u.parts.input;
+                    g.parts.output += u.parts.output;
+                    g.parts.cache_read += u.parts.cache_read;
+                    g.parts.cache_write += u.parts.cache_write;
+                }
+                g.five_pct = -1;
+                g.week_pct = -1;
+                per[key]["*"] = g;
             }
         }
+    }
     }
     auto remain_pct = [](const QuotaWindow& q) -> int {
         if (!q.known) return -1;
