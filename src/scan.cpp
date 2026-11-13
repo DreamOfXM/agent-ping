@@ -831,7 +831,10 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
                         quota.five.window_min != 300 && quota.five.window_min < 1440) {
                         quota.five.window_min = 300;   // 非 300 的短窗仍归「5 小时」一栏，只在说明里写实际分钟
                     }
-                    if (const std::string* pl = rl->str_at("plan_type")) if (!pl->empty()) quota.plan = *pl;
+                    if (const std::string* pl = rl->str_at("plan_type"))
+                        // API-key 鉴权的 rate_limits 会给字面 "unknown"——照抄就是卡上一个
+                        // 没有信息量的 unknown（11-13 用户实拍），按没写处理。
+                        if (!pl->empty() && *pl != "unknown") quota.plan = *pl;
                     const Json* cr = rl->at("credits");
                     if (cr) {
                         // 2026-10-19 的 rollout 实测：balance 是字符串 "0"，且同一条带着
