@@ -24,6 +24,7 @@
 #include "platform/cursor.h"
 #include "platform/motion.h"
 #include "platform/passthrough.h"
+#include "platform/textfield.h"
 #include "alert.h"
 #include "claims.h"
 #include "scan.h"
@@ -2111,6 +2112,13 @@ static bool g_r31_search = false;          // 总览里那条搜索框是否展�
 static std::string g_r31_query;            // 会话搜索（项目 / 工具 / 客户端 / 问题）
 static std::string g_r31_toolq;            // 工具列表搜索
 static int g_r31_focus = 0;                // 0＝没有输入框在收字，1＝会话搜索，2＝工具搜索
+// 原生输入框（platform/textfield*）：聚焦的那颗框把矩形与占位句登记给桥，桥负责
+// NSTextField 的 show/跟帧/摘除。中文与组词全走原生输入法——这是 10-28 那次
+// 「关 IME 上下文」绕法的正解（当时搜狗组词挂死，ASCII 直进队列、中文只剩 ⌘V）。
+static float g_r31_field_rect[4] = {0, 0, 0, 0};
+static bool g_r31_field_rect_ok = false;   // 上一帧真画过这颗框才允许字段定位
+static int g_r31_field_tag = 0;            // 字段当前挂的框（0＝没挂）
+static std::string g_r31_field_ph;         // 占位句随框登记（带语言）
 static int g_r31_rail = 0;                 // 来源导轨从第几颗开始摆（横向滚动）
 static std::string g_r31_account;          // 账户页看的是哪一路（空＝该路没有账户数据）
 static bool g_r31_models = false;          // 账户页「按模型」是否展开
@@ -3298,6 +3306,8 @@ static void HidePanel() {
     if (g_panelVisible) {
         g_panelVisible = false;
         g_modeDirty = true;
+        ap_field_hide();       // 面板收起，原生输入框跟着摘；重开重聚焦
+        g_r31_focus = 0;
 #ifndef __APPLE__
         if (g_win) glfwHideWindow(g_win);
 #endif
@@ -4067,6 +4077,8 @@ static void DoAction(const Hit& h, const ImVec2& at) {
                 g_r31_query.clear();
                 g_r31_focus = 1;
             }
+            // ✕ 与原生框并存（✕ 那一段点不到字段，见 hitTest 让路）：串清了字段也要清
+            if (g_r31_field_tag == h.opt) ap_field_set_text("");
             g_relayout = true;
             return;
         case HIT_GEAR:
@@ -4348,13 +4360,14 @@ static bool RealLeftDown() {
 
 #ifdef __APPLE__
 // GLFW 把按键交给 AppKit 的输入法（interpretKeyEvents），字符只从 insertText 回来。
-// 本机搜狗在这台机器上第一下按键后就连不上（IMKCFRunLoopWakeUpReliable 报错）：
-// 组词态挂住、永远不 commit，之后每个键都是「按下有、字符无」——搜索框点得进去、
-// 却一个字也打不出来（2026-10-28 实拍：z 之后 k 不进，marked=1 卡死）。
+// 本机搜狗在这台机器上对「ImGui 裸视图」第一下按键后就连不上（IMKCFRunLoopWakeUpReliable
+// 报错）：组词态挂住、永远不 commit——2026-10-28 实拍 z 之后 k 不进。所以这个视图的
+// inputContext 仍被关掉（下方 NoInputContext）：键上的 characters 直接进队列。
 //
-// 这块面板没有 AppKit 文本控件，输入全由自己从字符队列取，所以干脆不给这个视图
-// 输入法上下文：interpretKeyEvents 变成空操作，键上的 characters 直接进队列。
-// 代价是没法用拼音组词（组合窗本来也没地方画），中文搜索走 ⌘V 粘贴。
+// 2026-11-13 起中文输入不再指望这条路：两颗搜索框聚焦时垫一颗真 NSTextField
+// （platform/textfield*），组词/候选窗/退格全原生——搜狗对正常文本框一直是好的，
+// 当时坏的是「让 IME 附着在无文本控件的裸 GL 视图」这件事本身。原生框挂着时
+// HandleInput 不再从字符队列取字（键全被字段吃掉），避免双写。
 static IMP g_origKeyDown = nullptr;
 static id NoInputContext(id, SEL) { return nil; }
 
@@ -4378,13 +4391,48 @@ static void KeyDownHook(id self, SEL _cmd, id ev) {
 }
 #endif
 
+/// 原生输入框的回调（main 起点装一次）：变化落回查询串，Enter/Esc 交还焦点。
+static void FieldChanged(const char* text, int tag) {
+    if (tag == 2) g_r31_toolq = text ? text : "";
+    else g_r31_query = text ? text : "";
+    g_relayout = true;
+}
+static void FieldDone(bool /*commit*/, int /*tag*/) {
+    g_r31_focus = 0;
+    g_relayout = true;
+}
+
 static void HandleInput(const ImGuiIO& io, double now) {
     ImVec2 mp = MousePos(io);
+    // 原生搜索框跟帧：焦点换了就 show/hide，没换就跟着面板走（拖动/缩放各帧同步）。
+    // 矩形由视图绘制那一帧登记（r31_views.inc 两处搜索框）。
+    if (g_r31_focus != g_r31_field_tag) {
+        if (g_r31_focus && g_r31_field_rect_ok) {
+            const std::string& cur = (g_r31_focus == 2) ? g_r31_toolq : g_r31_query;
+            ap_field_show(g_win, g_r31_field_rect[0], g_r31_field_rect[1],
+                          g_r31_field_rect[2], g_r31_field_rect[3],
+                          g_r31_field_ph.c_str(), cur.c_str(), g_r31_focus);
+            g_r31_field_tag = g_r31_focus;
+        } else if (!g_r31_focus) {
+            ap_field_hide();
+            g_r31_field_tag = 0;
+        }
+    } else if (g_r31_focus && g_r31_field_rect_ok) {
+        ap_field_frame(g_win, g_r31_field_rect[0], g_r31_field_rect[1],
+                       g_r31_field_rect[2], g_r31_field_rect[3]);
+    }
+    g_r31_field_rect_ok = false;   // 本帧的绘制重新登记
+    // 框在收字时，点框外任何地方都算「交还焦点」（稿子的行为：点空白收输入框）。
+    if (g_r31_focus && ap_field_active() && ImGui::IsMouseClicked(0)) {
+        const bool inside = mp.x >= g_r31_field_rect[0] && mp.x < g_r31_field_rect[0] + g_r31_field_rect[2] &&
+                            mp.y >= g_r31_field_rect[1] && mp.y < g_r31_field_rect[1] + g_r31_field_rect[3];
+        if (!inside) g_r31_focus = 0;
+    }
     // R31 的两个搜索框自己收字：面板不给控件焦点，字符从 ImGui 的输入队列取。
-    // 这个视图关掉了输入法上下文（见启动处 KeyDownHook）：直接上屏的字符才进队列，
-    // 不做组词；中文走 ⌘V 粘贴（剪贴板是整段文字，不经过输入法）。
+    // 原生框在挂时（ap_field_active）键全被 NSTextField 吃掉——组词/候选/退格都
+    // 是原生的，这里不再从队列取字，避免双写；⌘V 也归原生框。
     bool escTaken = false;
-    if (g_r31_focus) {
+    if (g_r31_focus && !ap_field_active()) {
         std::string& target = (g_r31_focus == 2) ? g_r31_toolq : g_r31_query;
         for (ImWchar c : io.InputQueueCharacters)
             if (c >= 32 && c != 127) Utf8Append(target, (unsigned int)c);
@@ -8273,6 +8321,9 @@ int main(int argc, char** argv) {
         if (c) class_addMethod(c, sel_registerName("inputContext"), (IMP)NoInputContext, "@@:");
         if (c) class_addMethod(c, sel_registerName("acceptsFirstMouse:"), (IMP)AcceptsFirstMouseOn,
                                "B@:@");
+        // 搜索框的原生输入框：组词/候选/退格全在 NSTextField 里，中文不再只剩 ⌘V。
+        ap_field_set_change_cb(FieldChanged);
+        ap_field_set_done_cb(FieldDone);
     }
 #endif
 #ifdef __APPLE__

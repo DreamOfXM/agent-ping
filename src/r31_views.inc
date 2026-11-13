@@ -1762,8 +1762,19 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
         R31Glass(dl, sx, cy, sw, sh, 10.0f);
         I31(dl, I31_SEARCH, sx + 10.0f, cy + 10.0f, 16.0f, k31Muted);
         const bool focused = (g_r31_focus == 1);
+        if (focused) {
+            // 登记矩形/占位句给原生输入框（HandleInput 每帧拿去 show/跟帧）。
+            g_r31_field_rect[0] = sx; g_r31_field_rect[1] = cy;
+            g_r31_field_rect[2] = sw; g_r31_field_rect[3] = sh;
+            g_r31_field_rect_ok = true;
+            g_r31_field_tag = 1;
+            g_r31_field_ph = T("r_search_ph", loc);
+        }
+        const bool native = focused && ap_field_active();   // 文字与光标归 NSTextField 画
         const float tw = sx + sw - 10.0f - (g_r31_query.empty() ? 0.0f : 26.0f) - (sx + 31.0f);
-        if (g_r31_query.empty()) {
+        if (native) {
+            // 只画玻璃底、放大镜与 ✕；文字/光标是原生字段在画，别叠一份。
+        } else if (g_r31_query.empty()) {
             DrawTextRun(dl, sx + 31.0f, TextMid(cy + 18.0f, T_S12, loc), T("r_search_ph", loc), loc,
                         k31Faint, T_S12);
             // 空串也要画光标：不画的话点进来和没点一样，看不出这颗框已经在收字。
@@ -3491,8 +3502,19 @@ static void R31ToolsFixed(ImDrawList* dl, float x, float y, float w, int loc, do
     R31Glass(dl, sx, sy, sw, sh, 10.0f);
     I31(dl, I31_SEARCH, sx + 10.0f, sy + 10.0f, 16.0f, k31Muted);
     const bool focused = (g_r31_focus == 2);
+    if (focused) {
+        // 同会话搜索框：登记给原生输入框。
+        g_r31_field_rect[0] = sx; g_r31_field_rect[1] = sy;
+        g_r31_field_rect[2] = sw; g_r31_field_rect[3] = sh;
+        g_r31_field_rect_ok = true;
+        g_r31_field_tag = 2;
+        g_r31_field_ph = T("r_search_tools", loc);
+    }
+    const bool native = focused && ap_field_active();
     const float tw = sx + sw - 10.0f - (g_r31_toolq.empty() ? 0.0f : 26.0f) - (sx + 34.0f);
-    if (g_r31_toolq.empty()) {
+    if (native) {
+        // 文字与光标归 NSTextField。
+    } else if (g_r31_toolq.empty()) {
         DrawTextRun(dl, sx + 34.0f, TextMid(sy + 18.0f, T_S12, loc), T("r_search_tools", loc), loc,
                     k31Faint, T_S12);
         // 空串也要画光标：点进来却看不出这颗框在收字，和没点一样。
