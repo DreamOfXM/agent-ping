@@ -3331,25 +3331,30 @@ static Landing JumpTo(const Hit& h) {
     // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。定位不分死活：
     // ① 活进程按 tty 精确定位到那个标签；② 进程退了但标签还留着 → 按标题（含 cli 首词）
     // 选中新开；都没中 ③ iTerm2›Terminal 新窗口跑 resume——真正回到那一条会话。
-    // codex 桌面端会话（client=App）：唤起桌面 App（com.openai.codex），不走终端。
+    // codex 桌面端会话（client=App）：深链直达那条对话——桌面端认领
+    // codex://threads/<threadId>（app.asar 路由实测：threads/${encodeURIComponent(t.threadId)}），
+    // threadId 与本地会话 uuid 同源。/usr/bin/open 发 URL 即回，不阻塞面板。
     if (h.agent_id == "codex" && row_client_is_app) {
         char lad[256] = {0};
         int rc = -1;
-        if (!g_shot_to)
-            rc = ap_activate_app("com.openai.codex", lad, (int)sizeof lad) == 0 ? 0 : 1;
+        if (!g_shot_to) {
+            char u[256];
+            snprintf(u, sizeof u, "codex://threads/%s", h.native_id.c_str());
+            rc = ap_open_url(u, lad, (int)sizeof lad) == 0 ? 0 : 1;
+        }
         if (rc == 0) {
             out.level = L_APP;
-            out.why = "已唤起 Codex 桌面端";
+            out.why = "桌面端深链已发";
             ShowPanel();
-            fprintf(stderr, "[落点] codex/%s → 桌面端已唤起\n", h.native_id.c_str());
+            fprintf(stderr, "[落点] codex/%s → 深链 codex://threads/%s\n",
+                    h.native_id.c_str(), h.native_id.c_str());
             fflush(stderr);
             return out;
         }
-        // 桌面端没应答：落空并明说，不猜。
         out.level = L_NONE;
-        out.why = "Codex 桌面端没应答";
+        out.why = "codex:// 深链发送失败";
         ShowPanel();
-        fprintf(stderr, "[落点] codex/%s → 桌面端唤起失败\n", h.native_id.c_str());
+        fprintf(stderr, "[落点] codex/%s → 深链失败\n", h.native_id.c_str());
         fflush(stderr);
         return out;
     }

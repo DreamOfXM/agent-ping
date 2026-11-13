@@ -983,6 +983,19 @@ extern "C" int ap_open_cli_resume(const char* agent_id, const char* session_id, 
     if (layer) *layer = 0;
     return 1;
 }
+extern "C" int ap_open_url(const char* url, char* reason, int out_len) {
+    if (!url || !*url) { Say(reason, out_len, @"URL 为空"); return 1; }
+    @try {
+        NSURL *u = [NSURL URLWithString:@(url)];
+        if (!u) { Say(reason, out_len, @"URL 无法解析"); return 1; }
+        if ([[NSWorkspace sharedWorkspace] openURL:u]) {
+            Say(reason, out_len, [NSString stringWithFormat:@"已交给系统打开 %@", u]);
+            return 0;
+        }
+        Say(reason, out_len, @"openURL 没有应答");
+        return 1;
+    } @catch (...) { Say(reason, out_len, @"openURL 异常"); return 1; }
+}
 extern "C" int ap_activate_app(const char* bundle_id, char* reason, int out_len) {
     if (!bundle_id || !*bundle_id) { Say(reason, out_len, @"bundle id 为空"); return 1; }
     NSString *sc = [NSString stringWithFormat:
