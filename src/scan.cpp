@@ -1811,6 +1811,86 @@ AgentSnap scan_workbuddy(const std::string& name, const std::string& db_path,
         snap.yday_credits = ys.credits;
         snap.yday_hourly = ys.hourly;
     }
+#ifdef __APPLE__
+    // 账户积分（v8 补）：WorkBuddy 的「积分余额」只在头像弹出菜单里现拉现显，
+    // 平时 AX 读不到。策略：每次扫描都置 AX 开关试读（菜单开着就能抓到），
+    // 抓到的读数落在我们自己的 state 里；菜单关着时用最后一次的值，
+    // 卡面按「上次读取 时刻」呈现——不编数，也不因为菜单关了就整卡消失。
+    {
+        char buf[2048] = {0};
+        const double tnow = (double)std::time(nullptr);
+        double pts = -1;
+        if (ap_ax_texts("WorkBuddy", "com.tencent.workbuddy.mac", buf, (int)sizeof buf, 512)) {
+            std::vector<std::string> segs;
+            const char* q = buf;
+            while (*q) {
+                const char* bar = strchr(q, '|');
+                segs.emplace_back(q, bar ? (size_t)(bar - q) : strlen(q));
+                if (!bar) break;
+                q = bar + 1;
+            }
+            auto first_num = [](const std::string& s) -> double {
+                for (size_t k = 0; k < s.size(); k++) {
+                    if (!isdigit((unsigned char)s[k])) continue;
+                    std::string num;
+                    while (k < s.size() && (isdigit((unsigned char)s[k]) || s[k] == ',' || s[k] == '.')) {
+                        num += s[k];
+                        k++;
+                    }
+                    std::string clean;
+                    for (char c : num)
+                        if (c != ',') clean += c;
+                    try {
+                        return std::stod(clean);
+                    } catch (...) {
+                        return -1;
+                    }
+                }
+                return -1;
+            };
+            for (size_t i = 0; i < segs.size(); i++) {
+                const size_t at = segs[i].find("积分余额");
+                if (at == std::string::npos) continue;
+                double v = first_num(segs[i].substr(at + strlen("积分余额")));
+                if (v < 0 && i + 1 < segs.size()) v = first_num(segs[i + 1]);
+                if (v >= 0) pts = v;
+                break;
+            }
+        }
+        // 上次读数的落点：与 daily.txt 同一目录（AGENTPING_STATE_DIR 口径一致）
+        std::string state_dir = home() + "/Library/Application Support/AgentPing";
+        if (const char* over = getenv("AGENTPING_STATE_DIR")) state_dir = over;
+        const std::string pts_path = state_dir + "/wb-points.txt";
+        if (pts >= 0) {
+            snap.quota.known = true;
+            snap.quota.balance.known = true;
+            snap.quota.balance.remaining = pts;
+            snap.quota.balance.unit = "积分";
+            snap.quota.balance.label = "积分余额";
+            snap.quota.balance.seen_at = tnow;
+            FILE* pf = fopen(pts_path.c_str(), "w");
+            if (pf) {
+                fprintf(pf, "%.2f %lld", pts, (long long)tnow);
+                fclose(pf);
+            }
+        } else {
+            FILE* pf = fopen(pts_path.c_str(), "r");
+            if (pf) {
+                double v = -1;
+                long long t0 = 0;
+                if (fscanf(pf, "%lf %lld", &v, &t0) == 2 && v >= 0 && t0 > 0) {
+                    snap.quota.known = true;
+                    snap.quota.balance.known = true;
+                    snap.quota.balance.remaining = v;
+                    snap.quota.balance.unit = "积分";
+                    snap.quota.balance.label = "积分余额";
+                    snap.quota.balance.seen_at = (double)t0;
+                }
+                fclose(pf);
+            }
+        }
+    }
+#endif
     return snap;
 }
 
