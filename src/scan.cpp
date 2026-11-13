@@ -1,6 +1,9 @@
 #include "scan.h"
 
 #include "jsonl.h"
+#ifdef __APPLE__
+#include "platform/credits.h"
+#endif
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -2708,6 +2711,56 @@ AgentSnap scan_qwenwork(const std::string& name, const std::string& root, double
     FStat rs = fst(root);
     if (!rs.ok || !rs.dir) return snap;
     snap.available = true;
+#ifdef __APPLE__
+    // 账户积分：千问办公只在自家侧栏现拉现显，本机不落盘——AX 只读它窗口里的静态文本
+    // （读不到＝卡面未接线/上次读取，不编数）。proc/bundle 见 platform/credits.h。
+    {
+        char buf[2048] = {0};
+        if (ap_ax_texts("QwenWorkCN", "cn.qwenwork.desktop.mac", buf, (int)sizeof buf, 512)) {
+            std::vector<std::string> segs;
+            const char* q = buf;
+            while (*q) {
+                const char* bar = strchr(q, '|');
+                segs.emplace_back(q, bar ? (size_t)(bar - q) : strlen(q));
+                if (!bar) break;
+                q = bar + 1;
+            }
+            auto first_num = [](const std::string& s) -> double {
+                for (size_t k = 0; k < s.size(); k++) {
+                    if (!isdigit((unsigned char)s[k])) continue;
+                    std::string num;
+                    while (k < s.size() && (isdigit((unsigned char)s[k]) || s[k] == ',' || s[k] == '.')) {
+                        num += s[k];
+                        k++;
+                    }
+                    std::string clean;
+                    for (char c : num)
+                        if (c != ',') clean += c;
+                    try {
+                        return std::stod(clean);
+                    } catch (...) {
+                        return -1;
+                    }
+                }
+                return -1;
+            };
+            for (size_t i = 0; i < segs.size(); i++) {
+                const size_t at = segs[i].find("积分余额");
+                if (at == std::string::npos) continue;
+                double v = first_num(segs[i].substr(at + strlen("积分余额")));
+                if (v < 0 && i + 1 < segs.size()) v = first_num(segs[i + 1]);
+                if (v < 0) continue;
+                snap.quota.known = true;
+                snap.quota.balance.known = true;
+                snap.quota.balance.remaining = v;
+                snap.quota.balance.unit = "积分";
+                snap.quota.balance.label = "积分余额";
+                snap.quota.balance.seen_at = now;
+                break;
+            }
+        }
+    }
+#endif
     const double cutoff = now - kDaysBack * 86400;
     for (const std::string& dir : list_dir(root)) {
         std::string dpath = join(root, dir);

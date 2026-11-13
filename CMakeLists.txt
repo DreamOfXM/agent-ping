@@ -80,6 +80,8 @@ if(APPLE)
   set_source_files_properties(${OPEN_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(TEXTFIELD_SRC src/platform/textfield_macos.mm)
   set_source_files_properties(${TEXTFIELD_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(CREDITS_SRC src/platform/credits_macos.mm)
+  set_source_files_properties(${CREDITS_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(NOTIFY_SRC src/platform/notify_macos.mm)
   set_source_files_properties(${NOTIFY_SRC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(LANG_SRC src/platform/lang_macos.mm)
@@ -185,6 +187,7 @@ add_executable(pin_imgui_shell
   ${STATUSBAR_SRC}
   ${OPEN_SRC}
   ${TEXTFIELD_SRC}
+  ${CREDITS_SRC}
   ${NOTIFY_SRC}
   ${LANG_SRC}
   ${AUTOSTART_SRC}
