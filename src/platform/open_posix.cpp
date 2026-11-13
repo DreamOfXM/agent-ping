@@ -175,3 +175,22 @@ extern "C" int ap_open_privacy_pane(char* reason, int out_len) {
     Say(reason, out_len, "本平台没有系统设置里的那一页");
     return 1;
 }
+
+// Linux 没有这三档：CLI 会话的 tty 定位/新开终端、深度链唤起都是 macOS 的
+// 通道（open_macos.mm）。这里如实返回「没走通」，调用方退自己的下一档。
+extern "C" int ap_locate_cli_session(const char*, const char*, const char*,
+                                     char* reason, int out_len, int*) {
+    Say(reason, out_len, "本平台没有终端定位这一档");
+    return 1;
+}
+
+extern "C" int ap_open_cli_resume(const char*, const char*, const char*,
+                                  char* reason, int out_len, int*) {
+    Say(reason, out_len, "本平台没有新开终端这一档");
+    return 1;
+}
+
+extern "C" int ap_open_url(const char*, char* reason, int out_len) {
+    Say(reason, out_len, "本平台没有深链这一档");
+    return 1;
+}
