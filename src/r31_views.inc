@@ -3012,7 +3012,7 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
             R31Mid(dl, nx, y + 38.0f,
                    RFmt(T("r_claim_seen", loc),
                         R31ClaimStamp(c.seen_at, !R31SameDay(c.seen_at, now)).c_str()),
-                   loc, k31Fg, T_S11);
+                   loc, k31Sec, T_S11);
         } else {
             // 出处那行只到文件名级别：家目录全称画在屏上，用户名就跟着进了截图。
             static const std::string home = [] {
@@ -3024,15 +3024,15 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
                 src = "~" + src.substr(home.size());
             auto lines = R31Wrap(src, w - 100.0f, loc, T_S9, 1);
             R31Mid(dl, nx, y + 38.0f, lines.empty() ? std::string() : lines.front(), loc, k31Sec,
-                   T_S10);
+                   T_S11);
         }
         // 右侧这一行是「那家自己最后一次写盘是什么时候」。它和左边的读数时刻、页脚的
         // 扫描时刻是三件事：只有这一行能回答「我们没刷，还是那家没写」。拿不到 mtime
         // （文件不存在）就整行不画——占位会让「没有这一家」和「这一家从没写过」看着一样。
         if (c.log_mtime > 0) {
             const double age = now > c.log_mtime ? now - c.log_mtime : 0.0;
-            DrawTextRight(dl, x + w - 14.0f, TextMid(y + 38.0f, T_S10, loc),
-                          RFmt(T("r_claim_src", loc), Ago(age, loc).c_str()), loc, k31Sec, T_S10);
+            DrawTextRight(dl, x + w - 14.0f, TextMid(y + 38.0f, T_S11, loc),
+                          RFmt(T("r_claim_src", loc), Ago(age, loc).c_str()), loc, k31Sec, T_S11);
         }
     }
     float cy = y + 53.0f;
@@ -3151,8 +3151,8 @@ static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
     for (size_t i = 0; i < cs.size(); i++)
         cy = R31ClaimCard(dl, L, cy, listW, *cs[i], loc, now, (int)i) + 10.0f;
     cy += 5.0f;
-    cy = R31DrawWrap(dl, T("r_claim_hint", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S11, 18.5f,
-                     k31Sec, 3);
+    cy = R31DrawWrap(dl, T("r_claim_hint", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S10, 17.5f,
+                     k31Muted, 3);
     return cy + 16.0f;
 }
 
