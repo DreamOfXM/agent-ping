@@ -902,7 +902,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
             snap.quota.credits_known = true;
         }
         if (!quota.plan.empty()) snap.quota.plan = quota.plan;
-        snap.quota.known = snap.quota.five.known || snap.quota.week.known || snap.quota.credits_known;
+
 
         long best = 0;
         std::string top_model;
@@ -1200,6 +1200,88 @@ void local_day_before(double now, int i, long& key, double& d0, double& d1) {
     key = (long)tv.tm_year * 10000 + (long)(tv.tm_mon + 1) * 100 + (long)tv.tm_mday;
 }
 
+}  // namespace
+
+// ── ZCode 5 小时/周双窗：App 的 usage-stats RPC 响应不落盘，只能走它自己的额度
+// 接口（open.bigmodel.cn/api/monitor/usage/quota/limit）。鉴权用的 api-key 在
+// credentials.json 里是 enc:v2:os: 加密的，密钥在登录钥匙串（条目「ZCode Credential
+// Encryption」，账户=凭证路径指纹）——辅助脚本解开它发一次只读 GET。这是元数据接口，
+// 不是模型调用，不耗额度。脚本自缓存 120 秒；失败打印 {} 且不写缓存，卡面如实。
+namespace {
+const char kZQuotaPy[] = R"PY(import json, os, time, base64, subprocess, sys, urllib.request
+CACHE = '/tmp/agentping-zquota.json'
+now = time.time()
+try:
+    c = json.load(open(CACHE))
+    if now - c.get('ts', 0) < 120:
+        c.pop('ts', None)
+        print(json.dumps(c))
+        sys.exit(0)
+except Exception:
+    pass
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except Exception:
+    print('{}')
+    sys.exit(0)
+CRED = os.path.expanduser('~/.zcode/v2/credentials.json')
+ACCT = '07b75b561f6227d31d5fc0980b10d60b4c54c32de50e7bc0deb7e1934a4e8be1'
+def kc():
+    r = subprocess.run(['security', 'find-generic-password', '-s',
+                        'ZCode Credential Encryption', '-a', ACCT, '-w'],
+                       capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError('keychain')
+    sec = r.stdout.strip()
+    return base64.urlsafe_b64decode(sec + '=' * (-len(sec) % 4))
+def dec(val, key):
+    body = val[len('enc:v2:os:'):]
+    fp, rest = body.split(':', 1)
+    nb, tb, cb = rest.split('.')
+    dec1 = lambda x: base64.urlsafe_b64decode(x + '=' * (-len(x) % 4))
+    return AESGCM(key).decrypt(dec1(nb), dec1(cb) + dec1(tb), None).decode('utf8')
+d = json.load(open(CRED))
+aks = [k for k in d if 'api-key' in k]
+if not aks:
+    print('{}')
+    sys.exit(0)
+key = kc()
+ak = dec(d[aks[0]], key)
+req = urllib.request.Request('https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+                             headers={'Authorization': 'Bearer ' + ak,
+                                      'Accept': 'application/json'})
+j = json.loads(urllib.request.urlopen(req, timeout=12).read().decode('utf8'))
+out = {}
+for lim in (j.get('data') or {}).get('limits') or []:
+    t, u, n = lim.get('type'), lim.get('unit'), lim.get('number')
+    if t == 'CREDIT_LIMIT' and u == 3 and n == 5:
+        out['five'] = {'pct': lim.get('percentage'),
+                       'resets': (lim.get('nextResetTime') or 0) // 1000}
+    elif t == 'CREDIT_LIMIT' and u == 6 and n == 1:
+        out['week'] = {'pct': lim.get('percentage'),
+                       'resets': (lim.get('nextResetTime') or 0) // 1000}
+if not out:
+    print('{}')
+    sys.exit(0)
+out['ts'] = now
+json.dump(out, open(CACHE, 'w'))
+out.pop('ts')
+print(json.dumps(out))
+)PY";
+/// 脚本缺了/内容不同就重写（装到 /tmp：无持久副作用；失败轮重试成本低）。
+void ensure_zquota_script() {
+    const char* path = "/tmp/agentping-zquota.py";
+    FILE* f = fopen(path, "rb");
+    char probe[16] = {0};
+    size_t got = f ? fread(probe, 1, sizeof probe - 1, f) : 0;
+    if (f) fclose(f);
+    if (got >= 15 && strncmp(probe, "import json, os", 15) == 0) return;
+    f = fopen(path, "w");
+    if (!f) return;
+    fputs(kZQuotaPy, f);
+    fclose(f);
+    chmod(path, 0700);
+}
 }  // namespace
 
 AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double now, double since) {
@@ -1506,6 +1588,38 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
             snap.yday_hourly = ys.hourly;
         }
     }
+#ifdef __APPLE__
+    // 5 小时/周双窗（v8 补）：App 面板的这两窗走额度接口，RPC 响应不落盘——
+    // 这里用 credentials.json 里加密的 api-key（钥匙串密钥解开）发只读 GET。
+    // 读不到就不动 five/week，卡面上这两格如实不出现。
+    ensure_zquota_script();
+    {
+        FILE* qp = popen("python3 /tmp/agentping-zquota.py 2>/dev/null", "r");
+        if (qp) {
+            char qb[512] = {0};
+            size_t qn = fread(qb, 1, sizeof qb - 1, qp);
+            pclose(qp);
+            Json qj;
+            if (qn > 0 && json_parse(qb, (int)qn, qj)) {
+                auto fill = [&](const char* key, QuotaWindow& w, int wmin) {
+                    const Json* p = qj.at(key);
+                    if (!p) return;
+                    const Json* pct = p->at("pct");
+                    const Json* rs = p->at("resets");
+                    if (!pct || pct->kind != Json::NUM || !rs || rs->kind != Json::NUM) return;
+                    w.known = true;
+                    w.used = std::fmax(0.0, std::fmin(1.0, (100.0 - pct->num) / 100.0));
+                    w.resets_at = rs->num;
+                    w.window_min = wmin;
+                    w.seen_at = now;
+                };
+                fill("five", snap.quota.five, 300);
+                fill("week", snap.quota.week, 7 * 1440);
+            }
+        }
+    }
+#endif
+
     return snap;
 }
 
