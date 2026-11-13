@@ -6952,11 +6952,23 @@ static float EdgeMarkPx(const std::string& agent) {
     return agent == "qoder" ? 13.8f : agent == "workbuddy" ? 16.7f
          : agent == "zcode" ? 14.1f : agent == "claude" ? 16.0f
          : agent == "opencode" ? 15.0f : agent == "qwenworkcn" ? 15.0f
-         : agent == "pi" ? 13.5f : agent == "codex" ? 15.0f : 0.0f;
+         : agent == "pi" ? 13.5f : agent == "codex" ? 16.7f : 0.0f;
 }
 /// 一枚剪影：有位图按 SIZE 表画；没有的回退 11px/600 首字母（稿子 markHTML 的 fallback）。
 static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agent,
                      const std::string& initial, ImU32 ink) {
+    // codex 不走 TUI 点阵剪影：那枚 `>_` 既认不出是 OpenAI 的东西，点阵内容又只占
+    // 画布上半，画出来比别家小一圈（2026-11-13 用户实拍）。官方图标是桌面端
+    // app.icns 的蓝花云（本仓 kAgent31HexCodex31 已换成它的 64px 瓷贴）——
+    // 瓷贴满幅、带自家圆角，与其他 RGBA 瓷贴同路。
+    if (agent == "codex" && g_agent31TexCodex) {
+        const float px = EdgeMarkPx(agent);
+        dl->AddImageRounded((ImTextureID)g_agent31TexCodex,
+                            ImVec2(cx - px * 0.5f, cy - px * 0.5f),
+                            ImVec2(cx + px * 0.5f, cy + px * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
+                            IM_COL32_WHITE, px * 0.22f);
+        return;
+    }
     const ImU64 tex = MarkTex(agent);
     if (tex) {
         const float px = EdgeMarkPx(agent);
