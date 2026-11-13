@@ -4462,11 +4462,13 @@ static void KeyDownHook(id self, SEL _cmd, id ev) {
 
 /// 原生输入框的回调（main 起点装一次）：变化落回查询串，Enter/Esc 交还焦点。
 static void FieldChanged(const char* text, int tag) {
+    fprintf(stderr, "[输入框] 收字 tag=%d 「%s」\n", tag, text ? text : "");
     if (tag == 2) g_r31_toolq = text ? text : "";
     else g_r31_query = text ? text : "";
     g_relayout = true;
 }
-static void FieldDone(bool /*commit*/, int /*tag*/) {
+static void FieldDone(bool commit, int tag) {
+    fprintf(stderr, "[输入框] 收工 tag=%d %s\n", tag, commit ? "回车" : "Esc");
     g_r31_focus = 0;
     g_relayout = true;
 }
@@ -4476,6 +4478,8 @@ static void HandleInput(const ImGuiIO& io, double now) {
     // 原生搜索框跟帧：焦点换了就 show/hide，没换就跟着面板走（拖动/缩放各帧同步）。
     // 矩形由视图绘制那一帧登记（r31_views.inc 两处搜索框）。
     if (g_r31_focus != g_r31_field_tag) {
+        fprintf(stderr, "[输入框] 焦点变化 focus=%d tag=%d rect_ok=%d\n",
+                g_r31_focus, g_r31_field_tag, g_r31_field_rect_ok ? 1 : 0);
         if (g_r31_focus && g_r31_field_rect_ok) {
             const std::string& cur = (g_r31_focus == 2) ? g_r31_toolq : g_r31_query;
             ap_field_show(g_win, g_r31_field_rect[0], g_r31_field_rect[1],

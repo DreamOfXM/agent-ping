@@ -76,9 +76,10 @@ void ap_field_set_text(const char* text) {
 void ap_field_show(void* glfw_window, float x, float y, float w, float h,
                    const char* placeholder, const char* text, int tag) {
     NSWindow* win = glfw_window ? (NSWindow*)glfwGetCocoaWindow((GLFWwindow*)glfw_window) : nil;
-    if (!win) return;
+    if (!win) { fprintf(stderr, "[输入框] show 失败：无窗口\n"); return; }
     NSView* content = win.contentView;
-    if (!content) return;
+    if (!content) { fprintf(stderr, "[输入框] show 失败：无 contentView\n"); return; }
+    fprintf(stderr, "[输入框] show tag=%d key=%d\n", tag, win.keyWindow ? 1 : 0);
     if (!g_delegate) g_delegate = [[APFieldDelegate alloc] init];
     if (!g_field) {
         g_field = [[APFieldBox alloc] init];
@@ -107,7 +108,9 @@ void ap_field_show(void* glfw_window, float x, float y, float w, float h,
     g_field.editable = YES;
     g_field.selectable = YES;
     ap_field_frame(glfw_window, x, y, w, h);
-    [win makeFirstResponder:g_field];
+    const BOOL ok = [win makeFirstResponder:g_field];
+    fprintf(stderr, "[输入框] firstResponder=%s frame=%s\n",
+            ok ? "YES" : "NO", NSStringFromRect(g_field.frame).UTF8String);
 }
 
 void ap_field_frame(void* glfw_window, float x, float y, float w, float h) {

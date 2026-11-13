@@ -2165,7 +2165,9 @@ static R31UseSeg R31BuildUseSeg(int seg, bool one, const std::string& src) {
                 r.tool = &t;
                 r.tokens = t.usage.total();
                 r.parts = t.usage;
-                r.has_parts = true;
+                // 四档有没有由数据说话：只记 Credits 的工具（Qoder）四档全零，
+                // has_parts=true 会画出四个 0 的格子（11-13 用户实拍）。
+                r.has_parts = r.parts.total() > 0;
                 u.tk.push_back(r);
             }
             if (t.has_credits && t.credits > 0) {
