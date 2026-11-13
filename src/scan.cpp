@@ -693,8 +693,13 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
             if (rtype && *rtype == "session_meta") {
                 if (const std::string* c = p->str_at("cwd")) if (!c->empty()) project = basename_last(*c);
                 if (const std::string* s = p->str_at("session_id")) if (!s->empty()) sid = *s;
-                // 来源标签：桌面 App 把自己标成 vscode（实测），CLI 标 cli；缺省也按 CLI。
-                if (const std::string* sc = p->str_at("source"))
+                // 来源标签：桌面 App 的铁证是 originator=="Codex Desktop"（实测 11-13：
+                // TUI 会话也标 source=vscode，按 source 判会把终端会话错送桌面端——
+                // 桌面端列表里没有它，codex:// 深链被静默吞掉，双击像坏了）。
+                // 老会话没写 originator 时退回 source 口径。
+                if (const std::string* og = p->str_at("originator"))
+                    client = (*og == "Codex Desktop") ? "App" : "CLI";
+                else if (const std::string* sc = p->str_at("source"))
                     client = (*sc == "cli" || sc->empty()) ? "CLI" : "App";
                 continue;
             }

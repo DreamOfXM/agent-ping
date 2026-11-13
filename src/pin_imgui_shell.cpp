@@ -3331,9 +3331,11 @@ static Landing JumpTo(const Hit& h) {
     // claude / pi：纯 CLI，会话活在终端里（2026-11-12 用户拍板）。定位不分死活：
     // ① 活进程按 tty 精确定位到那个标签；② 进程退了但标签还留着 → 按标题（含 cli 首词）
     // 选中新开；都没中 ③ iTerm2›Terminal 新窗口跑 resume——真正回到那一条会话。
-    // codex 桌面端会话（client=App）：深链直达那条对话——桌面端认领
-    // codex://threads/<threadId>（app.asar 路由实测：threads/${encodeURIComponent(t.threadId)}），
-    // threadId 与本地会话 uuid 同源。/usr/bin/open 发 URL 即回，不阻塞面板。
+    // codex 桌面端会话（client=App，即 originator=="Codex Desktop"）：深链直达那条对话——
+    // 桌面端认领 codex://threads/<threadId>（app.asar 路由实测），threadId 与本地会话 uuid
+    // 同源（state_5.sqlite threads.id）。/usr/bin/open 发 URL 即回，不阻塞面板。
+    // 已知边界（11-13 实测）：桌面端只导航它本地目录里的会话，太老的 App 会话深链会被
+    // 静默吞掉；CLI 来源（codex-tui 等）一律走下面的终端托管，不进这分支。
     if (h.agent_id == "codex" && row_client_is_app) {
         char lad[256] = {0};
         int rc = -1;
