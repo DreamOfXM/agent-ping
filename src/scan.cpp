@@ -1040,8 +1040,12 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     std::map<std::string, Win> wins;
     {
         std::ostringstream q;
+        // tokens.input 实测已含缓存命中（11-13 全窗抽查：没有任何一条 input < cache.read，
+        // 与 Codex 同款口径，UsageParts 契约要求做差后进账——不差就把缓存读加了两遍，
+        // 当日总量直接翻倍：2.09亿 vs Tokei 1.1亿）。max(...,0) 防个别行口径倒挂。
         q << "select session_id, "
-             "sum(coalesce(json_extract(data,'$.tokens.input'), 0)), "
+             "sum(max(coalesce(json_extract(data,'$.tokens.input'), 0) "
+             "- coalesce(json_extract(data,'$.tokens.cache.read'), 0), 0)), "
              "sum(coalesce(json_extract(data,'$.tokens.output'), 0)), "
              "sum(coalesce(json_extract(data,'$.tokens.cache.read'), 0)), "
              "sum(coalesce(json_extract(data,'$.tokens.cache.write'), 0)) "
@@ -1061,8 +1065,10 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     // 按本机小时分桶：一条 group by 就够了，别为 24 格再读一遍表。
     {
         std::ostringstream q;
+        // input 做差同上（含缓存命中）；小时桶加的必须是 UsageParts::total() 同一口径。
         q << "select cast(strftime('%H', time_created/1000, 'unixepoch', 'localtime') as integer) h, "
-             "sum(coalesce(json_extract(data,'$.tokens.input'), 0) "
+             "sum(max(coalesce(json_extract(data,'$.tokens.input'), 0) "
+             "- coalesce(json_extract(data,'$.tokens.cache.read'), 0), 0) "
              "+ coalesce(json_extract(data,'$.tokens.output'), 0) "
              "+ coalesce(json_extract(data,'$.tokens.cache.read'), 0) "
              "+ coalesce(json_extract(data,'$.tokens.cache.write'), 0)) "
