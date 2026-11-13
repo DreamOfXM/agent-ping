@@ -653,21 +653,39 @@ static const Key kStr[] = {
                         "使用量と上限", "사용량 및 한도"}},
     // ── 权益领取（view 9）：全部字段来自各家写在自己磁盘上的读数 ──────────────
     {"r_claim_tab",    {"权益", "Rewards", "Vorteile", "Vantaggi", "特典", "혜택"}},
+    {"r_no_reading",   {"本机没有它的额度读数", "No quota reading for it on this machine",
+                        "Keine Kontingent-Lesung dafür auf diesem Rechner",
+                        "Nessuna lettura di quota per esso su questa macchina",
+                        "このマシンにはその额度読み取りがない",
+                        "이 기기에는 해당 할당량 읽기가 없습니다"}},
     {"r_unwired",      {"未接线", "Not wired", "Nicht angebunden", "Non collegato",
                         "未接続", "미연결"}},
     {"r_hook_hint",    {"statusLine hook 可补", "a statusLine hook can fill it",
                         "Ein statusLine-Hook kann es liefern", "uno statusLine hook può fornirlo",
                         "statusLine hook で補える", "statusLine hook 으로 보강 가능"}},
     {"r_models_tab",   {"模型", "Models", "Modelle", "Modelli", "モデル", "모델"}},
-    {"r_models_note",  {"模型明细只有当日窗——账本只落工具级，历史天没有分模型。",
-                        "Per-model detail is today-window only; the ledger stores tool-level days.",
-                        "Modelldetails nur im heutigen Fenster; das Journal führt nur Werkzeugebenen.",
-                        "Dettagli per modello solo nella finestra di oggi; il registro è per strumento.",
-                        "モデル明細は当日窓のみ。台帳はツール単位でしか落ちていない。",
-                        "모델 상세는 당일 창만 제공합니다. 장부는 도구 단위로만 기록됩니다."}},
+    {"r_models_note",  {"模型明细逐日落盘、不回填；没四档的来源命中画「—」，不拿工具总量拆假模型。",
+                        "Per-model detail accrues daily, never backfilled; sources without four-tier show a dash for hit rate.",
+                        "Modelldetails täglich, ohne Rückfüllung; Quellen ohne Vier-Stufen zeigen beim Hit einen Strich.",
+                        "Dettagli per modello giornalieri, senza backfill; fonti senza quattro livelli mostrano un trattino per hit.",
+                        "モデル明細は日次で蓄積・回填なし。四档のないソースのヒット率は「—」。",
+                        "모델 상세는 일별로 쌓이며 소급 없음. 4단계 없는 소스의 적중률은 「—」."}},
     {"r_models_none",  {"今日没有模型明细。", "No per-model detail today.",
                         "Heute keine Modelldetails.", "Nessun dettaglio per modello oggi.",
                         "今日のモデル明細なし。", "오늘 모델 상세가 없습니다."}},
+    {"r_models_none_seg", {"本段没有分模型记录。", "No per-model records in this range.",
+                        "Keine Modelldaten in diesem Zeitraum.", "Nessun dato per modello in questo intervallo.",
+                        "この期間にモデル記録なし。", "이 구간에 모델 기록이 없습니다."}},
+    {"r_models_sort_tk", {"按量", "By tokens", "Nach Tokens", "Per token", "トークン順", "토큰순"}},
+    {"r_models_sort_hit", {"按命中", "By hit rate", "Nach Trefferquote", "Per hit rate", "ヒット率順", "적중률순"}},
+    {"r_models_sort_name", {"按名", "By name", "Nach Name", "Per nome", "名前順", "이름순"}},
+    {"r_models_sess",  {"会话数", "Sessions", "Sitzungen", "Sessioni", "セッション数", "세션 수"}},
+    {"r_models_cover", {"分模型记录自 %s 起 · 本段覆盖 %d 天",
+                        "Per-model records since %s · %d days covered",
+                        "Modelldaten seit %s · %d Tage abgedeckt",
+                        "Dati per modello dal %s · %d giorni coperti",
+                        "モデル記録は %s から · 本段 %d 日カバー",
+                        "모델 기록 %s 부터 · 이번 구간 %d 일 커버"}},
     {"r_models_share", {"占同工具", "share of tool", "Anteil am Werkzeug",
                         "quota sullo strumento", "同一ツール内比", "도구 내 비율"}},
     {"r_models_all",   {"全部工具", "All tools", "Alle Werkzeuge", "Tutti gli strumenti",
@@ -891,6 +909,17 @@ static const Key kStr[] = {
     {"r_today",        {"今日", "Today", "Heute", "Oggi", "本日", "오늘"}},
     {"r_today_usage",  {"今日用量", "Today’s usage", "Heutige Nutzung", "Uso di oggi",
                         "本日の使用量", "오늘 사용량"}},
+    {"r_range_empty", {"所选时段没有用量记录。", "No usage recorded in this period.",
+                       "Keine Nutzungsdaten in diesem Zeitraum.", "Nessun utilizzo registrato in questo periodo.",
+                       "この期間の使用記録はありません。", "선택한 기간에 사용 기록이 없습니다."}},
+    {"r_model_days", {"模型记录覆盖 %d 天", "Model records cover %d days",
+                      "Modelldaten für %d Tage", "Dati dei modelli per %d giorni",
+                      "モデル記録：%d 日分", "모델 기록: %d일"}},
+    {"r_quota_current", {"账户最新读数，不随用量时段切换。", "Latest account readings, independent of the usage period.",
+                         "Letzter Kontostand, unabhängig vom Nutzungszeitraum.", "Ultime letture dell’account, indipendenti dal periodo d’uso.",
+                         "使用期間とは別の、最新のアカウント読み値です。", "사용 기간과 별개인 최신 계정 판독값입니다."}},
+    {"r_per_day", {"按日", "Daily", "Täglich", "Per giorno", "日別", "일별"}},
+    {"r_per_month", {"按月", "Monthly", "Monatlich", "Per mese", "月別", "월별"}},
     {"r_account_limits",{"账户额度", "Account limits", "Konto-Limits", "Limiti account",
                         "アカウント上限", "계정 한도"}},
     {"r_5h",           {"5 小时剩余", "5h remaining", "5 Std. übrig", "5h rimanenti",
@@ -1046,8 +1075,8 @@ static const Key kStr[] = {
                         "Consumati %s Credits", "消費 %s Credits", "소비 %s Credits"}},
     {"r_tool_sessions",{"查看此工具的会话", "View this tool’s sessions", "Sitzungen dieses Tools",
                         "Sessioni di questo strumento", "このツールのセッション", "이 도구의 세션"}},
-    {"r_activity",     {"今日用量分布", "Today’s activity", "Heutige Aktivität",
-                        "Attività di oggi", "本日の推移", "오늘 활동"}},
+    {"r_activity",     {"用量分布", "Usage activity", "Nutzungsverlauf",
+                        "Andamento dell’uso", "使用量の推移", "사용량 추이"}},
     {"r_hourly",       {"按小时", "Hourly", "Stündlich", "Ogni ora", "時間別", "시간별"}},
     {"r_input",        {"输入", "Input", "Eingabe", "Input", "入力", "입력"}},
     {"r_output",       {"输出", "Output", "Ausgabe", "Output", "出力", "출력"}},
@@ -1331,18 +1360,18 @@ static const Key kStr[] = {
                              "picco %02d · %s", "最大 %02d 時 · %s", "최고 %02d시 · %s"}},
     {"r_chart_peak_day",    {"峰值 %s · %s", "peak %s · %s", "Spitze %s · %s",
                              "picco %s · %s", "最大 %s · %s", "최고 %s · %s"}},
-    {"r_chart_empty_note",  {"虚线空心＝无记录；2px 实线＝有记录但为 0。",
-                             "dashed hollow = no record; 2px solid = recorded zero.",
-                             "gestrichelt hohl = keine Aufzeichnung; 2px solid = erfasst, aber 0.",
-                             "tratteggio vuoto = nessun record; 2px pieno = registrato ma 0.",
-                             "破線の空枠＝記録なし、2px 実線＝記録ありで 0。",
-                             "점선 빈칸=기록 없음, 2px 실선=기록 있음·0."}},
-    {"r_chart_nohours",     {"这一路没有小时级分档，只按日。",
-                             "No hourly split for this source — daily only.",
-                             "Keine stündliche Aufteilung — nur täglich.",
-                             "Nessuna suddivisione oraria — solo giornaliera.",
-                             "このソースには時間別の内訳がありません（日別のみ）。",
-                             "이 소스에는 시간별 분할이 없습니다(일별만)."}},
+    {"r_chart_coverage",    {"有记录 %d / %d 天 · 圆点表示 0，空白表示无记录",
+                             "%d / %d days recorded · dot: zero; blank: no record",
+                             "%d / %d Tage erfasst · Punkt: null; leer: keine Daten",
+                             "%d / %d giorni registrati · punto: zero; vuoto: nessun dato",
+                             "%d / %d 日分の記録 · 点は 0、空白は記録なし",
+                             "%d / %d일 기록 · 점: 0, 공백: 기록 없음"}},
+    {"r_chart_nohours",     {"此时段没有小时明细。",
+                             "No hourly breakdown for this period.",
+                             "Keine Stundendaten für diesen Zeitraum.",
+                             "Nessun dettaglio orario per questo periodo.",
+                             "この期間の時間別内訳はありません。",
+                             "이 기간의 시간별 내역이 없습니다."}},
     {"r_window_traj",  {"7 日窗口轨迹", "7-day window track", "7-Tage-Fensterverlauf",
                         "traccia finestra 7 giorni", "7 日ウィンドウ軌跡", "7일 창 궤적"}},
     {"r_roll_period",  {"滚动窗读数 · 非时段累计 · %s已耗 %s · 日聚合",
@@ -1529,9 +1558,6 @@ static const bool  kTierMono[TIER_N] = {true,  false, false, true,  true,  false
                                         false, false, false, false,
                                         false, false, false, false, false, false,
                                         false, false, false};
-// 稿子里的粗体只有两处落在 mono 上（num-xl 600、「N 轮」semibold），本机有
-// JetBrainsMono-SemiBold 可以直接对应。sans 侧的 500/600/650 没有第二份文件，
-// 靠 g_fontB 那张「同一文件 + 轮廓加粗」的烘焙出来（见下面的 FaceFont）。
 static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false, false, false,
                                         false, false, false, false,
                                         false, false, false, false, false, false,
@@ -1542,8 +1568,7 @@ static const bool  kTierBold[TIER_N] = {true,  false, false, true,  false, false
                                         false, false, false, false,
                                         false, false, false, false, false, false,
                                         false, false, false};
-// 0＝400 / 1＝500 / 2＝600。字体包里的 sans 只有 Regular 一档，>0 的档在烘焙时多烘一张
-// 轮廓加粗的脸（g_fontB，见 FaceFont）；mono 档有真 SemiBold，不再烘这一张。
+// 0＝400 / 1＝500 / 2＝600，使用 Noto 可变字体的命名实例。
 static const unsigned char kTierW[TIER_N] = {0, 2, 0, 0, 0, 1, 1, 1,
                                              0, 1, 0, 0,
                                              1, 0, 1, 1, 1, 2,
@@ -1564,9 +1589,6 @@ static bool FaceUsed(int t, int f) {
     return true;
 }
 static ImFont* g_font[TIER_N][FACE_N] = {};
-// 粗体另烘一份：stb 没法给轮廓加粗，只能画两遍错开一格（会留下双线/灰边）。
-// 这一份走 FreeType 加载器 + FT_GlyphSlot_Embolden —— 在栅格化之前把轮廓向外撑
-// em/24 像素，边缘只 AA 一次。只有非等宽的真粗档才有；等宽档用自带的 SemiBold 文件。
 static ImFont* g_fontB[TIER_N][FACE_N] = {};
 static ImFont* FaceFont(int tier, int face) {
     ImFont* b = g_fontB[tier][face];
@@ -1587,7 +1609,7 @@ static void LoadCoverage(FT_Library ft, const char* dir) {
     for (int f = 0; f < FACE_N; f++) {
         snprintf(path, sizeof path, "%s/%s", dir, kFace[f]);
         FT_Face face = nullptr;
-        if (FT_New_Face(ft, path, 0, &face)) { fprintf(stderr, "打不开 %s\n", path); continue; }
+        if (FT_New_Face(ft, path, f <= KR ? (4L << 16) : 0, &face)) { fprintf(stderr, "打不开 %s\n", path); continue; }
         for (unsigned long cp = 0x20; cp < 0x2FFFF; cp++)
             if (FT_Get_Char_Index(face, (FT_ULong)cp)) g_cover[f].insert((unsigned int)cp);
         // 只给宽度：FreeType 会把 y_scale 取成 x_scale，于是 ascender/descender
@@ -2095,6 +2117,7 @@ struct PanelData {
     /// 按工具的日聚合：今日一份 + 整份历史（分工具的时段消耗从这来，11-12 起积累）。
     std::map<std::string, ap::Snapshot::DayUse> agent_today;
     std::map<long, std::map<std::string, ap::Snapshot::DayUse>> agent_daily;
+    std::map<long, std::map<std::string, std::map<std::string, ap::ModelUse>>> model_daily;  // v8·M16
     /// N5 等待镜子（本周）：闭合等待的次数/平均/最长（秒）。
     /// 与上面状态项计数 await_n 同名不同义——镜像这三枚带 mirror 前缀。
     long mirror_n = 0;
@@ -2150,6 +2173,8 @@ static std::string g_r31_relay_brief;      // 接力简报原文（屏上预览/
 static int g_r31_useg = 0;                 // M9 用量屏时段：0今天 1昨天 2本周 3本月
 static int g_r31_useg_unit = 0;            // v5 柱图量纲：0 tokens 1 Credits（两本账不合加）
 static int g_r31_mfilter = -1;            // v8·M16 模型屏工具筛选：-1 全部，否则 tools 下标
+static int g_r31_msort = 0;               // v8·M16 模型排序：0 按量 1 按命中 2 按名
+static std::set<std::string> g_r31_mexp;  // v8·M16 模型行展开：seg:tool:model
 static std::set<std::string> g_r31_useg_open;   // v5 账本里展开着的行：seg:ledger:tool
 static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
 static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
@@ -2688,7 +2713,7 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               // v5：柱图量纲切换（opt＝0 tokens / 1 Credits）与账本行展开（key＝seg:ledger:tool）。
               HIT_USEGUNIT = 48, HIT_USEGROW = 49,
               // v8·M16 模型屏的工具筛选 chips（opt＝g_pd.tools 下标，-1 全部）。
-              HIT_MFILTER = 50 };
+              HIT_MFILTER = 50, HIT_MSORT = 51, HIT_MEXP = 52 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
@@ -3249,6 +3274,8 @@ static const char* ActName(int act) {
         case HIT_USEG:         return "用量时段";
         case HIT_USEGUNIT:     return "柱图量纲";
         case HIT_USEGROW:      return "账本行展开";
+        case HIT_MSORT:        return "模型排序";
+        case HIT_MEXP:         return "模型行展开";
         case HIT_COPY:     return "复制选项";
         case HIT_HISTMORE: return "历史翻页";
         case HIT_LANG:     return "语言";
@@ -3879,7 +3906,10 @@ static void DoAction(const Hit& h, const ImVec2& at) {
         }
         case HIT_USEG: {                      // M9 用量屏时段筛选
             g_r31_useg = h.opt;
-            g_r31_useg_open.clear();          // 稿子：换时段清空展开行（键里带段号，不清会残留）
+            g_r31_useg_open.clear();
+            g_r31_mexp.clear();
+            g_scroll[g_view] = g_scrollTarget[g_view] = 0.0f;
+            g_relayout = true;
             return;
         }
         case HIT_USEGUNIT: {                  // v5 柱图量纲：tokens / Credits 各算各的
@@ -3888,6 +3918,15 @@ static void DoAction(const Hit& h, const ImVec2& at) {
         }
         case HIT_MFILTER: {                   // v8·M16 模型屏工具筛选：-1 全部
             g_r31_mfilter = h.opt;
+            return;
+        }
+        case HIT_MSORT: {                     // v8·M16 模型排序：按量/按命中/按名
+            g_r31_msort = h.opt;
+            return;
+        }
+        case HIT_MEXP: {                      // v8·M16 模型行展开/收起（四档/会话/Credits）
+            if (g_r31_mexp.count(h.key)) g_r31_mexp.erase(h.key);
+            else g_r31_mexp.insert(h.key);
             return;
         }
         case HIT_USEGROW: {                   // v5 账本行展开/收起；双击＝定位最近会话
@@ -4053,11 +4092,11 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_r31_src = h.key.empty() ? "all" : h.key;
             // 偏移不在这里归零：R31Sources 会在「选择变了」那一帧把选中的那颗挪进视野，
             // 点一颗已经看得见的签不该让整条导轨突然滑回开头。
-            g_scroll[g_view] = 0.0f;
+            g_scroll[g_view] = g_scrollTarget[g_view] = 0.0f;
             g_relayout = true;
             return;
         case HIT_TAB31:                         // 会话 / 用量 / 权益三个标签（opt＝目标屏）
-            g_tab = (h.opt == 6 || h.opt == 8 || h.opt == 9) ? h.opt : 0;
+            g_tab = (h.opt == 6 || h.opt == 9) ? h.opt : 0;
             GotoView(g_tab);
             return;
         case HIT_INFO31: {                      // 行上的 ⓘ：进详情，不动跳转
@@ -4265,7 +4304,8 @@ static int g_click_gap = 0;     // 当前这颗已经占了几帧
 // 有了它们，「点开搜索框→打字→清空／退格／Esc」这条链能在出图轮里整条跑完，
 // 不必再去真的动他的桌面（2026-10-29 实测：合成按键会落进他正在用的 App）。
 static bool IsKeyStep(const std::string& s) {
-    return s.rfind("text:", 0) == 0 || s.rfind("key:", 0) == 0 || s.rfind("hold:", 0) == 0;
+    return s.rfind("text:", 0) == 0 || s.rfind("key:", 0) == 0 || s.rfind("hold:", 0) == 0 ||
+           s.rfind("wheel:", 0) == 0;
 }
 static ImGuiKey SeqKeyByName(const std::string& n) {
     if (n == "esc") return ImGuiKey_Escape;
@@ -4509,6 +4549,8 @@ static void HandleInput(const ImGuiIO& io, double now) {
         mp.y >= g_bodyTop[g_view].y && mp.y < g_bodyBot[g_view].y) {
         g_scrollTarget[g_view] = std::fmin(g_scrollMax[g_view],
                                            std::fmax(0.0f, g_scrollTarget[g_view] - io.MouseWheel * 40.0f));
+        if (getenv("AGENTPING_USAGE_AUDIT"))
+            printf("[usage-scroll] wheel=%.1f target=%.1f\n", io.MouseWheel, g_scrollTarget[g_view]);
     }
     // 取证轮要把长页（接线屏）的下半截拍下来，而合成指针不会滚滚轮：
     // 给一个「这一屏从多少偏移起画」的入口，只在 AGENTPING_SHOT 那轮生效。
@@ -4547,6 +4589,8 @@ static void HandleInput(const ImGuiIO& io, double now) {
             if (g_click_gap == 0) {
                 if (kind == "text")
                     ForEachTextChar(arg.c_str(), [&](unsigned int cp) { kio.AddInputCharacter(cp); });
+                else if (kind == "wheel")
+                    kio.AddMouseWheelEvent(0.0f, (float)atof(arg.c_str()));
                 else if ((seqHeld = SeqKeyByName(arg)) != ImGuiKey_None)
                     kio.AddKeyEvent(seqHeld, true);
             } else if (seqHeld != ImGuiKey_None && g_click_gap >= releaseAt) {
@@ -5893,6 +5937,7 @@ static void RebuildPanel(const ap::Snapshot& s) {
     pd.month_tokens = s.month_tokens;
     pd.agent_today = s.agent_today;
     pd.agent_daily = s.agent_daily;
+    pd.model_daily = s.model_daily;
     pd.mirror_n = s.await_n;
     pd.mirror_avg = s.await_avg;
     pd.mirror_max = s.await_max;
@@ -7442,7 +7487,7 @@ static int ApplyWindowMode() {
             wx = g_panelPosKnown ? g_panelX : (g_waKnown ? g_waX + g_waW - kPanelW - 14 : 40);
             wy = g_panelPosKnown ? g_panelY : (g_waKnown ? g_waY + 34 : 40);
             ApPass(g_win, false);
-            glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+            glfwSetWindowAttrib(g_win, GLFW_FOCUS_ON_SHOW, g_shot_to ? GLFW_FALSE : GLFW_TRUE);
             g_edgePass = false;
             glfwSetWindowSize(g_win, wantW, wantH);
             glfwSetWindowPos(g_win, wx, wy);
@@ -7961,6 +8006,52 @@ static void LoadProbeFixture() {
         auto it = pd.agent_daily.find(todayKey);
         if (it != pd.agent_daily.end()) pd.agent_today = it->second;
     }
+    for (auto& t : pd.tools) {
+        for (auto& m : t.models) {
+            m.parts.input = m.tokens;
+            m.has_parts = true;
+            m.sessions = 1;
+        }
+        for (const auto& [day, tools] : pd.agent_daily) {
+            const auto it = tools.find(t.id);
+            if (it == tools.end() || (it->second.tokens <= 0 && it->second.credits <= 0)) continue;
+            ap::ModelUse m;
+            m.name = t.id + "-fixture-model";
+            m.tokens = it->second.tokens;
+            m.credits = it->second.credits;
+            m.parts = it->second.parts;
+            m.has_parts = m.tokens > 0;
+            m.sessions = 2;
+            pd.model_daily[day][t.id][m.name] = m;
+        }
+    }
+    if (const char* shape = getenv("AGENTPING_USAGE_CASE")) {
+        const std::string kind = shape;
+        if (kind == "empty") {
+            pd.tools.clear();
+            pd.agent_daily.clear();
+            pd.model_daily.clear();
+            pd.daily.clear();
+            pd.today_tokens = 0;
+            pd.has_today_tokens = false;
+        } else if (kind == "noquota") {
+            for (auto& t : pd.tools) t.quota = {};
+        } else if (kind == "unknown-total") {
+            for (auto& t : pd.tools)
+                if (t.id == "zcode") t.quota.balance.total = 0;
+        } else if (kind == "mixed") {
+            for (auto& t : pd.tools) if (t.id == "claude") {
+                t.has_credits = true;
+                t.credits = 7.25;
+                t.quota.balance.known = true;
+                t.quota.balance.remaining = 42.5;
+                t.quota.balance.unit = "Credits";
+                t.models[0].name = "a-very-long-model-name-with-a-version-and-provider-suffix-2026";
+                t.models[0].credits = 7.25;
+                t.models[1].has_parts = false;
+            }
+        }
+    }
     // Codex 也要一条完成记录：完成记录屏 / 详情屏才有第二个工具可点。
     row(ap::ST_RESTING, "kitchen-timer", "Codex", "codex", "h9", at(11, 8), 9);
 
@@ -8204,7 +8295,7 @@ int main(int argc, char** argv) {
     // 取证（v5 用量屏）：钉时段/量纲/展开行，省得合成点击在多语并排轮里被语言差异卡住。
     // 正常窗口路径不读这三颗；它们只改初始状态，点一下仍是同一套 DoAction。
     if (const char* s = getenv("AGENTPING_USEG"); s && *s)
-        g_r31_useg = std::max(0, std::min(3, atoi(s)));
+        g_r31_useg = std::max(0, std::min(5, atoi(s)));
     if (const char* u = getenv("AGENTPING_USEG_UNIT"); u && *u)
         g_r31_useg_unit = atoi(u) == 1 ? 1 : 0;
     if (const char* o = getenv("AGENTPING_USEG_OPEN"); o && *o) {
@@ -8309,6 +8400,8 @@ int main(int argc, char** argv) {
             if (!FaceUsed(t, f)) continue;
             snprintf(path, sizeof path, "%s/%s", dir, kFace[f]);
             ImFontConfig fc; fc.SizePixels = Bake(t, f);
+            // Bundled Noto named instances 4/5/6 are 400/500/600; CJK defaults to 100.
+            fc.FontNo = f <= KR ? (4 << 16) : 0;
             // LightHinting＝ClearType 式纵向吸附：只竖向对齐像素格，横向保形。
             // 面板里大量文字画在分数 Y 上（TextMid 的居中算式），完全无吸附会让
             // 横向笔画落在两行像素之间——灰底小字发虚一半是它。
@@ -8316,11 +8409,10 @@ int main(int argc, char** argv) {
             g_font[t][f] = io.Fonts->AddFontFromFileTTF(path, Bake(t, f), &fc, ranges.Data);
             if (!g_font[t][f]) { fprintf(stderr, "字体加载失败 %s @%.1fpx\n", path, Bake(t, f)); return 2; }
             baked++;
-            // 粗档的第二张脸：同一份文件、同一个大小，只多一个「给轮廓加粗」的标志。
-            // 等宽档不烘 —— 它本来就有 JetBrains Mono SemiBold。
             if (kTierW[t] > 0 && !MonoTier(t)) {
                 ImFontConfig fb; fb.SizePixels = Bake(t, f);
-                fb.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_Bold;
+                fb.FontNo = (4 + kTierW[t]) << 16;
+                fb.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
                 g_fontB[t][f] = io.Fonts->AddFontFromFileTTF(path, Bake(t, f), &fb, ranges.Data);
                 if (!g_fontB[t][f]) {
                     fprintf(stderr, "粗体字形加载失败 %s @%.1fpx\n", path, Bake(t, f));
@@ -9103,6 +9195,9 @@ int main(int argc, char** argv) {
                 printf("[实拍] %s (%dx%d，窗口帧缓冲原样) 数据扫描于 %s｜内容高 g_panelH=%.1fpt，"
                        "窗口内容框 %dx%dpt｜alpha 左上=%d 左下=%d 圆角内=%d（左上 0 才说明透明浮层真的生效）\n",
                        wrote ? shot_to : "（未落盘）", sw, sh, stamp, g_panelH, cw_now, ch_now, tl, bl, tlin);
+                if (getenv("AGENTPING_USAGE_AUDIT"))
+                    printf("[usage-final] view=%d src=%s scroll=%.1f target=%.1f max=%.1f\n",
+                           g_view, g_r31_src.c_str(), g_scroll[g_view], g_scrollTarget[g_view], g_scrollMax[g_view]);
                 fflush(stdout);
                 sb_float_window(g_winMode != WIN_EDGE);   // 收摊前再报一次：resize 之后浮层属性有没有被 GLFW 改回去
                 // 菜单栏那颗不在我们这块窗口里，而外部截屏在这台机器上只会得到纯黑

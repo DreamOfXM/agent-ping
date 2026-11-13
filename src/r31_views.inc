@@ -1154,8 +1154,8 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
     {
         const bool on = (g_view == 0);
         const std::string t0 = T("r_sessions", loc);
-        const float tw = TextWidth(t0, loc, T_S12);
-        R31Mid(dl, tx, y + 17.0f, t0, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
+        const float tw = TextWidth(t0, loc, T_S12B);
+        R31Mid(dl, tx, y + 17.0f, t0, loc, on ? k31Fg : k31Muted, T_S12B);
         if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
         char cb[24];
         snprintf(cb, sizeof cb, "%d", (int)rows.size());
@@ -1170,34 +1170,12 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
     {
         const bool on = (g_view == 6);
         const std::string t1 = T("r_usage_tab", loc);
-        const float tw = TextWidth(t1, loc, T_S12);
-        R31Mid(dl, tx, y + 17.0f, t1, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
+        const float tw = TextWidth(t1, loc, T_S12B);
+        R31Mid(dl, tx, y + 17.0f, t1, loc, on ? k31Fg : k31Muted, T_S12B);
         if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
         AddHit(g_hits, tx - 2.0f, y, tx + tw + 2.0f, y + 34.0f, HIT_TAB31, 600, 6, loc, t1,
                on ? 1 : 0);
         tx += tw + 18.0f;
-    }
-    {
-        // 模型（view 8，v8·M16）：跨工具单模型行。badge＝当日有明细的模型行数。
-        const bool on = (g_view == 8);
-        const std::string t3 = T("r_models_tab", loc);
-        const float tw = TextWidth(t3, loc, T_S12);
-        R31Mid(dl, tx, y + 17.0f, t3, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
-        if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
-        tx += tw;
-        int mn = 0;
-        for (const Tool& t : g_pd.tools) mn += (int)t.models.size();
-        if (mn > 0) {
-            const std::string nb = std::to_string(mn);
-            const float bw = TextWidth(nb, loc, T_S9) + 10.0f;
-            dl->AddRectFilled(ImVec2(tx + 6.0f, y + 10.0f), ImVec2(tx + 6.0f + bw, y + 24.0f),
-                              k31Badge, 5.0f);
-            DrawTextRun(dl, tx + 11.0f, TextMid(y + 17.0f, T_S9, loc), nb, loc, k31Sec, T_S9);
-            tx += bw + 6.0f;
-        }
-        AddHit(g_hits, tx - 2.0f - ((mn > 0) ? 0.0f : 0.0f), y, tx + 2.0f, y + 34.0f, HIT_TAB31,
-               600, 8, loc, t3, on ? 1 : 0);
-        tx += 18.0f;
     }
     {
         // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数，
@@ -1206,8 +1184,8 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         const bool on = (g_view == 9);
         const float x0 = tx;
         const std::string t2 = T("r_claim_tab", loc);
-        const float tw = TextWidth(t2, loc, T_S12);
-        R31Mid(dl, tx, y + 17.0f, t2, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
+        const float tw = TextWidth(t2, loc, T_S12B);
+        R31Mid(dl, tx, y + 17.0f, t2, loc, on ? k31Fg : k31Muted, T_S12B);
         if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
         tx += tw;
         int ready = 0;
@@ -2352,24 +2330,7 @@ static R31Chart R31BuildChart(const R31UseSeg& u, int unit, bool one, const std:
             const long day = keys[i];
             bool recorded = false;
             double v = 0.0;
-            if (day == u.to_key) {
-                // 今天只取「今天这一行」，绝不能拿整段合计当今天（周图会把今天画成满格）。
-                recorded = true;
-                auto it = g_pd.agent_daily.find(day);
-                if (it != g_pd.agent_daily.end()) {
-                    if (global) {
-                        auto g = it->second.find("*");
-                        if (g != it->second.end())
-                            v = unit == 0 ? (double)g->second.tokens : g->second.credits;
-                    } else {
-                        for (const auto& [who, du] : it->second) {
-                            if (who == "*") continue;
-                            if (one && who != src) continue;
-                            v += unit == 0 ? (double)du.tokens : du.credits;
-                        }
-                    }
-                }
-            } else if (global) {
+            if (global) {
                 auto it = g_pd.agent_daily.find(day);
                 if (it != g_pd.agent_daily.end()) {
                     auto g = it->second.find("*");
@@ -2391,7 +2352,7 @@ static R31Chart R31BuildChart(const R31UseSeg& u, int unit, bool one, const std:
             }
             R31ChartSlot s;
             s.value = v;
-            s.today = (day == u.to_key);
+            s.today = (day == day_key_ui((std::time_t)g_pd.window_start));
             s.kind = noData || !recorded ? R31_SLOT_EMPTY
                                          : (v > 0 ? R31_SLOT_BAR : R31_SLOT_ZERO);
             const int dd = (int)(day % 100);
@@ -2424,589 +2385,482 @@ static float sy0k(float sh, double v, double lo, double hi) {
     const double t = (hi - lo) > 1e-9 ? (v - lo) / (hi - lo) : 0.5;
     return sh - (float)t * sh;
 }
+struct R31ModelSlice {
+    std::vector<ap::ModelUse> rows;
+    int days = 0;
+};
+
+static R31ModelSlice R31ModelsFor(const R31UseSeg& seg, const R31UseRow& row) {
+    R31ModelSlice out;
+    std::map<std::string, ap::ModelUse> sums;
+    auto add = [&](const ap::ModelUse& m) {
+        if (m.name.empty() || (m.tokens <= 0 && m.credits <= 0)) return;
+        auto it = sums.find(m.name);
+        if (it == sums.end()) { sums[m.name] = m; return; }
+        auto& v = it->second;
+        v.tokens += m.tokens;
+        v.credits += m.credits;
+        v.sessions += m.sessions;
+        v.parts.input += m.parts.input;
+        v.parts.output += m.parts.output;
+        v.parts.cache_read += m.parts.cache_read;
+        v.parts.cache_write += m.parts.cache_write;
+        v.has_parts = v.has_parts && m.has_parts;
+    };
+    if (seg.seg == 0 && row.tool) {
+        for (const auto& m : row.tool->models) add(m);
+        out.days = sums.empty() ? 0 : 1;
+    } else {
+        for (const auto& [day, tools] : g_pd.model_daily) {
+            if (day < seg.from_key || day > seg.to_key) continue;
+            auto it = tools.find(row.id);
+            if (it == tools.end()) continue;
+            bool recorded = false;
+            for (const auto& [name, m] : it->second) {
+                add(m);
+                recorded = recorded || m.tokens > 0 || m.credits > 0;
+            }
+            if (recorded) out.days++;
+        }
+    }
+    for (auto& [name, m] : sums) {
+        m.has_parts = m.has_parts && m.parts.total() == m.tokens;
+        out.rows.push_back(m);
+    }
+    auto hit = [](const ap::ModelUse& m) {
+        const long den = m.parts.input + m.parts.cache_read;
+        return m.has_parts && den > 0 ? (double)m.parts.cache_read / den : -1.0;
+    };
+    std::stable_sort(out.rows.begin(), out.rows.end(), [&](const auto& a, const auto& b) {
+        if (g_r31_msort == 2) return a.name < b.name;
+        if (g_r31_msort == 1 && hit(a) != hit(b)) return hit(a) > hit(b);
+        if (a.tokens != b.tokens) return a.tokens > b.tokens;
+        if (a.credits != b.credits) return a.credits > b.credits;
+        return a.name < b.name;
+    });
+    return out;
+}
+
+static void R31UsageSurface(ImDrawList* dl, float x, float y, float w, float h, ImU32 accent) {
+    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(29, 37, 47, 245), 13.0f);
+    dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), WithA(accent, 9), 13.0f);
+    dl->AddRect(ImVec2(x + 0.5f, y + 0.5f), ImVec2(x + w - 0.5f, y + h - 0.5f),
+                WithA(accent, 55), 13.0f);
+}
+
+static float R31PartsGrid(ImDrawList* dl, float x, float y, float w,
+                           const ap::UsageParts& parts, ImU32 accent, int loc) {
+    const char* keys[] = {"r_input", "r_output", "r_cache_read", "r_cache_write"};
+    const int icons[] = {I31_DOWN, I31_UP, I31_COPY, I31_LAYERS};
+    const long values[] = {parts.input, parts.output, parts.cache_read, parts.cache_write};
+    const float cw = (w - 12.0f) / 2.0f;
+    for (int i = 0; i < 4; i++) {
+        const float cx = x + (i % 2) * (cw + 12.0f), cy = y + (i / 2) * 58.0f;
+        dl->AddCircleFilled(ImVec2(cx + 13.0f, cy + 24.0f), 13.0f, WithA(accent, 24));
+        I31(dl, icons[i], cx + 6.0f, cy + 17.0f, 14.0f, accent);
+        R31Mid(dl, cx + 35.0f, cy + 12.0f,
+               ClipToWidth(T(keys[i], loc), cw - 35.0f, loc, T_S11), loc, k31Sec, T_S11);
+        R31Mid(dl, cx + 35.0f, cy + 35.0f, R31Compact((double)values[i]), loc, k31Fg, T_N20);
+    }
+    return y + 116.0f;
+}
+
+static float R31ToolUsageCard(ImDrawList* dl, float x, float y, float w, int loc,
+                               const R31UseSeg& seg, const R31UseRow& r, int index) {
+    const ImU32 accent = r.tool ? r.tool->hue : k31Blue;
+    const R31ModelSlice models = R31ModelsFor(seg, r);
+    const std::string key = std::to_string(seg.seg) + ":tool:" + r.id;
+    const bool expandable = r.has_parts || !models.rows.empty();
+    const bool open = expandable && g_r31_useg_open.count(key);
+    const bool both = r.tokens > 0 && r.credits > 0;
+    const float headerH = both ? 118.0f : 96.0f;
+    float height = headerH;
+    if (open) {
+        if (r.has_parts) height += 124.0f;
+        if (!models.rows.empty()) {
+            height += 36.0f + (models.rows.size() > 1 ? 34.0f : 0.0f);
+            if (seg.seg != 0) height += 22.0f;
+            for (const auto& m : models.rows) {
+                height += 62.0f;
+                const std::string mk = key + ":" + m.name;
+                if (g_r31_mexp.count(mk)) {
+                    if (m.has_parts) height += 116.0f;
+                    if (seg.seg == 0 && m.sessions > 0) height += 26.0f;
+                }
+            }
+        }
+        height += 10.0f;
+    }
+    R31UsageSurface(dl, x, y, w, height, accent);
+    if (r.tool) Brand31(dl, x + 16.0f, y + 15.0f, 24.0f, r.id, loc);
+    else I31(dl, I31_LAYERS, x + 18.0f, y + 19.0f, 18.0f, accent);
+    const std::string name = r.tool ? R31Agent(r.id, loc) : T("r_all_tools", loc);
+    R31Mid(dl, x + 50.0f, y + 27.0f, name, loc, k31Fg, T_S14B);
+    if (expandable) {
+        I31(dl, open ? I31_DOWN : I31_RIGHT, x + w - 29.0f, y + 20.0f, 14.0f, k31Sec);
+        AddHit(g_hits, x, y, x + w, y + headerH, HIT_USEGROW, 2400 + index, 0, loc, name, open);
+        g_hits.back().key = key;
+    }
+    const std::string value = r.tokens > 0 ? R31Compact((double)r.tokens) : R31Num(r.credits);
+    const float end = R31Mid(dl, x + 16.0f, y + 67.0f, value, loc, k31Fg, T_N28);
+    R31Mid(dl, end + 8.0f, y + 72.0f, r.tokens > 0 ? "tokens" : "Credits", loc, k31Sec, T_S11);
+    const long den = r.parts.input + r.parts.cache_read;
+    if (r.has_parts && den > 0) {
+        const float cx = x + w - 74.0f, cy = y + 65.0f;
+        const float frac = (float)((double)r.parts.cache_read / den);
+        dl->AddCircle(ImVec2(cx, cy), 13.0f, WithA(accent, 30), 40, 3.0f);
+        if (frac > 0) {
+            dl->PathArcTo(ImVec2(cx, cy), 13.0f, -1.5707963f, -1.5707963f + 6.2831853f * frac, 40);
+            dl->PathStroke(accent, 0, 3.0f);
+        }
+        R31Mid(dl, cx + 21.0f, cy, std::to_string((int)std::lround(frac * 100)) + "%", loc,
+               k31Fg, T_S12B);
+        DrawTextRight(dl, x + w - 16.0f, TextMid(y + 86.0f, T_S10B, loc), T("r_cell_hit", loc),
+                      loc, k31Sec, T_S10B);
+    }
+    if (both)
+        R31Mid(dl, x + 16.0f, y + 100.0f, R31Num(r.credits) + " Credits", loc, k31Sec, T_S12B);
+    if (!open) return y + height;
+    float cy = y + headerH;
+    if (r.has_parts) cy = R31PartsGrid(dl, x + 16.0f, cy + 4.0f, w - 32.0f, r.parts, accent, loc) + 4.0f;
+    if (!models.rows.empty()) {
+        R31Mid(dl, x + 16.0f, cy + 18.0f, T("r_by_model", loc), loc, k31Fg, T_S12B);
+        DrawTextRight(dl, x + w - 16.0f, TextMid(cy + 18.0f, T_S11, loc),
+                      std::to_string(models.rows.size()), loc, k31Sec, T_S11);
+        cy += 36.0f;
+        if (models.rows.size() > 1) {
+            const char* keys[] = {"r_models_sort_tk", "r_models_sort_hit", "r_models_sort_name"};
+            float sx = x + 16.0f;
+            const float cw = (w - 40.0f) / 3.0f;
+            for (int i = 0; i < 3; i++) {
+                const bool on = g_r31_msort == i;
+                dl->AddRectFilled(ImVec2(sx, cy), ImVec2(sx + cw, cy + 27.0f),
+                                  on ? WithA(accent, 30) : k31Badge, 6.0f);
+                const std::string label = T(keys[i], loc);
+                R31Mid(dl, sx + (cw - TextWidth(label, loc, T_S10B)) / 2, cy + 13.5f,
+                       label, loc, on ? k31Fg : k31Sec, T_S10B);
+                AddHit(g_hits, sx, cy, sx + cw, cy + 27.0f, HIT_MSORT, 2650 + index * 3 + i,
+                       i, loc, label, on);
+                sx += cw + 4.0f;
+            }
+            cy += 34.0f;
+        }
+        if (seg.seg != 0) {
+            R31Mid(dl, x + 16.0f, cy + 10.0f, RFmt(T("r_model_days", loc), models.days),
+                   loc, k31Sec, T_S11);
+            cy += 22.0f;
+        }
+        for (size_t i = 0; i < models.rows.size(); i++) {
+            const auto& m = models.rows[i];
+            const std::string mk = key + ":" + m.name;
+            const bool details = m.has_parts || (seg.seg == 0 && m.sessions > 0);
+            const bool expanded = details && g_r31_mexp.count(mk);
+            dl->AddRectFilled(ImVec2(x + 10.0f, cy), ImVec2(x + w - 10.0f, cy + 57.0f),
+                              k31Badge, 7.0f);
+            R31Mid(dl, x + 20.0f, cy + 16.0f,
+                   ClipToWidth(m.name, w - 62.0f, loc, T_S11B), loc, k31Fg, T_S11B);
+            std::string amount;
+            if (m.tokens > 0) amount = R31Compact((double)m.tokens) + " tokens";
+            if (m.credits > 0) amount += (amount.empty() ? "" : "   ·   ") + R31Num(m.credits) + " Credits";
+            R31Mid(dl, x + 20.0f, cy + 39.0f, amount, loc, k31Sec, T_S11);
+            if (details) {
+                I31(dl, expanded ? I31_DOWN : I31_RIGHT, x + w - 33.0f, cy + 10.0f, 12.0f, k31Sec);
+                AddHit(g_hits, x + 10.0f, cy, x + w - 10.0f, cy + 57.0f, HIT_MEXP,
+                       2700 + index, (int)i, loc, m.name, expanded);
+                g_hits.back().key = mk;
+            }
+            cy += 62.0f;
+            if (expanded) {
+                if (m.has_parts) cy = R31PartsGrid(dl, x + 16.0f, cy, w - 32.0f, m.parts, accent, loc);
+                if (seg.seg == 0 && m.sessions > 0) {
+                    R31Mid(dl, x + 20.0f, cy + 13.0f,
+                           std::string(T("r_models_sess", loc)) + "  " + std::to_string(m.sessions),
+                           loc, k31Sec, T_S11);
+                    cy += 26.0f;
+                }
+            }
+        }
+    }
+    return y + height;
+}
+
+static float R31QuotaCard(ImDrawList* dl, float x, float y, float w, const Tool& t,
+                           int loc, double now, int index, bool link) {
+    const ap::Balance balance = R31BalanceOf(t);
+    struct Reading { std::string label, value, unit, note; int percent; bool stale; };
+    std::vector<Reading> readings;
+    auto window = [&](const ap::QuotaWindow& q, const char* label) {
+        if (!q.known) return;
+        const bool stale = R31QuotaStale(q, now);
+        std::string note;
+        if (stale) {
+            note = T("r_stale", loc);
+            if (q.seen_at > 0) note += " · " + R31LimitStamp(q.seen_at);
+        } else if (q.resets_at > now) note = RFmt(T("r_after_reset", loc), Dur(q.resets_at - now, loc).c_str());
+        readings.push_back({T(label, loc), std::to_string(R31RemainPct(q)) + "%", "", note,
+                            R31RemainPct(q), stale});
+    };
+    window(t.quota.five, "r_5h");
+    window(t.quota.week, "r_week");
+    if (balance.known) {
+        const bool stale = R31BalanceStale(balance, now);
+        std::string note;
+        if (balance.exceeded) note = T("r_used_up", loc);
+        if (stale) {
+            if (!note.empty()) note += " · ";
+            note += T("r_stale", loc);
+            if (balance.seen_at > 0) note += " · " + R31LimitStamp(balance.seen_at);
+        } else if (balance.period_end > now) {
+            if (!note.empty()) note += " · ";
+            note += RFmt(T("r_ends_at", loc), R31LimitStamp(balance.period_end).c_str());
+        }
+        std::string value = balance.unit == "tokens" ? R31Compact(balance.remaining) : R31Num(balance.remaining);
+        if (balance.total > 0)
+            value += " / " + (balance.unit == "tokens" ? R31Compact(balance.total) : R31Num(balance.total));
+        std::string label = T("r_remaining", loc);
+        if (!balance.label.empty()) label += " · " + balance.label;
+        readings.push_back({label, value, balance.unit, note, R31BalancePct(balance), stale});
+    }
+    if (readings.empty()) {
+        // 未接线卡（v8 补）：今天在跑但本机没有它的额度读数——虚线轨道 + 说明，不编数。
+        const float height = 92.0f;
+        R31UsageSurface(dl, x, y, w, height, t.hue);
+        Brand31(dl, x + 16.0f, y + 14.0f, 22.0f, t.id, loc);
+        R31Mid(dl, x + 48.0f, y + 25.0f, R31Agent(t.id, loc), loc, k31Fg, T_S13B);
+        const bool claudeGap = (t.id == "claude");
+        R31Mid(dl, x + 16.0f, y + 52.0f, T("r_unwired", loc), loc, k31Blue, T_S11);
+        DrawTextRun(dl, x + 16.0f + TextWidth(T("r_unwired", loc), loc, T_S11) + 10.0f,
+                    TextMid(y + 52.0f, T_S11, loc),
+                    T(claudeGap ? "r_hook_hint" : "r_no_reading", loc), loc, k31Muted, T_S11);
+        dl->AddRect(ImVec2(x + 16.0f, y + 70.0f), ImVec2(x + w - 16.0f, y + 75.0f), k31Line, 2.5f);
+        if (link) {
+            I31(dl, I31_RIGHT, x + w - 28.0f, y + 18.0f, 13.0f, k31Sec);
+            AddHit(g_hits, x, y, x + w, y + height, HIT_ACCOUNT31, 1110 + index, 0,
+                   loc, R31Agent(t.id, loc), 0);
+            g_hits.back().key = t.id;
+        }
+        return y + height;
+    }
+    float height = 49.0f;
+    for (const auto& r : readings)
+        height += 73.0f + (r.note.empty() ? 0.0f : 5.0f + 17.0f * R31Wrap(r.note, w - 32.0f, loc, T_S11, 0).size());
+    R31UsageSurface(dl, x, y, w, height, t.hue);
+    Brand31(dl, x + 16.0f, y + 14.0f, 22.0f, t.id, loc);
+    const float nameEnd = R31Mid(dl, x + 48.0f, y + 25.0f, R31Agent(t.id, loc), loc, k31Fg, T_S13B);
+    const float planRight = x + w - (link ? 44.0f : 16.0f);
+    if (!t.quota.plan.empty())
+        DrawTextRight(dl, planRight, TextMid(y + 25.0f, T_S11, loc),
+                      ClipToWidth(t.quota.plan, planRight - nameEnd - 12.0f, loc, T_S11), loc, k31Sec, T_S11);
+    if (link) {
+        I31(dl, I31_RIGHT, x + w - 28.0f, y + 18.0f, 13.0f, k31Sec);
+        AddHit(g_hits, x, y, x + w, y + height, HIT_ACCOUNT31, 1110 + index, 0,
+               loc, R31Agent(t.id, loc), 0);
+        g_hits.back().key = t.id;
+    }
+    float cy = y + 45.0f;
+    for (const auto& r : readings) {
+        R31Mid(dl, x + 16.0f, cy + 10.0f, r.label, loc, k31Sec, T_S11);
+        if (!r.unit.empty()) DrawTextRight(dl, x + w - 16.0f, TextMid(cy + 10.0f, T_S11, loc),
+                                         r.unit, loc, k31Sec, T_S11);
+        const ImU32 color = r.percent == 0 ? k31Red : k31Fg;
+        R31Mid(dl, x + 16.0f, cy + 36.0f, r.value, loc, color, T_N23);
+        if (r.percent >= 0) {
+            dl->AddRectFilled(ImVec2(x + 16.0f, cy + 58.0f), ImVec2(x + w - 16.0f, cy + 63.0f),
+                              WithA(t.hue, 26), 2.5f);
+            if (r.percent > 0)
+                dl->AddRectFilled(ImVec2(x + 16.0f, cy + 58.0f),
+                                  ImVec2(x + 16.0f + (w - 32.0f) * r.percent / 100.0f, cy + 63.0f),
+                                  t.hue, 2.5f);
+        }
+        cy += 73.0f;
+        if (!r.note.empty()) {
+            cy = R31DrawWrap(dl, r.note, x + 16.0f, cy - 4.5f, w - 32.0f, loc, T_S11,
+                             17.0f, r.stale ? k31Amber : k31Sec) + 9.5f;
+        }
+    }
+    return y + height;
+}
+
 static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
-    const float L = x + 16.0f, listW = w - 32.0f;
-    // 来源导轨在这一屏也画，正文就得跟着它走：选了一家只算那一家，否则导轨是个假开关。
+    const float L = x + 16.0f, width = w - 32.0f;
     const bool one = g_r31_src != "all";
-    const Tool* sel = one ? R31ToolOf(g_r31_src) : nullptr;
-    auto inSrc = [&](const Tool& t) { return !one || t.id == g_r31_src; };
-    bool anyUsage = one ? (sel && sel->present() && (R31HasUsage(*sel) || R31QuotaAny(*sel)))
-                        : (g_pd.has_today_tokens && g_pd.today_tokens > 0);
-    if (!one)
-        for (const Tool& t : g_pd.tools) if (R31HasUsage(t)) anyUsage = true;
-    if (!anyUsage && !g_pd.daily.empty()) anyUsage = true;
-    if (!anyUsage && one)
-        for (const auto& [d, m] : g_pd.agent_daily)
-            if (m.count(g_r31_src)) { anyUsage = true; break; }
-    if (!anyUsage)
-        return R31Empty(dl, L, y, listW, 180.0f,
-                        one ? T("r_no_usage_src", loc) : T("r_no_usage", loc),
-                        T("r_no_usage_hint", loc), nullptr, 0, loc);
     const R31UseSeg seg = R31BuildUseSeg(g_r31_useg, one, g_r31_src);
-    const R31Chart chart = R31BuildChart(seg, g_r31_useg_unit, one, g_r31_src, loc);
-    float cy = y;
-    // usage-head（v7）：扫描行 → 双账 chips（tokens/Credits 各一本，不合加）→ 六时段。
-    // 段序照稿：今天/昨天/本周/上周/本月/本年。全部可点：没有记录的段如实切过去显示 0。
-    {
-        const float hx = L + 7.0f;
-        char tb[16];
-        std::time_t tn = (std::time_t)(g_pd.now > 0 ? g_pd.now : std::time(nullptr));
-        std::tm tvn{};
-        localtime_r(&tn, &tvn);
-        strftime(tb, sizeof tb, "%H:%M:%S", &tvn);
-        R31Mid(dl, hx, cy + 9.0f, RFmt(T("r_scan_at", loc), tb).c_str(), loc, k31Faint, T_S9);
-        cy += 22.0f;
-        {
-            const float cw2 = (listW - 8.0f) / 2.0f;
-            const char* lk[2] = {"r_ledger_tk", "r_ledger_cr"};
-            const std::string lv[2] = {R31Compact((double)seg.tokens), R31Num(seg.credits)};
+    float cy = y + 2.0f;
+    const int order[] = {0, 1, 2, 4, 3, 5};
+    const float chipW = (width - 8.0f) / 3.0f;
+    for (int i = 0; i < 6; i++) {
+        const int sid = order[i];
+        const float cx = L + (i % 3) * (chipW + 4.0f), sy = cy + (i / 3) * 34.0f;
+        const bool on = g_r31_useg == sid;
+        const std::string label = R31SegLabel(sid, loc);
+        dl->AddRectFilled(ImVec2(cx, sy), ImVec2(cx + chipW, sy + 30.0f),
+                          on ? IM_COL32(62, 81, 105, 255) : k31Badge, 7.0f);
+        R31Mid(dl, cx + (chipW - TextWidth(label, loc, T_S11B)) / 2.0f, sy + 15.0f,
+               label, loc, on ? k31Fg : k31Sec, T_S11B);
+        AddHit(g_hits, cx, sy, cx + chipW, sy + 30.0f, HIT_USEG, 2300 + i, sid, loc, label, on);
+    }
+    cy += 82.0f;
+    if (!one && (seg.tokens > 0 || seg.credits > 0)) {
+        const bool both = seg.tokens > 0 && seg.credits > 0;
+        float cx = L + 4.0f;
+        auto total = [&](const std::string& value, const char* unit) {
+            R31Mid(dl, cx, cy + 10.0f, unit, loc, k31Sec, T_S11B);
+            R31Mid(dl, cx, cy + 42.0f, value, loc, k31Fg, both ? T_N28 : T_N35);
+            cx += width / 2.0f;
+        };
+        if (seg.tokens > 0) total(R31Compact((double)seg.tokens), "tokens");
+        if (seg.credits > 0) total(R31Num(seg.credits), "Credits");
+        cy += 74.0f;
+    }
+    std::vector<R31UseRow> rows = seg.tk;
+    for (const auto& cr : seg.cr) {
+        auto it = std::find_if(rows.begin(), rows.end(), [&](const auto& r) { return r.id == cr.id; });
+        if (it != rows.end()) { it->credits = cr.credits; it->credit_days = cr.credit_days; }
+        else rows.push_back(cr);
+    }
+    if (rows.empty()) {
+        cy = R31DrawWrap(dl, T("r_range_empty", loc), L + 4.0f, cy, width - 8.0f,
+                         loc, T_S12, 19.0f, k31Sec, 2) + 24.0f;
+    } else {
+        if (!one) {
+            R31Mid(dl, L + 4.0f, cy + 10.0f, T("r_usage_by", loc), loc, k31Sec, T_S12B);
+            cy += 28.0f;
+        }
+        for (size_t i = 0; i < rows.size(); i++)
+            cy = R31ToolUsageCard(dl, L, cy, width, loc, seg, rows[i], (int)i) + 12.0f;
+    }
+    const int unit = seg.tokens <= 0 ? 1 : seg.credits <= 0 ? 0 : g_r31_useg_unit;
+    const R31Chart chart = R31BuildChart(seg, unit, one, g_r31_src, loc);
+    const bool bothUnits = seg.tokens > 0 && seg.credits > 0;
+    if ((chart.has_peak && !chart.no_hours) || bothUnits) {
+        cy += 8.0f;
+        R31Mid(dl, L + 4.0f, cy + 12.0f, T("r_activity", loc), loc, k31Sec, T_S12B);
+        const bool both = seg.tokens > 0 && seg.credits > 0;
+        if (both) {
             for (int i = 0; i < 2; i++) {
-                const float cx2 = L + (float)i * (cw2 + 8.0f);
-                dl->AddRectFilled(ImVec2(cx2, cy), ImVec2(cx2 + cw2, cy + 30.0f), k31Sel, 9.0f);
-                dl->AddRect(ImVec2(cx2 + 0.5f, cy + 0.5f), ImVec2(cx2 + cw2 - 0.5f, cy + 29.5f),
-                            k31Line, 9.0f, 0, 1.0f);
-                DrawTextRun(dl, cx2 + 10.0f, TextMid(cy + 15.0f, T_S10, loc), T(lk[i], loc), loc,
-                            k31Muted, T_S10);
-                DrawTextRight(dl, cx2 + cw2 - 10.0f, TextMid(cy + 15.0f, T_S12B, loc), lv[i], loc,
-                              k31Fg, T_S12B);
+                const float cx = L + width - 130.0f + i * 66.0f;
+                const std::string label = i == 0 ? "tokens" : "Credits";
+                dl->AddRectFilled(ImVec2(cx, cy), ImVec2(cx + 62.0f, cy + 26.0f),
+                                  unit == i ? k31Sel : k31Badge, 6.0f);
+                R31Mid(dl, cx + 8.0f, cy + 13.0f, label, loc, k31Fg, T_S11);
+                AddHit(g_hits, cx, cy, cx + 62.0f, cy + 26.0f, HIT_USEGUNIT, 2350 + i, i,
+                       loc, label, unit == i);
             }
-            cy += 36.0f;
-        }
-        // kSegKey 按 sid 索引（与 R31BuildUseSeg 的 seg 语义一致：3=本月 4=上周），
-        // kOrder 只管屏幕顺序（稿序：本周后面直接跟上周）。
-        static const char* kSegKey[6] = {"r_today", "r_useg_yest", "r_useg_week",
-                                         "r_useg_month", "r_useg_lastweek", "r_useg_year"};
-        const int kOrder[6] = {0, 1, 2, 4, 3, 5};
-        float fx = hx;
-        for (int i = 0; i < 6; i++) {
-            const int sid = kOrder[i];
-            const std::string lab = T(kSegKey[sid], loc);
-            const float tw = TextWidth(lab, loc, T_S10);
-            const bool on = (g_r31_useg == sid);
-            const float hov = TxPeekNew(Zid(loc, 2300 + i, HIT_USEG, sid), 0.0f);
-            dl->AddRectFilled(ImVec2(fx, cy + 2.0f), ImVec2(fx + tw + 18.0f, cy + 22.0f),
-                              on ? k31Sel : (hov > 0.01f ? k31Hover : WithA(k31Sel, 0)), 8.0f);
-            if (on)
-                dl->AddRect(ImVec2(fx + 0.5f, cy + 2.5f), ImVec2(fx + tw + 17.5f, cy + 21.5f),
-                            k31Line, 8.0f, 0, 1.0f);
-            DrawTextRun(dl, fx + 9.0f, TextMid(cy + 12.0f, T_S10, loc), lab, loc,
-                        on ? k31Fg : k31Sec, T_S10);
-            AddHit(g_hits, fx, cy + 2.0f, fx + tw + 18.0f, cy + 22.0f, HIT_USEG, 2300 + i, sid,
-                   loc, lab, sid);
-            fx += tw + 18.0f + 7.0f;
-        }
-        cy += 30.0f;
-        const std::string note =
-            RFmt(T("r_seg_note", loc), R31SegLabel(g_r31_useg, loc).c_str());
-        cy = R31DrawWrap(dl, note, L + 7.0f, cy, listW - 14.0f, loc, T_S9, 14.0f, k31Muted, 2) +
-             4.0f;
-    }
-    // v7 M14：逐工具 7 日火花线（agent_daily 的 tokens，今天止）。整天没记录的天断点跳过。
-    std::map<std::string, std::vector<double>> spark7;   // agent id → 旧→新 ≤7 点
-    {
-        std::map<std::string, std::map<long, double>> byday;
-        for (const auto& [d, m] : g_pd.agent_daily)
-            for (const auto& [who, du] : m) {
-                if (who == "*") continue;
-                byday[who][d] += (double)du.tokens;
-            }
-        for (auto& [who, dm] : byday) {
-            auto& v = spark7[who];
-            long d0 = g_pd.agent_daily.empty() ? 0 : g_pd.agent_daily.begin()->first;
-            // 以 daily 里最早的键为窗口起点近似（≤8 天），取该工具自己有的天
-            (void)d0;
-            for (const auto& [d, val] : dm) {
-                (void)d;
-                v.push_back(val);
-            }
-            if (v.size() > 7) v.erase(v.begin(), v.end() - 7);
-        }
-    }
-    // 今日段的「会话数」徽标：Tool::rows 就是各家今天摆出来的会话数。
-    auto today_rows_of = [&](const std::string& id) -> int {
-        for (const Tool& t : g_pd.tools)
-            if (t.id == id) return t.rows;
-        return 0;
-    };
-    // 一本账：标题 + 小计 + 可展开的逐工具行。四档/来源注在展开区里，不占折叠高度。
-    auto drawLedger = [&](float ly, bool cr) -> float {
-        const std::vector<R31UseRow>& rows = cr ? seg.cr : seg.tk;
-        std::vector<char> open(rows.size(), 0);
-        std::vector<float> expH(rows.size(), 0.0f);
-        std::vector<std::string> notes(rows.size());
-        for (size_t i = 0; i < rows.size(); i++) {
-            const std::string key =
-                std::to_string(g_r31_useg) + ":" + (cr ? "cr" : "tk") + ":" + rows[i].id;
-            open[i] = g_r31_useg_open.count(key) ? 1 : 0;
-            if (!open[i]) continue;
-            if (cr) {
-                notes[i] = RFmt(T("r_credit_src", loc), rows[i].credit_days);
-            } else if (!rows[i].has_parts) {
-                notes[i] = T("r_parts_missing", loc);
-            } else {
-                notes[i] = T("r_parts_note", loc);
-                if (g_r31_useg == 0 && rows[i].tool) {
-                    for (const auto& mu : rows[i].tool->models)
-                        if (!mu.name.empty()) { notes[i] += " · " + mu.name; break; }
-                }
-            }
-            const float nh = (float)R31Wrap(notes[i], listW - 28.0f, loc, T_S9, 3).size() * 13.5f;
-            if (cr) expH[i] = nh + 10.0f;
-            else if (rows[i].has_parts) {
-                const int mls =
-                    (g_r31_useg == 0 && rows[i].tool) ? (int)rows[i].tool->models.size() : 0;
-                expH[i] = 5.0f * 48.0f + (float)mls * 16.0f + nh + 14.0f;
-            }
-            else expH[i] = nh + 10.0f;
-        }
-        float cardH = 26.0f + (float)rows.size() * 30.0f +
-                      (rows.empty() ? 28.0f : 0.0f) + 8.0f;
-        for (float e : expH) cardH += e;
-        R31Glass(dl, L, ly, listW, cardH, 13.0f);
-        R31Mid(dl, L + 14.0f, ly + 17.0f, T(cr ? "r_ledger_cr" : "r_ledger_tk", loc), loc,
-               k31Sec, T_S10B);   // 小计已由顶部双账 chips 扛，卡头只留账名
-        float ry = ly + 26.0f;
-        for (size_t i = 0; i < rows.size(); i++) {
-            const R31UseRow& r = rows[i];
-            if (i > 0) RHair(dl, L + 14.0f, ry, L + listW - 14.0f, k31Line);
-            if (r.tool) Brand31(dl, L + 14.0f, ry + 6.0f, 18.0f, r.id, loc);
-            else I31(dl, I31_LAYERS, L + 14.0f, ry + 7.0f, 14.0f, k31Muted);
-            const std::string nm = r.tool ? R31Agent(r.id, loc) : T("r_all_tools", loc);
-            DrawTextRun(dl, L + 38.0f, TextMid(ry + 15.0f, T_S12B, loc), nm, loc, k31Fg,
-                        T_S12B);
-            const std::string val = cr ? R31Num(r.credits) : R31Compact((double)r.tokens);
-            const float vw = TextWidth(val, loc, T_S13B);
-            const float vx = L + listW - 28.0f - vw;
-            DrawTextRun(dl, vx, TextMid(ry + 15.0f, T_S13B, loc), val, loc, k31Fg, T_S13B);
-            // v7 M14：今日段挂会话数徽标（今天摆出的会话数，Tool::rows 现成）。
-            if (g_r31_useg == 0 && r.tool) {
-                const int rn = today_rows_of(r.id);
-                if (rn > 0) {
-                    const std::string bd = std::to_string(rn);
-                    const float bx = L + 38.0f + TextWidth(nm, loc, T_S12B) + 9.0f;
-                    DrawTextRun(dl, bx, TextMid(ry + 15.0f, T_S9, loc), bd, loc, k31Faint, T_S9);
-                }
-            }
-            if (!cr && r.has_parts) {
-                const long den = r.parts.input + r.parts.cache_read;
-                if (den > 0) {
-                    const int pct =
-                        (int)std::lround((double)r.parts.cache_read / (double)den * 100.0);
-                    const std::string hit = RFmt(T("r_hit_short", loc), pct);
-                    const float hx = L + 38.0f + TextWidth(nm, loc, T_S12B) + 9.0f +
-                                     (g_r31_useg == 0 && r.tool
-                                          ? TextWidth(std::to_string(today_rows_of(r.id)),
-                                                      loc, T_S9) + 6.0f
-                                          : 0.0f);
-                    if (hx + TextWidth(hit, loc, T_S9) < vx - 8.0f)
-                        DrawTextRun(dl, hx, TextMid(ry + 15.0f, T_S9, loc), hit, loc, k31Muted,
-                                    T_S9);
-                }
-            }
-            // v7 M14：7 日火花线，贴着数值左侧（tokens 行才有；Credits 行不硬画）。
-            if (!cr) {
-                auto sit = spark7.find(r.id);
-                if (sit != spark7.end() && sit->second.size() >= 2) {
-                    const auto& tr = sit->second;
-                    double lo = 1e18, hi = -1e18;
-                    for (double v : tr) { lo = std::min(lo, v); hi = std::max(hi, v); }
-                    if (hi - lo < 1e-9) { lo -= 1.0; hi += 1.0; }
-                    const float sw = 44.0f, sh = 12.0f;
-                    const float sx = vx - 8.0f - sw;
-                    if (sx > L + 38.0f + TextWidth(nm, loc, T_S12B) + 30.0f) {
-                        for (size_t k = 1; k < tr.size(); k++) {
-                            const float xa = sx + (float)(k - 1) / (float)(tr.size() - 1) * sw;
-                            const float xb = sx + (float)k / (float)(tr.size() - 1) * sw;
-                            const float ya = sy0k(sh, tr[k - 1], lo, hi);
-                            const float yb = sy0k(sh, tr[k], lo, hi);
-                            dl->AddLine(ImVec2(xa, ry + 9.0f + ya),
-                                        ImVec2(xb, ry + 9.0f + yb), WithA(k31Blue, 170), 1.2f);
-                        }
-                    }
-                }
-            }
-            I31(dl, open[i] ? I31_DOWN : I31_RIGHT, L + listW - 16.0f, ry + 10.0f, 10.0f,
-                k31Faint);
-            AddHit(g_hits, L, ry, L + listW, ry + 30.0f, HIT_USEGROW, 2400 + (int)i, 0, loc, nm,
-                   0);
-            g_hits.back().key =
-                std::to_string(g_r31_useg) + ":" + (cr ? "cr" : "tk") + ":" + r.id;
-            ry += 30.0f;
-            if (open[i]) {
-                if (!cr && r.has_parts) {
-                    // v7 M14/M13：两列小格网格——命中环 + 四档 + 诚实格。
-                    // 厂商日志没写的字段画「—」并注明（不拿 0 冒充，也不估算）。
-                    const float valX = L + listW - 14.0f;
-                    const long pv[4] = {r.parts.input, r.parts.output, r.parts.cache_read,
-                                        r.parts.cache_write};
-                    const int den = (int)(r.parts.input + r.parts.cache_read);
-                    const int hitPct = den > 0 ? (int)std::lround(100.0 * (double)r.parts.cache_read /
-                                                                 (double)den)
-                                               : -1;
-                    const bool hasCr = r.tool && r.tool->has_credits && r.tool->credits > 0;
-                    struct MCell {
-                        const char* k;
-                        std::string v;
-                        const char* sub;
-                        bool blank;
-                        bool ring;
-                    };
-                    const MCell cells[10] = {
-                        {"r_cell_hit", hitPct >= 0 ? std::to_string(hitPct) + "%" : "",
-                         "", hitPct < 0, true},
-                        {"r_ctx_use", "", "r_sub_ctx", true, false},
-                        {"r_input", R31Compact((double)pv[0]), "", false, false},
-                        {"r_output", R31Compact((double)pv[1]), "", false, false},
-                        {"r_cache_read", R31Compact((double)pv[2]), "", false, false},
-                        {"r_cache_write", R31Compact((double)pv[3]), "", false, false},
-                        {"r_think", "", "r_sub_ctx", true, false},
-                        {"r_cell_cr", hasCr ? R31Num(r.tool->credits) : "", "r_sub_notlogged",
-                         !hasCr, false},
-                        {"r_cell_dur", "", "r_sub_nodur", true, false},
-                        {"r_cell_spd", "", "r_sub_noest", true, false},
-                    };
-                    int modelLines = (g_r31_useg == 0 && r.tool) ? (int)r.tool->models.size() : 0;
-                    const int cols = 2;
-                    const float cW = (listW - 28.0f - 12.0f) / 2.0f;
-                    for (int ci = 0; ci < 10; ci++) {
-                        const MCell& c = cells[ci];
-                        const int col = ci % cols, row = ci / cols;
-                        const float cx = L + 14.0f + (float)col * (cW + 12.0f);
-                        const float cyC = ry + (float)row * 48.0f;
-                        float lx = cx;
-                        if (c.ring) {
-                            // 进度环：13px 径、48 段平滑弧，从顶起顺时针到命中率——
-                            // 灰轨+蓝弧在小尺寸下会糊成一团，尺寸和段数照稿子的 12px/2.6 放大。
-                            const float rc = cx + 6.5f, ryc = cyC + 7.5f, rr = 6.0f;
-                            dl->AddCircle(ImVec2(rc, ryc), rr, WithA(k31Line, 140), 40, 2.4f);
-                            if (hitPct > 0) {
-                                dl->PathArcTo(ImVec2(rc, ryc), rr, -3.14159265f * 0.5f,
-                                              -3.14159265f * 0.5f +
-                                                  3.14159265f * 2.0f * (float)hitPct / 100.0f,
-                                              48);
-                                dl->PathStroke(WithA(k31Blue, 230), 0, 2.4f);
-                            }
-                            lx = cx + 17.0f;
-                        }
-                        DrawTextRun(dl, lx, TextMid(cyC + 6.0f, T_S9, loc), T(c.k, loc), loc,
-                                    k31Faint, T_S9);
-                        DrawTextRun(dl, cx, TextMid(cyC + 24.0f, T_S12B, loc),
-                                    c.v.empty() ? "—" : c.v.c_str(), loc,
-                                    c.blank ? k31Faint : k31Fg, T_S12B);
-                        if (c.sub && c.sub[0])
-                            DrawTextRun(dl, cx, TextMid(cyC + 40.0f, T_S9, loc), T(c.sub, loc),
-                                        loc, k31Muted, T_S9);
-                    }
-                    ry += 5.0f * 48.0f;
-                    // v7：逐模型行（名 + 本段 tokens）。命中率按模型日志没写，不编。
-                    if (g_r31_useg == 0 && r.tool && !r.tool->models.empty()) {
-                        for (const auto& mu : r.tool->models) {
-                            if (mu.name.empty()) continue;
-                            DrawTextRun(dl, L + 22.0f, TextMid(ry + 8.5f, T_S9, loc),
-                                        ClipToWidth(mu.name, listW - 120.0f, loc, T_S9), loc,
-                                        k31Muted, T_S9);
-                            const std::string mv = R31Compact((double)mu.tokens);
-                            DrawTextRun(dl, valX - TextWidth(mv, loc, T_S9), TextMid(ry + 8.5f, T_S9, loc),
-                                        mv, loc, k31Faint, T_S9);
-                            ry += 16.0f;
-                        }
-                        ry += 2.0f;
-                    }
-                    ry = R31DrawWrap(dl, notes[i], L + 14.0f, ry + 4.0f, listW - 28.0f, loc,
-                                     T_S9, 13.5f, k31Faint, 3);
-                    ry += 8.0f;
-                } else {
-                    ry = R31DrawWrap(dl, notes[i], L + 14.0f, ry + 2.0f, listW - 28.0f, loc,
-                                     T_S9, 13.5f, k31Faint, 3);
-                    ry += 8.0f;
-                }
-            }
-        }
-        if (rows.empty()) {
-            R31Mid(dl, L + 14.0f, ry + 12.0f,
-                   T(cr ? "r_ledger_none_cr" : "r_ledger_none_tk", loc), loc, k31Faint, T_S9);
-            ry += 28.0f;
-        }
-        return ly + cardH + 10.0f;
-    };
-    cy = drawLedger(cy, false);
-    cy = drawLedger(cy, true);
-    {
-        const std::string foot =
-            RFmt(T("r_ledger_foot", loc), (int)seg.tk.size(), (int)seg.cr.size());
-        cy = R31DrawWrap(dl, foot, L + 5.0f, cy + 2.0f, listW - 10.0f, loc, T_S9, 13.5f,
-                         k31Muted, 2) + 8.0f;
-    }
-    // v7：本段无活动的工具如实点名（有采集器、本段没消耗）。
-    if (!one) {
-        std::string idle;
-        for (const Tool& t : g_pd.tools) {
-            if (!t.present()) continue;
-            bool in = false;
-            for (const auto& r : seg.tk) if (r.id == t.id) { in = true; break; }
-            if (!in) for (const auto& r : seg.cr) if (r.id == t.id) { in = true; break; }
-            if (!in) {
-                if (!idle.empty()) idle += " · ";
-                idle += R31Agent(t.id, loc);
-            }
-        }
-        if (!idle.empty()) {
-            cy = R31DrawWrap(dl, T("r_seg_idle", loc) + idle, L + 5.0f, cy, listW - 10.0f, loc,
-                             T_S9, 13.5f, k31Faint, 2) + 6.0f;
-        }
-    }
-    // 柱图：粒度跟时段，量纲跟右上两颗 chip。tokens/Credits 各算各的。
-    {
-        const float chartH = 126.0f;
-        R31Glass(dl, L, cy, listW, chartH, 13.0f);
-        const float chipW = 48.0f, chipH = 18.0f, chipGap = 5.0f;
-        const float chipX = L + listW - 14.0f - (chipW * 2.0f + chipGap);
-        const std::string ttl = ClipToWidth(chart.title, chipX - L - 24.0f, loc, T_S10B);
-        R31Mid(dl, L + 14.0f, cy + 15.0f, ttl, loc, k31Sec, T_S10B);
-        for (int b = 0; b < 2; b++) {
-            const bool on = (g_r31_useg_unit == b);
-            const float bx = chipX + (float)b * (chipW + chipGap);
-            dl->AddRectFilled(ImVec2(bx, cy + 7.0f), ImVec2(bx + chipW, cy + 7.0f + chipH),
-                              on ? k31Sel : WithA(k31Sel, 0), 9.0f);
-            if (on)
-                dl->AddRect(ImVec2(bx + 0.5f, cy + 7.5f),
-                            ImVec2(bx + chipW - 0.5f, cy + 7.0f + chipH - 0.5f), k31Line, 9.0f, 0,
-                            1.0f);
-            const char* lab = b == 0 ? "tokens" : "Credits";
-            DrawTextRun(dl, bx + 8.0f, TextMid(cy + 16.0f, T_S9, loc), lab, loc,
-                        on ? k31Fg : k31Muted, T_S9);
-            AddHit(g_hits, bx, cy + 7.0f, bx + chipW, cy + 7.0f + chipH, HIT_USEGUNIT,
-                   2410 + b, b, loc, lab, b);
-        }
-        std::string peak;
-        if (chart.has_peak) {
-            const std::string pv = g_r31_useg_unit == 0
-                                       ? R31Compact(chart.peak) + " tokens"
-                                       : R31Num(chart.peak) + " Credits";
-            if (seg.seg <= 1)
-                peak = RFmt(T("r_chart_peak_hour", loc), chart.peak_hour, pv.c_str());
-            else
-                peak = RFmt(T("r_chart_peak_day", loc), R31MMDD(chart.peak_day).c_str(),
-                            pv.c_str());
+        } else DrawTextRight(dl, L + width - 4.0f, TextMid(cy + 12.0f, T_S11, loc),
+                            unit == 0 ? "tokens" : "Credits", loc, k31Sec, T_S11);
+        cy += 38.0f;
+        if (chart.no_hours || !chart.has_peak) {
+            cy = R31DrawWrap(dl, T("r_chart_nohours", loc), L + 4.0f, cy, width - 8.0f,
+                             loc, T_S11, 17.0f, k31Sec, 3) + 20.0f;
         } else {
-            peak = "—";
-        }
-        DrawTextRight(dl, L + listW - 14.0f, TextMid(cy + 33.0f, T_S9, loc), peak, loc, k31Muted,
-                      T_S9);
-        const int n = (int)chart.slots.size();
-        if (n > 0) {
-            const float gap = n > 24 ? 1.5f : 3.0f;
-            const float bw = std::max(2.0f, (listW - 28.0f - gap * (float)(n - 1)) / (float)n);
-            const float baseY = cy + 86.0f, maxH = 40.0f;
-            const double scale = chart.has_peak && chart.peak > 0 ? chart.peak : 1.0;
-            for (int i = 0; i < n; i++) {
-                const R31ChartSlot& s = chart.slots[i];
-                const float bx = L + 14.0f + (float)i * (bw + gap);
-                if (s.kind == R31_SLOT_BAR) {
-                    const float hh = std::fmax(3.0f, (float)(s.value / scale) * maxH);
-                    dl->AddRectFilled(ImVec2(bx, baseY - hh), ImVec2(bx + bw, baseY),
-                                      s.today ? WithA(k31Blue, 225) : WithA(k31Blue, 120), 2.5f);
-                } else if (s.kind == R31_SLOT_ZERO) {
-                    dl->AddRectFilled(ImVec2(bx, baseY - 2.0f), ImVec2(bx + bw, baseY),
-                                      WithA(k31Sec, 190), 1.0f);
-                } else {
-                    // 无记录：空心框，不拿 2px 底线冒充「记录了 0」。
-                    dl->AddRect(ImVec2(bx, baseY - 10.0f), ImVec2(bx + bw, baseY - 1.0f),
-                                WithA(k31Faint, 120), 2.0f, 0, 1.0f);
+            std::vector<R31ChartSlot> slots;
+            std::vector<std::string> labels;
+            int recordedDays = 0;
+            for (const auto& slot : chart.slots)
+                if (slot.kind != R31_SLOT_EMPTY) recordedDays++;
+            if (seg.seg == 5) {
+                std::map<long, R31ChartSlot> months;
+                long day = seg.from_key;
+                for (const auto& slot : chart.slots) {
+                    auto& month = months[day / 100];
+                    if (slot.kind != R31_SLOT_EMPTY) {
+                        month.value += slot.value;
+                        month.kind = month.value > 0 ? R31_SLOT_BAR : R31_SLOT_ZERO;
+                    }
+                    day = R31AddDays(day, 1);
                 }
-                if (!s.label.empty()) {
-                    const float tw = TextWidth(s.label, loc, T_S9);
-                    DrawTextRun(dl, bx + (bw - tw) * 0.5f, cy + 90.0f, s.label, loc,
-                                s.today ? k31Sec : k31Faint, T_S9);
+                for (const auto& [month, slot] : months) {
+                    slots.push_back(slot);
+                    labels.push_back(std::to_string(month % 100));
+                }
+            } else {
+                slots = chart.slots;
+                for (size_t i = 0; i < slots.size(); i++) {
+                    const size_t last = slots.size() - 1;
+                    labels.push_back(i == 0 ? (seg.seg <= 1 ? "00:00" : R31MMDD(seg.from_key))
+                                      : i == last ? (seg.seg <= 1 ? "23:00" : R31MMDD(seg.to_key))
+                                                  : "");
                 }
             }
-        }
-        std::string cnote;
-        if (g_r31_useg_unit == 0 && seg.tokens <= 0)
-            cnote = T("r_ledger_none_tk", loc);
-        else if (g_r31_useg_unit == 1 && seg.credits <= 0)
-            cnote = T("r_ledger_none_cr", loc);
-        else if (chart.no_hours)
-            cnote = T("r_chart_nohours", loc);
-        else
-            cnote = T("r_chart_empty_note", loc);
-        R31DrawWrap(dl, cnote, L + 14.0f, cy + 104.0f, listW - 28.0f, loc, T_S9, 13.5f,
-                    k31Muted, 1);
-        cy += chartH + 10.0f;
-    }
-    // 额度（v8·M15 重做）：两列卡，照稿——左 48px 环（双环＝外 5h / 内 周；单环＝活期
-    // 余额；没写的窗＝虚线环 + 「—」），右列 名 + 两行（窗口行右侧挂重置时刻，余额行挂
-    // 到期）。热色：已用 ≥75% 琥珀、≥90% 红。Claude 没接额度源 → 虚线双环 + 「未接线」。
-    {
-        std::vector<const Tool*> qs;
-        const Tool* claudeTool = nullptr;
-        for (const Tool& t : g_pd.tools) {
-            if (t.id == "claude" && t.available) claudeTool = &t;
-            if (inSrc(t) && R31QuotaAny(t)) qs.push_back(&t);
-        }
-        if (claudeTool && !R31QuotaAny(*claudeTool)) qs.push_back(claudeTool);   // 未接线卡垫底
-        if (!qs.empty()) {
-            const float cardW = (listW - 6.0f) / 2.0f;
-            const float cardH = 64.0f;
-            const int nRows = (int)((qs.size() + 1) / 2);
-            const float gridH = (float)nRows * 70.0f + 6.0f;
-            const float cardY0 = cy;
-            R31Glass(dl, L, cardY0, listW, gridH, 13.0f);
-            auto heatCol = [](int used, ImU32 base) {
-                if (used >= 90) return WithA(k31Red, 255);
-                if (used >= 75) return WithA(k31Amber, 255);
-                return base;
-            };
-            for (size_t qi = 0; qi < qs.size(); qi++) {
-                const Tool& t = *qs[qi];
-                const bool unwired = (&t == claudeTool) && !R31QuotaAny(t);
-                const float cx0 = L + (float)(qi % 2) * (cardW + 6.0f) + 4.0f;
-                const float cy0 = cardY0 + 6.0f + (float)(qi / 2) * (cardH + 6.0f);
-                dl->AddRectFilled(ImVec2(cx0, cy0), ImVec2(cx0 + cardW - 8.0f, cy0 + cardH),
-                                  k31Badge, 10.0f);
-                dl->AddRect(ImVec2(cx0 + 0.5f, cy0 + 0.5f),
-                            ImVec2(cx0 + cardW - 8.5f, cy0 + cardH - 0.5f), k31Line, 10.0f, 0,
-                            1.0f);
-                const bool staleF = R31QuotaStale(t.quota.five, now);
-                const bool staleW = R31QuotaStale(t.quota.week, now);
-                const bool f5 = t.quota.five.known, wk = t.quota.week.known;
-                const bool hasWin = f5 || wk;
-                const ap::Balance bal = R31BalanceOf(t);
-                const bool staleBal = bal.known && R31BalanceStale(bal, now);
-                const bool staleAny = (f5 && staleF) || (wk && staleW) || staleBal;
-                // 环（左，48px 盒）：稿 rc 21/14、描 4.4
-                const float rcx = cx0 + 32.0f, rcy = cy0 + 32.0f;
-                auto ringArc = [&](float r, float frac, ImU32 col) {
-                    if (frac < 0.0f) {
-                        for (int i = 0; i < 12; i++) {
-                            const float a0 = (float)i * (6.2831853f / 12.0f);
-                            dl->PathArcTo(ImVec2(rcx, rcy), r, a0,
-                                          a0 + (6.2831853f / 12.0f) * 0.52f, 8);
-                            dl->PathStroke(col, 0, 4.4f);
-                        }
-                        return;
-                    }
-                    dl->PathArcTo(ImVec2(rcx, rcy), r, -1.5707963f,
-                                  -1.5707963f + 6.2831853f * frac, 48);
-                    dl->PathStroke(col, 0, 4.4f);
-                };
-                dl->AddCircle(ImVec2(rcx, rcy), 21.0f, WithA(k31Fg, 15), 48, 4.4f);
-                char c1[8] = "—", c2[8] = "—";
-                ImU32 col1 = WithA(k31Fg, 140), col2 = WithA(k31Fg, 140);
-                if (unwired) {
-                    ringArc(21.0f, -1.0f, WithA(k31Fg, 60));
-                    ringArc(14.0f, -1.0f, WithA(k31Fg, 60));
-                } else if (hasWin) {
-                    const int u5 = f5 ? 100 - R31RemainPct(t.quota.five) : -1;
-                    const int uW = wk ? 100 - R31RemainPct(t.quota.week) : -1;
-                    if (f5) {
-                        ringArc(21.0f, (float)u5 / 100.0f, heatCol(u5, WithA(k31Blue, 255)));
-                        snprintf(c1, sizeof c1, "%d", u5);
-                        col1 = staleF ? k31Muted : heatCol(u5, k31Sec);
-                    }
-                    if (wk) {
-                        ringArc(14.0f, (float)uW / 100.0f, heatCol(uW, WithA(k31Violet, 255)));
-                        snprintf(c2, sizeof c2, "%d", uW);
-                        col2 = staleW ? k31Muted : heatCol(uW, k31Sec);
-                    }
-                } else if (bal.known) {
-                    const int bp = R31BalancePct(bal);
-                    if (bp > 0)
-                        ringArc(21.0f, (float)bp / 100.0f,
-                                bal.exceeded ? WithA(k31Red, 255) : WithA(k31Green, 255));
-                    snprintf(c1, sizeof c1, "%d", bp >= 0 ? bp : 0);
-                    col1 = staleBal ? k31Muted : (bal.exceeded ? k31Red : k31Sec);
+            double peak = 0;
+            for (const auto& slot : slots) peak = std::max(peak, slot.value);
+            const float step = (width - 8.0f) / (float)slots.size();
+            const float bw = step * 0.62f;
+            RHair(dl, L + 4.0f, cy + 65.0f, L + width - 4.0f, k31Line);
+            for (size_t i = 0; i < slots.size(); i++) {
+                const float cx = L + 4.0f + (float)i * step;
+                const auto& slot = slots[i];
+                if (slot.kind == R31_SLOT_BAR) {
+                    const float height = std::max(2.0f, (float)(slot.value / peak) * 62.0f);
+                    dl->AddRectFilled(ImVec2(cx + (step - bw) / 2, cy + 65.0f - height),
+                                      ImVec2(cx + (step + bw) / 2, cy + 65.0f),
+                                      slot.value == peak ? k31Blue : WithA(k31Blue, 120), 2.0f);
+                } else if (slot.kind == R31_SLOT_ZERO) {
+                    dl->AddCircleFilled(ImVec2(cx + step / 2, cy + 63.0f), 2.0f, k31Sec);
                 }
-                DrawTextRun(dl, rcx - TextWidth(c1, loc, T_S9) * 0.5f,
-                            TextMid(rcy - 5.0f, T_S9, loc), c1, loc, col1, T_S9);
-                DrawTextRun(dl, rcx - TextWidth(c2, loc, T_S9) * 0.5f,
-                            TextMid(rcy + 6.0f, T_S9, loc), c2, loc, col2, T_S9);
-                // 右列：名（+stale 点）/ 两行
-                const float tx0 = cx0 + 64.0f;
-                const float txR = cx0 + cardW - 16.0f;
-                R31Mid(dl, tx0, cy0 + 11.0f, R31Agent(t.id, loc), loc, k31Fg, T_S11B);
-                if (staleAny && !unwired)
-                    dl->AddCircleFilled(ImVec2(tx0 + TextWidth(R31Agent(t.id, loc), loc, T_S11B) + 7.0f,
-                                               cy0 + 10.0f), 2.5f, k31Amber, 10);
-                if (unwired) {
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc), T("r_unwired", loc),
-                                loc, k31Blue, T_S9);
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc), T("r_hook_hint", loc),
-                                loc, k31Muted, T_S9);
-                } else if (hasWin) {
-                    const int u5 = f5 ? 100 - R31RemainPct(t.quota.five) : -1;
-                    const int uW = wk ? 100 - R31RemainPct(t.quota.week) : -1;
-                    std::string r1 = std::string("5h ") + (f5 ? std::to_string(u5) + "%" : "—");
-                    std::string rs1 = "—";
-                    if (staleF) rs1 = T("r_last_reading", loc);
-                    else if (f5 && t.quota.five.resets_at > now)
-                        rs1 = R31LimitStamp(t.quota.five.resets_at);
-                    std::string r2 =
-                        std::string(T("r_week", loc)) + " " + (wk ? std::to_string(uW) + "%" : "—");
-                    std::string rs2 = "—";
-                    if (staleW) rs2 = T("r_last_reading", loc);
-                    else if (wk && t.quota.week.resets_at > now)
-                        rs2 = R31LimitStamp(t.quota.week.resets_at);
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc), r1, loc,
-                                heatCol(u5 < 0 ? 0 : u5, k31Sec), T_S9);
-                    DrawTextRight(dl, txR, TextMid(cy0 + 26.0f, T_S9, loc),
-                                  ClipToWidth(rs1, txR - tx0 - TextWidth(r1, loc, T_S9) - 8.0f,
-                                              loc, T_S9),
-                                  loc, k31Faint, T_S9);
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc), r2, loc,
-                                heatCol(uW < 0 ? 0 : uW, k31Sec), T_S9);
-                    DrawTextRight(dl, txR, TextMid(cy0 + 41.0f, T_S9, loc),
-                                  ClipToWidth(rs2, txR - tx0 - TextWidth(r2, loc, T_S9) - 8.0f,
-                                              loc, T_S9),
-                                  loc, k31Faint, T_S9);
-                } else if (bal.known) {
-                    std::string r1 = bal.exceeded
-                                         ? T("r_used_up", loc)
-                                         : (std::string(T("r_remaining", loc)) + " " +
-                                            R31Compact(bal.remaining) +
-                                            (bal.total > 0 ? "/" + R31Compact(bal.total) : "") +
-                                            (bal.unit.empty() ? "" : " " + bal.unit));
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 26.0f, T_S9, loc),
-                                ClipToWidth(r1, txR - tx0, loc, T_S9), loc,
-                                bal.exceeded ? k31Red : (staleBal ? k31Muted : k31Sec), T_S9);
-                    const std::string r2 =
-                        staleBal
-                            ? std::string(T("r_last_reading", loc)) + " " +
-                                  R31LimitStamp(bal.seen_at)
-                            : (bal.period_end > now
-                                   ? RFmt(T("r_ends_at", loc),
-                                          R31LimitStamp(bal.period_end).c_str())
-                                   : std::string(T("r_local_usage", loc)));
-                    DrawTextRun(dl, tx0, TextMid(cy0 + 41.0f, T_S9, loc),
-                                ClipToWidth(r2, txR - tx0, loc, T_S9), loc, k31Muted, T_S9);
+                if (!labels[i].empty()) {
+                    float lx = cx + (step - TextWidth(labels[i], loc, T_S10B)) / 2;
+                    lx = std::clamp(lx, L + 4.0f, L + width - 4.0f - TextWidth(labels[i], loc, T_S10B));
+                    R31Mid(dl, lx, cy + 80.0f, labels[i], loc, k31Sec, T_S10B);
                 }
-                // 点卡＝账户页（与旧行同一落点）
-                AddHit(g_hits, cx0, cy0, cx0 + cardW - 8.0f, cy0 + cardH, HIT_ACCOUNT31, 1110, 0,
-                       loc, t.name, 0);
-                g_hits.back().key = t.id;
             }
-            cy = cardY0 + gridH + 10.0f;
+            cy += 101.0f;
+            const std::string caption = R31SegLabel(seg.seg, loc) + " · " +
+                T(seg.seg <= 1 ? "r_hourly" : seg.seg == 5 ? "r_per_month" : "r_per_day", loc);
+            R31Mid(dl, L + 4.0f, cy, caption, loc, k31Sec, T_S11);
+            cy += 18.0f;
+            if (seg.seg >= 2) {
+                const std::string coverage = RFmt(T("r_chart_coverage", loc), recordedDays, (int)chart.slots.size());
+                cy = R31DrawWrap(dl, coverage, L + 4.0f, cy, width - 8.0f, loc, T_S11, 17.0f, k31Sec, 3);
+            }
+            cy += 15.0f;
         }
     }
-
-        // N5 等待镜子（本周）：闭合等待才有数——人没来不算闭合，不编。没有闭合整行不画。
-    if (g_pd.mirror_n > 0) {
-        const std::string avgS = Dur(g_pd.mirror_avg, loc);
-        const std::string maxS = Dur(g_pd.mirror_max, loc);
-        const std::string line = RFmt(T("r_mirror_line", loc), avgS.c_str(), maxS.c_str(),
-                                      (int)g_pd.mirror_n);
-        cy += 12.0f;
-        R31Mid(dl, L + 5.0f, cy + 8.0f, line, loc, k31Sec, T_S11B);
-        cy += 22.0f;
-        cy = R31DrawWrap(dl, T("r_mirror_note", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S9,
-                         14.0f, k31Faint, 2);
+    std::vector<const Tool*> quotas;
+    for (const auto& t : g_pd.tools)
+        if ((!one || t.id == g_r31_src) && R31QuotaAny(t)) quotas.push_back(&t);
+    // 没接额度源但今天在跑的也摆卡（11-13 用户点名 WorkBuddy/千问办公要出现）——
+    // 卡面诚实写「未接线」，不按用量编一个额度。
+    for (const auto& t : g_pd.tools)
+        if ((!one || t.id == g_r31_src) && !R31QuotaAny(t) &&
+            (t.rows > 0 || t.usage.total() > 0 || t.has_credits))
+            quotas.push_back(&t);
+    if (!quotas.empty()) {
+        cy += 8.0f;
+        R31Mid(dl, L + 4.0f, cy + 12.0f, T("r_account_limits", loc), loc, k31Fg, T_S14B);
+        cy += 28.0f;
+        cy = R31DrawWrap(dl, T("r_quota_current", loc), L + 4.0f, cy, width - 8.0f,
+                         loc, T_S11, 17.0f, k31Sec, 2) + 14.0f;
+        for (size_t i = 0; i < quotas.size(); i++)
+            cy = R31QuotaCard(dl, L, cy, width, *quotas[i], loc, now, (int)i, true) + 12.0f;
     }
-    // data-note：口径总说明留在最底，不跟任何一张卡的读数混在一行。
-    cy += 15.0f;
-    cy = R31DrawWrap(dl, T("r_data_note", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S10,
-                     17.5f, k31Muted, 3);
-    return cy + 16.0f;
+    if (getenv("AGENTPING_USAGE_AUDIT")) {
+        std::string state = "src=" + g_r31_src + " period=" + std::to_string(seg.seg) +
+            " tokens=" + std::to_string(seg.tokens) + " credits=" + std::to_string(seg.credits) +
+            " unit=" + std::to_string(unit) + " tools=";
+        for (const auto& r : rows) {
+            const auto models = R31ModelsFor(seg, r);
+            state += r.id + "/" + std::to_string(r.tokens) + "/" + std::to_string(r.credits) +
+                "/parts=" + std::to_string(r.has_parts) + "/models=" + std::to_string(models.rows.size()) + ",";
+        }
+        state += " quotas=";
+        for (const auto* t : quotas) state += t->id + ",";
+        state += " open=";
+        for (const auto& key : g_r31_useg_open) state += key + ",";
+        state += " model-open=";
+        for (const auto& key : g_r31_mexp) state += key + ",";
+        state += " sort=" + std::to_string(g_r31_msort);
+        static std::string last;
+        if (state != last) { printf("[usage-state] %s\n", state.c_str()); fflush(stdout); last = state; }
+    }
+    if (g_pd.mirror_n > 0 && !one) {
+        const std::string line = RFmt(T("r_mirror_line", loc), Dur(g_pd.mirror_avg, loc).c_str(),
+                                      Dur(g_pd.mirror_max, loc).c_str(), (int)g_pd.mirror_n);
+        cy = R31DrawWrap(dl, line, L + 4.0f, cy + 14.0f, width - 8.0f, loc, T_S11,
+                         18.0f, k31Sec, 3) + 6.0f;
+    }
+    return cy + 14.0f;
 }
 
 /// 用量页脚（809..850）。
@@ -3020,9 +2874,9 @@ static void R31UsageFoot(ImDrawList* dl, float x, float y, float w, int loc) {
     const std::string left = std::string(R31ModeText(loc)) + " " + sb;
     float tx = x + 19.0f;
     I31(dl, I31_CLOCK, tx, y + 20.5f - 6.0f, 12.0f, k31Muted);
-    DrawTextRun(dl, tx + 17.0f, TextMid(y + 20.5f, T_S9, loc), left, loc, k31Muted, T_S9);
-    DrawTextRight(dl, x + w - 19.0f, TextMid(y + 20.5f, T_S9, loc), T("r_not_billing", loc), loc,
-                  k31Muted, T_S9);
+    DrawTextRun(dl, tx + 17.0f, TextMid(y + 20.5f, T_S11, loc), left, loc, k31Sec, T_S11);
+    DrawTextRight(dl, x + w - 19.0f, TextMid(y + 20.5f, T_S11, loc), T("r_not_billing", loc), loc,
+                  k31Sec, T_S11);
 }
 
 // ── 权益领取（view 9）：整块滚动（162..809），页脚 41 ──────────────────────────
@@ -3239,106 +3093,6 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
     return y + ch;
 }
 
-// ── 模型（view 8，v8·M16）：跨工具单模型行 ─────────────────────────────────
-// 明细只有当日窗：账本（daily.txt）只落工具级，历史天没有分模型——这里不做六时段，
-// 注行把这件事说明白。行＝模型名 + 工具徽标 + 占同工具占比条 + tokens；按量排。
-// Credits 的模型级只有 Qoder 日志逐条带，本窗没接——那一格诚实留白，不按占比编。
-static float R31Models(ImDrawList* dl, float x, float y, float w, int loc) {
-    const float L = x + 16.0f;
-    const float listW = w - 32.0f;
-    float cy = y + 8.0f;
-    struct MRow {
-        const Tool* t;
-        std::string nm;
-        long tk;
-    };
-    std::vector<MRow> rows;
-    std::vector<const Tool*> have;
-    for (const Tool& t : g_pd.tools) {
-        if (t.models.empty()) continue;
-        have.push_back(&t);
-        for (const ap::ModelUse& m : t.models) rows.push_back({&t, m.name, m.tokens});
-    }
-    std::stable_sort(rows.begin(), rows.end(),
-                     [](const MRow& a, const MRow& b) { return a.tk > b.tk; });
-    // 工具筛选 chips：全部 + 有明细的那几家（v8 的筛选，能落地的先落这一层）
-    {
-        float fx = L;
-        auto chip = [&](const std::string& lab, bool on, int opt) {
-            const float tw2 = TextWidth(lab, loc, T_S10) + 18.0f;
-            dl->AddRectFilled(ImVec2(fx, cy + 2.0f), ImVec2(fx + tw2, cy + 22.0f),
-                              on ? k31Sel : WithA(k31Sel, 0), 8.0f);
-            if (on)
-                dl->AddRect(ImVec2(fx + 0.5f, cy + 2.5f), ImVec2(fx + tw2 - 0.5f, cy + 21.5f),
-                            k31Line, 8.0f, 0, 1.0f);
-            DrawTextRun(dl, fx + 9.0f, TextMid(cy + 12.0f, T_S10, loc), lab, loc,
-                        on ? k31Fg : k31Sec, T_S10);
-            AddHit(g_hits, fx, cy + 2.0f, fx + tw2, cy + 22.0f, HIT_MFILTER, 2600, opt, loc, lab,
-                   on ? 1 : 0);
-            return tw2 + 7.0f;
-        };
-        fx += chip(T("r_models_all", loc), g_r31_mfilter < 0, -1);
-        for (size_t i = 0; i < have.size(); i++)
-            fx += chip(R31Agent(have[i]->id, loc), g_r31_mfilter == (int)(i), (int)(i));
-        cy += 30.0f;
-    }
-    const Tool* sel =
-        (g_r31_mfilter >= 0 && g_r31_mfilter < (int)have.size()) ? have[(size_t)g_r31_mfilter]
-                                                                 : nullptr;
-    if (rows.empty() || (sel != nullptr && sel->models.empty())) {
-        R31Mid(dl, L, cy + 14.0f, T("r_models_none", loc), loc, k31Muted, T_S11);
-        cy += 30.0f;
-        R31DrawWrap(dl, T("r_models_note", loc), L, cy, listW, loc, T_S9, 13.5f, k31Muted, 2);
-        return cy + 20.0f;
-    }
-    // 行区：玻璃卡内一行 26px。占同工具条＝m.tk ÷ 该工具当日 tokens（同量纲内成立）。
-    {
-        float cardH = 10.0f;
-        for (const MRow& r : rows) {
-            if (sel && r.t != sel) continue;
-            cardH += 26.0f;
-        }
-        cardH += 6.0f;
-        const float cardY = cy;
-        R31Glass(dl, L, cardY, listW, cardH, 13.0f);
-        float ry = cardY + 5.0f;
-        for (const MRow& r : rows) {
-            if (sel && r.t != sel) continue;
-            DrawTextRun(dl, L + 12.0f, TextMid(ry + 12.0f, T_S11, loc),
-                        ClipToWidth(r.nm, L + listW * 0.42f - (L + 12.0f), loc, T_S11), loc,
-                        k31Fg, T_S11);
-            // 工具徽标：色点 + 名
-            dl->AddCircleFilled(ImVec2(L + listW * 0.46f, ry + 12.0f), 3.0f, r.t->hue, 10);
-            DrawTextRun(dl, L + listW * 0.46f + 8.0f, TextMid(ry + 12.0f, T_S9, loc),
-                        R31Agent(r.t->id, loc), loc, k31Muted, T_S9);
-            // 占同工具条
-            const float barX = L + listW * 0.62f, barW = listW * 0.16f;
-            dl->AddRectFilled(ImVec2(barX, ry + 10.5f), ImVec2(barX + barW, ry + 13.5f), k31Line,
-                              1.5f);
-            long own = 0;
-            for (const MRow& q : rows)
-                if (q.t == r.t) own += q.tk;
-            if (own > 0) {
-                const float shp = (float)((double)r.tk / (double)own);
-                dl->AddRectFilled(ImVec2(barX, ry + 10.5f),
-                                  ImVec2(barX + barW * shp, ry + 13.5f),
-                                  WithA(r.t->hue, 210), 1.5f);
-            }
-            DrawTextRight(dl, L + listW - 12.0f, TextMid(ry + 12.0f, T_S11B, loc),
-                          R31Compact((double)r.tk), loc, k31Fg, T_S11B);
-            ry += 26.0f;
-        }
-        cy = cardY + cardH;
-    }
-    {
-        std::string note = T("r_models_share", loc) + std::string(" · ");
-        note += T("r_models_note", loc);
-        R31DrawWrap(dl, note, L, cy + 4.0f, listW, loc, T_S9, 13.5f, k31Muted, 2);
-        cy += 18.0f + 4.0f * 13.5f;
-    }
-    return cy;
-}
-
 static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
     const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
     const float L = x + 16.0f, listW = w - 32.0f;
@@ -3425,203 +3179,28 @@ static void R31ClaimsFoot(ImDrawList* dl, float x, float y, float w, int loc) {
 
 // ── 账户（view 7）：整块滚动（54..789），页脚 61 ─────────────────────────────
 static float R31Account(ImDrawList* dl, float x, float y, float w, int loc) {
-    const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
     const Tool* t = R31ToolOf(g_r31_account);
-    const float L = x + 20.0f, cw2 = w - 40.0f;
-    float cy = y + 7.0f;
     if (!t || !t->present())
-        return R31Empty(dl, L, cy, cw2, 180.0f, T("r_no_account", loc),
+        return R31Empty(dl, x + 20.0f, y, w - 40.0f, 180.0f, T("r_no_account", loc),
                         T("r_no_account_hint", loc), nullptr, 0, loc);
-    // hero：pad 4 2 20，块高 66
-    {
-        Brand31(dl, L + 2.0f, cy + 4.0f, 42.0f, t->id, loc);
-        const float nx = L + 2.0f + 42.0f + 12.0f;
-        const std::string cap = T("r_today", loc);
-        const float capW = TextWidth(cap, loc, T_S10) + 18.0f;
-        const float capX = x + w - 22.0f - capW;
-        DrawTextRun(dl, nx, TextMid(cy + 15.5f, T_S20, loc),
-                    ClipToWidth(R31Agent(t->id, loc), capX - 8.0f - nx, loc, T_S20), loc, k31Fg,
-                    T_S20, -0.5f);
-        const std::string sub = t->quota.plan.empty() ? std::string(T("r_local_usage", loc))
-                                                      : t->quota.plan + " · " + T("r_personal", loc);
-        R31Mid(dl, nx, cy + 40.5f, sub, loc, k31Muted, T_S10);
-        dl->AddRect(ImVec2(capX + 0.5f, cy + 12.5f), ImVec2(capX + capW - 0.5f, cy + 37.5f),
-                    k31Line, 6.0f, 0, 1.0f);
-        DrawTextRun(dl, capX + 9.0f, TextMid(cy + 25.0f, T_S10, loc), cap, loc, k31Sec, T_S10);
-        cy += 66.0f;
+    const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
+    float cy = y + 12.0f;
+    if (R31QuotaAny(*t))
+        cy = R31QuotaCard(dl, x + 20.0f, cy, w - 40.0f, *t, loc, now, 0, false) + 20.0f;
+    const R31UseSeg seg = R31BuildUseSeg(0, true, t->id);
+    if (seg.tokens > 0 || seg.credits > 0) {
+        R31Mid(dl, x + 24.0f, cy + 12.0f, T("r_today_usage", loc), loc, k31Sec, T_S12B);
+        cy += 30.0f;
+        R31UseRow row;
+        row.id = t->id;
+        row.tool = t;
+        row.tokens = seg.tokens;
+        row.credits = seg.credits;
+        row.parts = t->usage;
+        row.has_parts = row.tokens > 0;
+        cy = R31ToolUsageCard(dl, x + 20.0f, cy, w - 40.0f, loc, seg, row, 0) + 12.0f;
     }
-    // account-total：pad 0 3 17
-    {
-        const float tx = L + 3.0f;
-        R31Mid(dl, tx, cy + 8.25f, T("r_total_usage", loc), loc, k31Muted, T_S11);
-        const std::string big = R31Compact((double)t->usage.total());
-        const float nw = TextWidth(big, loc, T_N39, -1.5f);
-        DrawTextRun(dl, tx, TextTop(cy + 21.0f, 44.85f, T_N39, loc), big, loc, k31Fg, T_N39, -1.5f);
-        DrawTextRun(dl, tx + nw + 7.0f, TextTop(cy + 47.85f, 18.0f, T_S12, loc), "tokens", loc,
-                    k31Muted, T_S12);
-        cy += 21.0f + 44.85f;
-        if (t->has_credits) {
-            cy += 8.0f;
-            R31Mid(dl, tx, cy + 8.25f, RFmt(T("r_consumed", loc), R31Num(t->credits).c_str()), loc,
-                   k31Sec, T_S11);
-            cy += 16.5f;
-        }
-        cy += 17.0f;
-    }
-    // 额度卡（整块仅当 quota 有已知窗）
-    const bool f5 = t->quota.five.known, wk = t->quota.week.known;
-    if (t->quota.known && (f5 || wk)) {
-        const bool staleF = R31QuotaStale(t->quota.five, now);
-        const bool staleW = R31QuotaStale(t->quota.week, now);
-        const bool stale = staleF || staleW;
-        float qh = 13.0f + 88.0f + 14.0f;
-        if (stale) qh += 4.0f + 13.5f;
-        const float qy = cy;
-        R31Glass(dl, L, qy, cw2, qh, 12.0f);
-        const float fullW = cw2 - 28.0f;
-        const float cellW = (fullW - 20.0f) / 2.0f;
-        const float py = qy + 13.0f;
-        if (f5 && wk) {
-            R31QuotaCell(dl, L + 14.0f, py, cellW, t->quota.five, "r_5h", loc, now);
-            R31QuotaCell(dl, L + 14.0f + cellW + 20.0f, py, cellW, t->quota.week, "r_week", loc, now);
-        } else if (f5) {
-            R31QuotaCell(dl, L + 14.0f, py, fullW, t->quota.five, "r_5h", loc, now);
-        } else {
-            R31QuotaCell(dl, L + 14.0f, py, fullW, t->quota.week, "r_week", loc, now);
-        }
-        if (stale)
-            R31DrawWrap(dl, T("r_stale_note", loc), L + 14.0f, py + 54.0f, fullW, loc, T_S9, 13.5f,
-                        k31Muted, 2);
-        cy = qy + qh;
-    }
-    // 余额卡：ZCode / Qoder 的「这一期还剩多少」，与滚动窗口不是一回事，单独一块。
-    {
-        const ap::Balance bal = R31BalanceOf(*t);
-        if (bal.known) {
-            const bool staleB = R31BalanceStale(bal, now);
-            if (f5 || wk) cy += 10.0f;
-            float bh = 13.0f + 88.0f + 14.0f;
-            if (staleB) bh += 4.0f + 13.5f;
-            const float by = cy;
-            R31Glass(dl, L, by, cw2, bh, 12.0f);
-            const float fullW = cw2 - 28.0f;
-            R31BalanceCell(dl, L + 14.0f, by + 13.0f, fullW, bal, loc, now);
-            if (staleB)
-                R31DrawWrap(dl, T("r_balance_stale_note", loc), L + 14.0f, by + 13.0f + 92.0f,
-                            fullW, loc, T_S9, 13.5f, k31Muted, 2);
-            cy = by + bh;
-        }
-    }
-    // 小时柱图：margin 19 3 20；块内 heading + 370×89 图 + 刻度
-    bool activityDrawn = false;
-    {
-        long hmax = 0;
-        for (int i = 0; i < 24; i++) hmax = std::fmax(hmax, (double)t->hourly[(size_t)i]);
-        if (hmax > 0) {
-            activityDrawn = true;
-            cy += 19.0f;
-            const float bx0 = L + 3.0f, bw2 = w - 46.0f;    // 370
-            R31Mid(dl, bx0, cy + 8.0f, T("r_activity", loc), loc, k31Sec, T_S11B);
-            DrawTextRight(dl, bx0 + bw2, TextMid(cy + 8.0f, T_S10, loc), T("r_hourly", loc), loc,
-                          k31Muted, T_S10);
-            cy += 28.0f;
-            const float chartH = 89.0f;
-            RHair(dl, bx0, cy + 29.0f, bx0 + bw2, k31LineSoft);
-            RHair(dl, bx0, cy + 58.0f, bx0 + bw2, k31LineSoft);
-            const float gap = 5.0f, barW = (bw2 - 23.0f * gap) / 24.0f;
-            int peak = 0;
-            for (int i = 1; i < 24; i++)
-                if (t->hourly[(size_t)i] > t->hourly[(size_t)peak]) peak = i;
-            for (int i = 0; i < 24; i++) {
-                if (t->hourly[(size_t)i] <= 0) continue;
-                float hgt = (float)t->hourly[(size_t)i] / (float)hmax * 88.0f;
-                if (hgt < 1.0f) hgt = 1.0f;
-                const float bxx = bx0 + (float)i * (barW + gap);
-                const ImU32 col = (i == peak) ? WithA(k31Blue, 230) : WithA(k31Sec, 71);
-                dl->AddRectFilled(ImVec2(bxx, cy + chartH - hgt), ImVec2(bxx + barW, cy + chartH),
-                                  col, 2.0f);
-            }
-            RHair(dl, bx0, cy + chartH - 1.0f, bx0 + bw2, k31Line);
-            cy += chartH + 7.0f;
-            {
-                const char* ticks[5] = {"00:00", "06:00", "12:00", "18:00", "23:00"};
-                float tws[5];
-                float totalW = 0.0f;
-                for (int i = 0; i < 5; i++) {
-                    tws[i] = TextWidth(ticks[i], loc, T_S8);
-                    totalW += tws[i];
-                }
-                const float g2 = (bw2 - totalW) / 4.0f;
-                float tx2 = bx0;
-                for (int i = 0; i < 5; i++) {
-                    DrawTextRun(dl, tx2, TextTop(cy, 10.0f, T_S8, loc), ticks[i], loc, k31Muted, T_S8);
-                    tx2 += tws[i] + g2;
-                }
-                cy += 10.0f;
-            }
-            cy += 20.0f;
-        }
-    }
-    // 拆解 2×2：格 188×72（无边距，奇数列右 1pt / 首行底 1pt）；全零整块不画
-    if (t->usage.total() > 0) {
-        if (!activityDrawn) cy += 19.0f;    // activity 缺席时补上它的 margin-top
-        const int order[4][2] = {{0, I31_DOWN}, {1, I31_UP}, {2, I31_LAYERS}, {3, I31_COPY}};
-        const long vals[4] = {t->usage.input, t->usage.output, t->usage.cache_read,
-                              t->usage.cache_write};
-        const char* keys4[4] = {"r_input", "r_output", "r_cache_read", "r_cache_write"};
-        const float gw = cw2, cw3 = gw / 2.0f;
-        const float gy = cy;
-        R31Glass(dl, L, gy, gw, 144.0f, 12.0f);
-        dl->AddRectFilled(ImVec2(L + cw3, gy), ImVec2(L + cw3 + 1.0f, gy + 144.0f), k31Line);
-        dl->AddRectFilled(ImVec2(L, gy + 72.0f), ImVec2(L + gw, gy + 73.0f), k31Line);
-        for (int ci = 0; ci < 4; ci++) {
-            const int col = ci % 2, row = ci / 2;
-            const float cxx = L + (float)col * cw3;
-            const float cyy = gy + (float)row * 72.0f;
-            I31(dl, order[ci][1], cxx + 14.0f, cyy + 15.0f, 15.0f, k31Muted);
-            DrawTextRun(dl, cxx + 38.0f, TextTop(cyy + 14.0f, 15.0f, T_S10, loc),
-                        T(keys4[ci], loc), loc, k31Muted, T_S10);
-            DrawTextRun(dl, cxx + 38.0f, TextMid(cyy + 45.5f, T_N20, loc),
-                        R31Compact((double)vals[ci]), loc, k31Fg, T_N20, -0.4f);
-        }
-        cy = gy + 144.0f;
-    }
-    // 按模型：toggle 46 高 + 展开列表
-    {
-        float tx = L + 4.0f;
-        I31(dl, I31_LAYERS, tx, cy + 16.0f, 14.0f, k31Sec);
-        tx += 14.0f + 8.0f;
-        tx = R31Mid(dl, tx, cy + 23.0f, T("r_by_model", loc), loc, k31Sec, T_S11);
-        {
-            char nb[8];
-            snprintf(nb, sizeof nb, "%d", (int)t->models.size());
-            DrawTextRun(dl, tx + 4.0f, TextMid(cy + 23.0f, T_S10, loc), nb, loc, k31Muted, T_S10);
-        }
-        I31(dl, g_r31_models ? I31_DOWN : I31_RIGHT, L + cw2 - 4.0f - 12.0f, cy + 17.0f, 12.0f,
-            k31Muted);
-        AddHit(g_hits, L, cy, L + cw2, cy + 46.0f, HIT_MODELSTOG, 1400, 0, loc,
-               T("r_by_model", loc), g_r31_models ? 1 : 0);
-        cy += 46.0f;
-        if (g_r31_models && !t->models.empty()) {
-            const float rowH = 35.5f;
-            const float lh2 = 4.0f + (float)t->models.size() * rowH;
-            R31Glass(dl, L, cy, cw2, lh2, 9.0f);
-            for (size_t m2 = 0; m2 < t->models.size(); m2++) {
-                const ap::ModelUse& mu = t->models[m2];
-                const float ry = cy + 2.0f + (float)m2 * rowH;
-                if (m2 > 0) RHair(dl, L + 12.0f, ry, L + cw2 - 12.0f, k31Line);
-                R31Mid(dl, L + 12.0f, ry + 17.75f, mu.name, loc, k31Sec, T_CHIP);
-                DrawTextRight(dl, L + cw2 - 12.0f, TextMid(ry + 17.75f, T_S11, loc),
-                              R31Compact((double)mu.tokens), loc, k31Fg, T_S11);
-            }
-            cy += lh2;
-        }
-    }
-    // data-note：r_model_note
-    cy += 15.0f;
-    cy = R31DrawWrap(dl, T("r_model_note", loc), L + 3.0f, cy, cw2 - 6.0f, loc, T_S10, 17.5f,
-                     k31Muted, 3);
-    return cy + 18.0f;
+    return cy + 12.0f;
 }
 /// 账户页脚（789..850）：一颗满宽「查看此工具的会话」。
 static void R31AccountFoot(ImDrawList* dl, float x, float y, float w, int loc) {
@@ -4249,24 +3828,8 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
         RCullHits(hits0, x + 16.0f, bodyTop, x + w - 16.0f, bodyBot);
         R31UsageFoot(dl, x, y + h - 41.0f, w, loc);
-        panelOut = std::fmin(endY - startY + 41.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
-    } else if (view == 8) {
-        // 模型（v8·M16）：与用量屏同一档滚动结构，页脚共用。
-        const float bodyTop = y + 162.0f, bodyBot = y + h - 41.0f;
-        g_bodyTop[view] = ImVec2(x + 16.0f, bodyTop);
-        g_bodyBot[view] = ImVec2(x + w - 16.0f, bodyBot);
-        g_bodyValid[view] = true;
-        if (g_scroll[view] > g_scrollMax[view]) g_scroll[view] = g_scrollMax[view];
-        const size_t hits0 = g_hits.size();
-        dl->PushClipRect(ImVec2(x + 16.0f, bodyTop), ImVec2(x + w - 16.0f, bodyBot), true);
-        const float startY = bodyTop - g_scroll[view];
-        const float endY = R31Models(dl, x, startY, w, loc);
-        dl->PopClipRect();
-        g_contentH[view] = endY - startY;
-        g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
-        RCullHits(hits0, x + 16.0f, bodyTop, x + w - 16.0f, bodyBot);
-        R31UsageFoot(dl, x, y + h - 41.0f, w, loc);
-        panelOut = std::fmin(endY - startY + 41.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
+        panelOut = std::clamp(endY - startY + 41.0f + 4.0f + (bodyTop - y),
+                              std::fmin(kSessMinH, kCanvasH), kCanvasH);
     } else if (view == 9) {
         // 与用量屏同一档：表头＋来源＋页签占到 162，页脚 41。
         const float bodyTop = y + 162.0f, bodyBot = y + h - 41.0f;
@@ -4299,7 +3862,8 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
         RCullHits(hits0, x + 20.0f, bodyTop, x + w - 20.0f, bodyBot);
         R31AccountFoot(dl, x, y + h - 61.0f, w, loc);
-        panelOut = std::fmin(endY - startY + 61.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
+        panelOut = std::clamp(endY - startY + 61.0f + 4.0f + (bodyTop - y),
+                              std::fmin(kSessMinH, kCanvasH), kCanvasH);
     } else if (view == 8) {
         R31ToolsFixed(dl, x, y, w, loc, tn);
         const float bodyTop = y + 166.0f, bodyBot = y + h;

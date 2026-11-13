@@ -255,7 +255,7 @@ struct Raw {
     double credits = 0;
     UsageParts usage;                  // 今天（或窗内）四档；tokens 与它同一口径
     std::string model;                 // 窗内用得最多的模型
-    std::map<std::string, long> models;
+    std::map<std::string, ModelUse> models;
     std::array<long, 24> hourly{};     // 本机 0–23 点
     std::array<double, 24> chourly{};  // 同小时的 Credits（Qoder 的 usage.credits 逐条有）
     long y_tokens = 0;      // 昨天同一个窗内的量，只喂表头的「较昨日」
@@ -420,8 +420,18 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
                 }
                 if (msg) {
                     if (const std::string* m = msg->str_at("model")) {
-                        if (!m->empty() && *m != "<synthetic>")
-                            r.models[*m] += p.total();
+                        if (!m->empty() && *m != "<synthetic>") {
+                            // v8·M16：分模型四档／Credits 逐条累加（日志真给了 model+usage）。
+                            ModelUse& mu = r.models[*m];
+                            mu.name = *m;
+                            mu.tokens += p.total();
+                            mu.parts.input += p.input;
+                            mu.parts.output += p.output;
+                            mu.parts.cache_read += p.cache_read;
+                            mu.parts.cache_write += p.cache_write;
+                            mu.credits += cr;
+                            mu.has_parts = true;
+                        }
                     }
                 }
             } else {
@@ -493,7 +503,7 @@ bool transcript_raw(const std::string& path, const FStat& st, double since, Raw&
     }
     long best = 0;
     for (const auto& kv : r.models)
-        if (kv.second > best) { best = kv.second; r.model = kv.first; }
+        if (kv.second.tokens > best) { best = kv.second.tokens; r.model = kv.first; }
 
     out = r;
     cache()[path] = Entry{st.mtime, st.size, since, r};
@@ -576,8 +586,23 @@ AgentSnap scan_transcript(const std::string& id, const std::string& name, const 
                 for (const auto& kv : r.models) {
                     bool found = false;
                     for (auto& m : snap.models)
-                        if (m.name == kv.first) { m.tokens += kv.second; found = true; break; }
-                    if (!found) snap.models.push_back({kv.first, kv.second});
+                        if (m.name == kv.first) {
+                            m.tokens += kv.second.tokens;
+                            m.parts.input += kv.second.parts.input;
+                            m.parts.output += kv.second.parts.output;
+                            m.parts.cache_read += kv.second.parts.cache_read;
+                            m.parts.cache_write += kv.second.parts.cache_write;
+                            m.credits += kv.second.credits;
+                            m.sessions += 1;
+                            m.has_parts = m.has_parts || kv.second.has_parts;
+                            found = true;
+                            break;
+                        }
+                    if (!found) {
+                        ModelUse mu = kv.second;
+                        mu.sessions = 1;
+                        snap.models.push_back(mu);
+                    }
                 }
                 for (int h = 0; h < 24; h++) {
                     snap.hourly[h] += r.hourly[h];
@@ -677,7 +702,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
         long prev_total = 0;
         UsageParts prev_parts, total_parts;
         std::array<long, 24> hourly{};
-        std::map<std::string, long> models;
+        std::map<std::string, ModelUse> models;
         std::string model;
         Quota quota;
 
@@ -765,7 +790,17 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
                     localtime_r(&tt, &tv);
                     hourly[tv.tm_hour] += delta.total();
                 }
-                if (!model.empty()) models[model] += (d >= since ? delta.total() : 0);
+                if (!model.empty() && d >= since && delta.total() > 0) {
+                    // v8·M16：Codex 分模型四档（token_count 增量归到当前 turn_context 的 model）。
+                    ModelUse& mu = models[model];
+                    mu.name = model;
+                    mu.tokens += delta.total();
+                    mu.parts.input += delta.input;
+                    mu.parts.output += delta.output;
+                    mu.parts.cache_read += delta.cache_read;
+                    mu.parts.cache_write += delta.cache_write;
+                    mu.has_parts = true;
+                }
 
                 const Json* rl = p->at("rate_limits");
                 if (rl) {
@@ -834,11 +869,25 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
         snap.usage.cache_write += total_parts.cache_write;
         for (int h = 0; h < 24; h++) snap.hourly[h] += hourly[h];
         for (const auto& kv : models) {
-            if (kv.second <= 0) continue;
+            if (kv.second.tokens <= 0) continue;
             bool found = false;
             for (auto& m : snap.models)
-                if (m.name == kv.first) { m.tokens += kv.second; found = true; break; }
-            if (!found) snap.models.push_back({kv.first, kv.second});
+                if (m.name == kv.first) {
+                    m.tokens += kv.second.tokens;
+                    m.parts.input += kv.second.parts.input;
+                    m.parts.output += kv.second.parts.output;
+                    m.parts.cache_read += kv.second.parts.cache_read;
+                    m.parts.cache_write += kv.second.parts.cache_write;
+                    m.sessions += 1;
+                    m.has_parts = m.has_parts || kv.second.has_parts;
+                    found = true;
+                    break;
+                }
+            if (!found) {
+                ModelUse mu = kv.second;
+                mu.sessions = 1;
+                snap.models.push_back(mu);
+            }
         }
         if (quota.five.seen_at > snap.quota.five.seen_at) snap.quota.five = quota.five;
         if (quota.week.seen_at > snap.quota.week.seen_at) snap.quota.week = quota.week;
@@ -852,7 +901,7 @@ AgentSnap scan_codex(const std::string& name, const std::string& root, double no
         long best = 0;
         std::string top_model;
         for (const auto& kv : models)
-            if (kv.second > best) { best = kv.second; top_model = kv.first; }
+            if (kv.second.tokens > best) { best = kv.second.tokens; top_model = kv.first; }
 
         Session s;
         s.id = "codex-" + sid;
@@ -2080,6 +2129,45 @@ Balance read_zcode_balance() {
     const std::string dir = home() + "/.zcode/v2/logs";
     std::vector<std::string> names = list_dir(dir);
     std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& c) { return a > c; });
+    const double now = (double)std::time(nullptr);
+    // ① 官方 MCP 额度（zcode.z.ai/api/v1/mcp/usage 的落日志响应）＝当前订阅的真额度：
+    //    total_usage used/limit/remaining，日刷新（next_refresh_at）。billing/balances
+    //    那路是「领的卡」清单——卡过期后该接口返回空清单，继续往旧日志捞只会捞到
+    //    过期快照（11-13 用户实拍：显示了已过期卡的 1.7亿/3亿）。MCP 有数就以它为准。
+    for (std::size_t i = 0; i < names.size() && i < 2; i++) {
+        const std::string mp = dir + "/" + names[i];
+        for (const std::string& ln : tail_lines(mp, "官方 MCP 额度响应", 3, 4ull << 20)) {
+            const std::size_t brace = ln.find('{');
+            if (brace == std::string::npos) continue;
+            Json rec;
+            if (!json_parse(ln.c_str() + brace, ln.size() - brace, rec)) continue;
+            const Json* body = rec.at("body");
+            if (!body || body->kind != Json::STR) continue;   // 响应体是二次编码的字符串
+            Json inner;
+            if (!json_parse(body->str.c_str(), body->str.size(), inner)) continue;
+            const Json* data = inner.at("data");
+            const Json* usage = data ? data->at("total_usage") : nullptr;
+            if (!usage || usage->kind != Json::OBJ) continue;
+            bool gr = false, gl = false, gn = false;
+            const long remaining = num_at(usage, "remaining", &gr);
+            const long limit = num_at(usage, "limit", &gl);
+            if (!gr || remaining < 0 || !gl || limit <= 0) continue;
+            b.known = true;
+            b.remaining = (double)remaining;
+            b.total = (double)limit;
+            b.unit = "credits";
+            if (const Json* lv = data->at("level"))
+                if (lv->kind == Json::STR) b.label = lv->str;
+            const long nref = num_at(data, "next_refresh_at", &gn);
+            if (gn && nref > 0) b.period_end = (double)nref;
+            b.seen_at = parse_bracket_local(ln);
+            b.exceeded = remaining <= 0;
+            b.source = mp;
+            return b;
+        }
+    }
+    // ② 领的卡（billing/balances）兜底：过期的卡不再顶数——到期时刻已过就整行作废，
+    //    继续往更旧的日志找也是同一张卡的更旧快照，直接两份日志都不认。
     for (std::size_t i = 0; i < names.size() && i < 2; i++) {
         const std::string p = dir + "/" + names[i];
         const FStat st = fst(p);
@@ -2136,6 +2224,9 @@ Balance read_zcode_balance() {
                 if (ge && e > 0) got.period_end = (double)e;
             }
             break;    // tail_lines 新的在前：第一条能给余额的就是当前读数
+        }
+        if (got.known && got.period_end > 0 && got.period_end < now) {
+            got = Balance{};   // 过期卡：不算数（11-13 实拍：09:00 到期的卡被顶成了当前余额）
         }
         c.mtime = st.mtime;
         c.size = st.size;
@@ -2830,6 +2921,14 @@ std::string daily_path() {
     if (!h || !*h) return "";
     return std::string(h) + "/Library/Application Support/AgentPing/daily.txt";
 }
+/// v8·M16：分模型日聚合，与 daily.txt 同目录同规矩（append-only、今天幂等重写、不回填）。
+std::string models_daily_path() {
+    const char* over = getenv("AGENTPING_STATE_DIR");
+    if (over && *over) return std::string(over) + "/models_daily.txt";
+    const char* h = getenv("HOME");
+    if (!h || !*h) return "";
+    return std::string(h) + "/Library/Application Support/AgentPing/models_daily.txt";
+}
 long day_key(double epoch) {
     std::time_t t = (std::time_t)epoch;
     std::tm tv;
@@ -2992,6 +3091,43 @@ void roll_daily(Snapshot& s) {
                   << " " << u.parts.input << " " << u.parts.output
                   << " " << u.parts.cache_read << " " << u.parts.cache_write
                   << " " << u.five_pct << " " << u.week_pct << "\n";
+    }
+    // v8·M16：分模型日聚合（models_daily.txt）。一行一天一工具一模型：
+    // day agent model tokens credits in out cr cw sessions has_parts。
+    // 只从落地日起积累、不回填；旧段没有分模型记录时界面如实说「只有工具级」，不拿工具总量拆假模型。
+    {
+        const std::string mp = models_daily_path();
+        std::map<long, std::map<std::string, std::map<std::string, ModelUse>>> mper;
+        if (!mp.empty()) {
+            std::ifstream mf(mp);
+            std::string line;
+            while (std::getline(mf, line)) {
+                if (line.empty()) continue;
+                std::istringstream is(line);
+                long d; std::string who, nm; ModelUse mu; long hp = 0;
+                if (is >> d >> who >> nm >> mu.tokens >> mu.credits >> mu.parts.input
+                       >> mu.parts.output >> mu.parts.cache_read >> mu.parts.cache_write
+                       >> mu.sessions >> hp) {
+                    if (d == today) continue;   // 今天整段重写
+                    mu.name = nm; mu.has_parts = hp != 0;
+                    mper[d][who][nm] = mu;
+                }
+            }
+        }
+        for (const auto& a : s.agents)
+            for (const auto& mu : a.models)
+                if (mu.tokens > 0 || mu.credits > 0) mper[today][a.id][mu.name] = mu;
+        if (!mp.empty()) {
+            std::ofstream mf(mp);
+            for (const auto& [d, m] : mper)
+                for (const auto& [who, mm] : m)
+                    for (const auto& [nm, mu] : mm)
+                        mf << d << " " << who << " " << nm << " " << mu.tokens << " " << mu.credits
+                           << " " << mu.parts.input << " " << mu.parts.output
+                           << " " << mu.parts.cache_read << " " << mu.parts.cache_write
+                           << " " << mu.sessions << " " << (mu.has_parts ? 1 : 0) << "\n";
+        }
+        s.model_daily = mper;
     }
     // 快照带整份按工具表（时段分工具消耗用）。8 天截断是旧版柱图留下的，v5 的月图
     // 要看到本月一号起，所以这里不截；历史行仍是 append-only，不回改。

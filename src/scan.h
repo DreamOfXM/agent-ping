@@ -23,6 +23,12 @@ struct UsageParts {
 struct ModelUse {
     std::string name;
     long tokens = 0;
+    /// v8·M16：单模型四档／Credits／会话数。只有日志逐条带 model+usage 的来源才填
+    /// （claude/qoder/codex/zcode/workbuddy）；填不出就保持 0／空，界面画「—」不编。
+    UsageParts parts;
+    double credits = 0;
+    long sessions = 0;
+    bool has_parts = false;
 };
 
 /// 账户级额度的一格。known=false ＝ 这个来源没给这一档，界面整格不画（不填 0）。
@@ -198,6 +204,9 @@ struct Snapshot {
     /// key＝agent id；全局量仍在 daily/week_tokens（旧格式行折算成 "*" 行读回）。
     std::map<std::string, DayUse> agent_today;
     std::map<long, std::map<std::string, DayUse>> agent_daily;   // day → agent → 量
+    /// v8·M16：分模型日聚合（day → agent → model → 量）。只从落地日起积累、不回填；
+    /// 某段没有分模型记录时模型视图如实降级到「只有工具级」，不拿工具总量按比例拆假模型。
+    std::map<long, std::map<std::string, std::map<std::string, ModelUse>>> model_daily;
     /// M2 趋势（估算）：每工具 5h 窗剩余%的进程内差分（最近 6 分钟读数），known=false 整行不画。
     /// 只算差分速率，不预测耗尽时刻——那是编的数。
     struct Trend { bool known = false; double pct_per_hour = 0; std::vector<double> recent; };

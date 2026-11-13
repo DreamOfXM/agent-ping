@@ -231,6 +231,22 @@ if(SQLITE3_LIB)
   target_link_libraries(alert_probe ${SQLITE3_LIB})
 endif()
 
+# v8·M16：分模型日聚合的纯逻辑自测（不链 ImGui/GLFW／不碰真状态目录）——
+# 「分模型合计==工具总量、今天幂等、历史不回改、没装的源不写 0 行」必须能在无窗口环境判。
+add_executable(usage_probe
+  src/usage_probe.cpp
+  src/jsonl.cpp
+  src/scan.cpp
+  ${OPEN_SRC}
+  ${NOTIFY_SRC}
+)
+target_include_directories(usage_probe PRIVATE src)
+target_link_libraries(usage_probe ${PLATFORM_LIBS} Threads::Threads)
+if(SQLITE3_LIB)
+  target_compile_definitions(usage_probe PRIVATE AP_HAVE_SQLITE=1)
+  target_link_libraries(usage_probe ${SQLITE3_LIB})
+endif()
+
 # 权益层的取证工具：只依赖 <ctime>/POSIX，不链 ImGui/GLFW/Cocoa ——
 # 「这一格本机到底有没有读数」必须能在没有窗口的环境里判，不然它就是不可验证的主张。
 add_executable(claims_probe
