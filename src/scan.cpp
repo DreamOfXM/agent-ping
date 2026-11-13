@@ -1190,6 +1190,33 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
             }
         sqlite3_finalize(st);
     }
+    // 按模型聚合（M16 模型视图的 zcode 份）：$.model 是对象 {providerID, modelID,
+    // variant}，取 modelID；窗口、主会话、input 做差都同上面的口径。只留前 8。
+    {
+        std::ostringstream q;
+        // 字段名两代并存：新行 modelId、旧行 modelID（11-13 实测），coalesce 兜住
+        q << "select coalesce(json_extract(data,'$.modelId'), json_extract(data,'$.modelID'),'?') m, "
+             "sum(max(coalesce(json_extract(data,'$.tokens.input'), 0) "
+             "- coalesce(json_extract(data,'$.tokens.cache.read'), 0), 0)"
+             " + coalesce(json_extract(data,'$.tokens.output'), 0)"
+             " + coalesce(json_extract(data,'$.tokens.cache.read'),0)"
+             " + coalesce(json_extract(data,'$.tokens.cache.write'),0)) t "
+             "from message mj join session s on mj.session_id = s.id"
+             " where coalesce(s.task_type,'') != 'subagent_child'"
+             " and json_extract(mj.data,'$.role') = 'assistant'"   // user 行也带 tokens 但没有 modelID
+             " and mj.time_created >= " << (long long)(since * 1000)
+          << " group by m having t > 0 order by t desc limit 8;";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q.str().c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const std::string m = col_text(st, 0);
+                const long t = (long)sqlite3_column_double(st, 1);
+                if (m.empty() || t <= 0) continue;
+                snap.models.push_back({m, t});
+            }
+            sqlite3_finalize(st);
+        }
+    }
     // 按本机小时分桶：一条 group by 就够了，别为 24 格再读一遍表。
     {
         std::ostringstream q;

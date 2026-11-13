@@ -28,6 +28,8 @@ static const ImU32 k31Sweep    = IM_COL32(255, 255, 255, 158);  // --sweep 62%
 static const ImU32 k31Blue     = IM_COL32(172, 208, 255, 255);  // --blue #ACD0FF
 static const ImU32 k31Red      = IM_COL32(255, 176, 155, 255);  // --red #FFB09B
 static const ImU32 k31Green    = IM_COL32(141, 227, 191, 255);  // --green #8DE3BF
+static const ImU32 k31Amber    = IM_COL32(255, 209, 143, 255);  // --amber #FFD18F（额度 ≥75%）
+static const ImU32 k31Violet   = IM_COL32(201, 184, 255, 255);  // --violet #C9B8FF（周环底色）
 static const ImU32 k31White    = IM_COL32(255, 255, 255, 255);
 
 // 面板底：稿子是 rgba(28,34,43,.46) 压在一张壁纸上再磨砂。这里没有壁纸也没有模糊，
@@ -1174,6 +1176,28 @@ static void R31Tabs(ImDrawList* dl, float x, float y, float w, int loc) {
         AddHit(g_hits, tx - 2.0f, y, tx + tw + 2.0f, y + 34.0f, HIT_TAB31, 600, 6, loc, t1,
                on ? 1 : 0);
         tx += tw + 18.0f;
+    }
+    {
+        // 模型（view 8，v8·M16）：跨工具单模型行。badge＝当日有明细的模型行数。
+        const bool on = (g_view == 8);
+        const std::string t3 = T("r_models_tab", loc);
+        const float tw = TextWidth(t3, loc, T_S12);
+        R31Mid(dl, tx, y + 17.0f, t3, loc, on ? k31Fg : k31Muted, on ? T_S12B : T_S12);
+        if (on) dl->AddRectFilled(ImVec2(tx, y + 32.0f), ImVec2(tx + tw, y + 34.0f), k31Sec);
+        tx += tw;
+        int mn = 0;
+        for (const Tool& t : g_pd.tools) mn += (int)t.models.size();
+        if (mn > 0) {
+            const std::string nb = std::to_string(mn);
+            const float bw = TextWidth(nb, loc, T_S9) + 10.0f;
+            dl->AddRectFilled(ImVec2(tx + 6.0f, y + 10.0f), ImVec2(tx + 6.0f + bw, y + 24.0f),
+                              k31Badge, 5.0f);
+            DrawTextRun(dl, tx + 11.0f, TextMid(y + 17.0f, T_S9, loc), nb, loc, k31Sec, T_S9);
+            tx += bw + 6.0f;
+        }
+        AddHit(g_hits, tx - 2.0f - ((mn > 0) ? 0.0f : 0.0f), y, tx + 2.0f, y + 34.0f, HIT_TAB31,
+               600, 8, loc, t3, on ? 1 : 0);
+        tx += 18.0f;
     }
     {
         // 权益：三家里只要有一家在磁盘上写过领取读数，这一格就有点；badge ＝ 真可领的条数，
@@ -2753,7 +2777,7 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
             DrawTextRun(dl, bx + 8.0f, TextMid(cy + 16.0f, T_S9, loc), lab, loc,
                         on ? k31Fg : k31Muted, T_S9);
             AddHit(g_hits, bx, cy + 7.0f, bx + chipW, cy + 7.0f + chipH, HIT_USEGUNIT,
-                   2410 + b, 0, loc, lab, b);
+                   2410 + b, b, loc, lab, b);
         }
         std::string peak;
         if (chart.has_peak) {
@@ -2825,7 +2849,7 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                     R31QuotaStale(tp->quota.five, now) || R31QuotaStale(tp->quota.week, now) ||
                     (tp->quota.balance.known && R31BalanceStale(tp->quota.balance, now));
                 const bool ex2 = tp->quota.balance.known && tp->quota.balance.exceeded;
-                cardH += 54.0f + ((ex2 || sw2) ? 14.0f : 0.0f);
+                cardH += 66.0f + ((ex2 || sw2) ? 14.0f : 0.0f);
             }
             const float cardY = cy;
             R31Glass(dl, L, cardY, listW, cardH, 13.0f);
@@ -2862,46 +2886,104 @@ static float R31Usage(ImDrawList* dl, float x, float y, float w, int loc) {
                            t.name, 0);
                     g_hits.back().key = t.id;
                 }
-                // 条行（22px）：窗口两列，或余额一列；百分比为剩余口径，stale 走灰。
+                // 环行（v8·M15）：双环＝外 5h / 内 周（弧长与中心数都是「已用」口径，
+                // ≥75% 琥珀、≥90% 红；重置时刻来自 resets_at，stale 换「上次读取」）。
+                // 单环＝活期余额（弧长与中心数都是「剩余」，exceeded 整环红）。
                 {
                     const float by = ry + 24.0f;
-                    const float barW = 52.0f, labW = 16.0f, pvW = 26.0f;
-                    float bx = L + 40.0f;
-                    auto drawBar = [&](const char* lab, bool known, int pct, bool stale) {
-                        DrawTextRun(dl, bx, TextMid(by + 8.0f, T_S9, loc), lab, loc, k31Faint,
-                                    T_S9);
-                        bx += labW;
-                        dl->AddRectFilled(ImVec2(bx, by + 4.0f), ImVec2(bx + barW, by + 7.0f),
-                                          k31Line, 2.0f);
-                        if (known && pct >= 0) {
-                            const float p = (float)pct / 100.0f;
-                            if (p > 0.0f)
-                                dl->AddRectFilled(
-                                    ImVec2(bx, by + 4.0f), ImVec2(bx + barW * p, by + 7.0f),
-                                    stale ? WithA(k31Faint, 115) : WithA(k31Blue, 230), 2.0f);
-                        }
-                        bx += barW + 4.0f;
-                        char vb[8];
-                        snprintf(vb, sizeof vb, known && pct >= 0 ? "%d%%" : "—", pct);
-                        DrawTextRun(dl, bx, TextMid(by + 8.0f, T_S9, loc), vb, loc,
-                                    known ? (stale ? k31Muted : k31Sec) : k31Faint, T_S9);
-                        bx += pvW + 10.0f;
+                    const float rcx = L + 40.0f, rcy = by + 20.0f;
+                    const float tx0 = L + 66.0f;
+                    const float txR = L + listW - 12.0f;
+                    auto heatCol = [](int used, ImU32 base) {
+                        if (used >= 90) return WithA(k31Red, 255);
+                        if (used >= 75) return WithA(k31Amber, 255);
+                        return base;
                     };
-                    if (f5) drawBar("5h", true, R31RemainPct(t.quota.five), staleF);
-                    if (wk) drawBar("周", true, R31RemainPct(t.quota.week), staleW);
-                    if (bal.known && !bal.exceeded) {
-                        std::string abs = R31Compact(bal.remaining);
-                        if (bal.total > 0) abs += "/" + R31Compact(bal.total);
-                        if (!bal.unit.empty()) abs += " " + bal.unit;
-                        DrawTextRun(dl, bx, TextMid(by + 8.0f, T_S9, loc),
-                                    ClipToWidth(abs, L + listW - 12.0f - bx, loc, T_S9), loc,
+                    if (hasWin) {
+                        const int u5 = 100 - R31RemainPct(t.quota.five);
+                        const int uW = 100 - R31RemainPct(t.quota.week);
+                        dl->AddCircle(ImVec2(rcx, rcy), 17.0f, k31Line, 40, 3.0f);
+                        dl->AddCircle(ImVec2(rcx, rcy), 10.5f, k31Line, 32, 3.0f);
+                        if (f5) {
+                            dl->PathArcTo(ImVec2(rcx, rcy), 17.0f, -1.5707963f,
+                                          -1.5707963f + 6.2831853f * (float)u5 / 100.0f, 40);
+                            dl->PathStroke(heatCol(u5, WithA(k31Blue, 235)), 0, 3.0f);
+                        }
+                        if (wk) {
+                            dl->PathArcTo(ImVec2(rcx, rcy), 10.5f, -1.5707963f,
+                                          -1.5707963f + 6.2831853f * (float)uW / 100.0f, 32);
+                            dl->PathStroke(heatCol(uW, WithA(k31Violet, 235)), 0, 3.0f);
+                        }
+                        char c1[8], c2[8];
+                        snprintf(c1, sizeof c1, "%d", u5);
+                        snprintf(c2, sizeof c2, "%d", uW);
+                        DrawTextRun(dl, rcx - TextWidth(c1, loc, T_S9) * 0.5f,
+                                    TextMid(rcy - 5.0f, T_S9, loc), c1, loc,
+                                    staleF ? k31Muted : k31Sec, T_S9);
+                        DrawTextRun(dl, rcx - TextWidth(c2, loc, T_S9) * 0.5f,
+                                    TextMid(rcy + 6.0f, T_S9, loc), c2, loc,
+                                    staleW ? k31Muted : k31Sec, T_S9);
+                        const std::string l1 =
+                            std::string("5h ") + std::to_string(u5) + "% · " +
+                            (staleF ? T("r_last_reading", loc)
+                                    : (t.quota.five.resets_at > now
+                                           ? RFmt(T("r_after_reset", loc),
+                                                  Dur(t.quota.five.resets_at - now, loc).c_str())
+                                           : std::string("—")));
+                        const std::string l2 =
+                            std::string(T("r_week", loc)) + " " + std::to_string(uW) + "% · " +
+                            (staleW ? T("r_last_reading", loc)
+                                    : (t.quota.week.resets_at > now
+                                           ? R31LimitStamp(t.quota.week.resets_at)
+                                           : std::string("—")));
+                        DrawTextRun(dl, tx0, TextMid(by + 8.0f, T_S9, loc),
+                                    ClipToWidth(l1, txR - tx0, loc, T_S9), loc,
+                                    heatCol(u5, k31Sec), T_S9);
+                        DrawTextRun(dl, tx0, TextMid(by + 26.0f, T_S9, loc),
+                                    ClipToWidth(l2, txR - tx0, loc, T_S9), loc,
+                                    heatCol(uW, k31Sec), T_S9);
+                    } else if (bal.known) {
+                        const int bp = R31BalancePct(bal);
+                        dl->AddCircle(ImVec2(rcx, rcy), 17.0f, k31Line, 40, 3.0f);
+                        if (bp > 0) {
+                            dl->PathArcTo(ImVec2(rcx, rcy), 17.0f, -1.5707963f,
+                                          -1.5707963f + 6.2831853f * (float)bp / 100.0f, 40);
+                            dl->PathStroke(bal.exceeded ? WithA(k31Red, 235) : WithA(k31Green, 235),
+                                           0, 3.0f);
+                        }
+                        char cb[8];
+                        snprintf(cb, sizeof cb, "%d", bp >= 0 ? bp : 0);
+                        DrawTextRun(dl, rcx - TextWidth(cb, loc, T_S9) * 0.5f,
+                                    TextMid(rcy, T_S9, loc), cb, loc,
                                     staleBal ? k31Muted : k31Sec, T_S9);
+                        std::string l1 = T("r_remaining", loc);
+                        if (bal.exceeded) {
+                            l1 = T("r_used_up", loc);
+                        } else {
+                            std::string abs = R31Compact(bal.remaining);
+                            if (bal.total > 0) abs += "/" + R31Compact(bal.total);
+                            if (!bal.unit.empty()) abs += " " + bal.unit;
+                            l1 += " " + abs;
+                        }
+                        const std::string l2 =
+                            staleBal
+                                ? std::string(T("r_last_reading", loc)) + " " +
+                                      R31LimitStamp(bal.seen_at)
+                                : (bal.period_end > now
+                                       ? RFmt(T("r_ends_at", loc),
+                                              R31LimitStamp(bal.period_end).c_str())
+                                       : std::string(T("r_local_usage", loc)));
+                        DrawTextRun(dl, tx0, TextMid(by + 8.0f, T_S9, loc),
+                                    ClipToWidth(l1, txR - tx0, loc, T_S9), loc,
+                                    bal.exceeded ? k31Red : (staleBal ? k31Muted : k31Sec), T_S9);
+                        DrawTextRun(dl, tx0, TextMid(by + 26.0f, T_S9, loc),
+                                    ClipToWidth(l2, txR - tx0, loc, T_S9), loc, k31Muted, T_S9);
                     }
                 }
                 // 注行（14px）：重置摘要 / 本段已耗 / stale / 用尽+接力——一行说得完的才上。
                 {
-                    const float ny = ry + 46.0f;
-                    float noteY = ry + 46.0f;
+                    const float ny = ry + 58.0f;
+                    float noteY = ry + 58.0f;
                     const std::string extra = staleAny ? T("r_stale_note", loc) : "";
                     const R31UseRow* tr = nullptr;
                     const R31UseRow* crr = nullptr;
@@ -3188,6 +3270,106 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
     g_hits.back().agent_id = c.vendor;
     g_hits.back().key = "claim:" + c.vendor;
     return y + ch;
+}
+
+// ── 模型（view 8，v8·M16）：跨工具单模型行 ─────────────────────────────────
+// 明细只有当日窗：账本（daily.txt）只落工具级，历史天没有分模型——这里不做六时段，
+// 注行把这件事说明白。行＝模型名 + 工具徽标 + 占同工具占比条 + tokens；按量排。
+// Credits 的模型级只有 Qoder 日志逐条带，本窗没接——那一格诚实留白，不按占比编。
+static float R31Models(ImDrawList* dl, float x, float y, float w, int loc) {
+    const float L = x + 16.0f;
+    const float listW = w - 32.0f;
+    float cy = y + 8.0f;
+    struct MRow {
+        const Tool* t;
+        std::string nm;
+        long tk;
+    };
+    std::vector<MRow> rows;
+    std::vector<const Tool*> have;
+    for (const Tool& t : g_pd.tools) {
+        if (t.models.empty()) continue;
+        have.push_back(&t);
+        for (const ap::ModelUse& m : t.models) rows.push_back({&t, m.name, m.tokens});
+    }
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const MRow& a, const MRow& b) { return a.tk > b.tk; });
+    // 工具筛选 chips：全部 + 有明细的那几家（v8 的筛选，能落地的先落这一层）
+    {
+        float fx = L;
+        auto chip = [&](const std::string& lab, bool on, int opt) {
+            const float tw2 = TextWidth(lab, loc, T_S10) + 18.0f;
+            dl->AddRectFilled(ImVec2(fx, cy + 2.0f), ImVec2(fx + tw2, cy + 22.0f),
+                              on ? k31Sel : WithA(k31Sel, 0), 8.0f);
+            if (on)
+                dl->AddRect(ImVec2(fx + 0.5f, cy + 2.5f), ImVec2(fx + tw2 - 0.5f, cy + 21.5f),
+                            k31Line, 8.0f, 0, 1.0f);
+            DrawTextRun(dl, fx + 9.0f, TextMid(cy + 12.0f, T_S10, loc), lab, loc,
+                        on ? k31Fg : k31Sec, T_S10);
+            AddHit(g_hits, fx, cy + 2.0f, fx + tw2, cy + 22.0f, HIT_MFILTER, 2600, opt, loc, lab,
+                   on ? 1 : 0);
+            return tw2 + 7.0f;
+        };
+        fx += chip(T("r_models_all", loc), g_r31_mfilter < 0, -1);
+        for (size_t i = 0; i < have.size(); i++)
+            fx += chip(R31Agent(have[i]->id, loc), g_r31_mfilter == (int)(i), (int)(i));
+        cy += 30.0f;
+    }
+    const Tool* sel =
+        (g_r31_mfilter >= 0 && g_r31_mfilter < (int)have.size()) ? have[(size_t)g_r31_mfilter]
+                                                                 : nullptr;
+    if (rows.empty() || (sel != nullptr && sel->models.empty())) {
+        R31Mid(dl, L, cy + 14.0f, T("r_models_none", loc), loc, k31Muted, T_S11);
+        cy += 30.0f;
+        R31DrawWrap(dl, T("r_models_note", loc), L, cy, listW, loc, T_S9, 13.5f, k31Muted, 2);
+        return cy + 20.0f;
+    }
+    // 行区：玻璃卡内一行 26px。占同工具条＝m.tk ÷ 该工具当日 tokens（同量纲内成立）。
+    {
+        float cardH = 10.0f;
+        for (const MRow& r : rows) {
+            if (sel && r.t != sel) continue;
+            cardH += 26.0f;
+        }
+        cardH += 6.0f;
+        const float cardY = cy;
+        R31Glass(dl, L, cardY, listW, cardH, 13.0f);
+        float ry = cardY + 5.0f;
+        for (const MRow& r : rows) {
+            if (sel && r.t != sel) continue;
+            DrawTextRun(dl, L + 12.0f, TextMid(ry + 12.0f, T_S11, loc),
+                        ClipToWidth(r.nm, L + listW * 0.42f - (L + 12.0f), loc, T_S11), loc,
+                        k31Fg, T_S11);
+            // 工具徽标：色点 + 名
+            dl->AddCircleFilled(ImVec2(L + listW * 0.46f, ry + 12.0f), 3.0f, r.t->hue, 10);
+            DrawTextRun(dl, L + listW * 0.46f + 8.0f, TextMid(ry + 12.0f, T_S9, loc),
+                        R31Agent(r.t->id, loc), loc, k31Muted, T_S9);
+            // 占同工具条
+            const float barX = L + listW * 0.62f, barW = listW * 0.16f;
+            dl->AddRectFilled(ImVec2(barX, ry + 10.5f), ImVec2(barX + barW, ry + 13.5f), k31Line,
+                              1.5f);
+            long own = 0;
+            for (const MRow& q : rows)
+                if (q.t == r.t) own += q.tk;
+            if (own > 0) {
+                const float shp = (float)((double)r.tk / (double)own);
+                dl->AddRectFilled(ImVec2(barX, ry + 10.5f),
+                                  ImVec2(barX + barW * shp, ry + 13.5f),
+                                  WithA(r.t->hue, 210), 1.5f);
+            }
+            DrawTextRight(dl, L + listW - 12.0f, TextMid(ry + 12.0f, T_S11B, loc),
+                          R31Compact((double)r.tk), loc, k31Fg, T_S11B);
+            ry += 26.0f;
+        }
+        cy = cardY + cardH;
+    }
+    {
+        std::string note = T("r_models_share", loc) + std::string(" · ");
+        note += T("r_models_note", loc);
+        R31DrawWrap(dl, note, L, cy + 4.0f, listW, loc, T_S9, 13.5f, k31Muted, 2);
+        cy += 18.0f + 4.0f * 13.5f;
+    }
+    return cy;
 }
 
 static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
@@ -4089,6 +4271,23 @@ static float R31Draw(ImDrawList* dl, float x, float y, float w, float h, int loc
         dl->PushClipRect(ImVec2(x + 16.0f, bodyTop), ImVec2(x + w - 16.0f, bodyBot), true);
         const float startY = bodyTop - g_scroll[view];
         const float endY = R31Usage(dl, x, startY, w, loc);
+        dl->PopClipRect();
+        g_contentH[view] = endY - startY;
+        g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));
+        RCullHits(hits0, x + 16.0f, bodyTop, x + w - 16.0f, bodyBot);
+        R31UsageFoot(dl, x, y + h - 41.0f, w, loc);
+        panelOut = std::fmin(endY - startY + 41.0f + 4.0f + (bodyTop - y), (float)(y + h) - y);
+    } else if (view == 8) {
+        // 模型（v8·M16）：与用量屏同一档滚动结构，页脚共用。
+        const float bodyTop = y + 162.0f, bodyBot = y + h - 41.0f;
+        g_bodyTop[view] = ImVec2(x + 16.0f, bodyTop);
+        g_bodyBot[view] = ImVec2(x + w - 16.0f, bodyBot);
+        g_bodyValid[view] = true;
+        if (g_scroll[view] > g_scrollMax[view]) g_scroll[view] = g_scrollMax[view];
+        const size_t hits0 = g_hits.size();
+        dl->PushClipRect(ImVec2(x + 16.0f, bodyTop), ImVec2(x + w - 16.0f, bodyBot), true);
+        const float startY = bodyTop - g_scroll[view];
+        const float endY = R31Models(dl, x, startY, w, loc);
         dl->PopClipRect();
         g_contentH[view] = endY - startY;
         g_scrollMax[view] = std::fmax(0.0f, g_contentH[view] - (bodyBot - bodyTop));

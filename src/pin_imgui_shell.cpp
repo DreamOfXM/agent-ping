@@ -653,6 +653,20 @@ static const Key kStr[] = {
                         "使用量と上限", "사용량 및 한도"}},
     // ── 权益领取（view 9）：全部字段来自各家写在自己磁盘上的读数 ──────────────
     {"r_claim_tab",    {"权益", "Rewards", "Vorteile", "Vantaggi", "特典", "혜택"}},
+    {"r_models_tab",   {"模型", "Models", "Modelle", "Modelli", "モデル", "모델"}},
+    {"r_models_note",  {"模型明细只有当日窗——账本只落工具级，历史天没有分模型。",
+                        "Per-model detail is today-window only; the ledger stores tool-level days.",
+                        "Modelldetails nur im heutigen Fenster; das Journal führt nur Werkzeugebenen.",
+                        "Dettagli per modello solo nella finestra di oggi; il registro è per strumento.",
+                        "モデル明細は当日窓のみ。台帳はツール単位でしか落ちていない。",
+                        "모델 상세는 당일 창만 제공합니다. 장부는 도구 단위로만 기록됩니다."}},
+    {"r_models_none",  {"今日没有模型明细。", "No per-model detail today.",
+                        "Heute keine Modelldetails.", "Nessun dettaglio per modello oggi.",
+                        "今日のモデル明細なし。", "오늘 모델 상세가 없습니다."}},
+    {"r_models_share", {"占同工具", "share of tool", "Anteil am Werkzeug",
+                        "quota sullo strumento", "同一ツール内比", "도구 내 비율"}},
+    {"r_models_all",   {"全部工具", "All tools", "Alle Werkzeuge", "Tutti gli strumenti",
+                        "全ツール", "모든 도구"}},
     {"r_claim_head",   {"本机读数能确认的领取", "Claims the local logs can confirm",
                         "Anforderungen laut lokalen Protokollen", "Riscossioni verificabili dai log locali",
                         "ローカルログで確認できる受取", "로컬 로그로 확인할 수 있는 수령"}},
@@ -2130,6 +2144,7 @@ static std::string g_r31_relay;            // 详情屏「任务接力」模式�
 static std::string g_r31_relay_brief;      // 接力简报原文（屏上预览/复制/导出共用这一份）
 static int g_r31_useg = 0;                 // M9 用量屏时段：0今天 1昨天 2本周 3本月
 static int g_r31_useg_unit = 0;            // v5 柱图量纲：0 tokens 1 Credits（两本账不合加）
+static int g_r31_mfilter = -1;            // v8·M16 模型屏工具筛选：-1 全部，否则 tools 下标
 static std::set<std::string> g_r31_useg_open;   // v5 账本里展开着的行：seg:ledger:tool
 static std::set<std::string> g_r31_subopen; // 展开着子对话列表的行（key），跨屏保留
 static bool g_lang_menu = false;            // 设置屏语言下拉是否展开
@@ -2666,7 +2681,9 @@ enum HitAct { HIT_OPEN = 0, HIT_READ = 1, HIT_LATER = 2, HIT_OPTION = 3,
               // M9 用量屏时间维度那排筛选（今天/昨天/本周/本月），opt＝段号。
               HIT_USEG = 47,
               // v5：柱图量纲切换（opt＝0 tokens / 1 Credits）与账本行展开（key＝seg:ledger:tool）。
-              HIT_USEGUNIT = 48, HIT_USEGROW = 49 };
+              HIT_USEGUNIT = 48, HIT_USEGROW = 49,
+              // v8·M16 模型屏的工具筛选 chips（opt＝g_pd.tools 下标，-1 全部）。
+              HIT_MFILTER = 50 };
 /// 设置屏上每一颗控件的身份。`Hit::row` 装这个，`Hit::opt` 装分段控件的取值。
 /// 顺序与设置屏从上到下一致，改了要把 alert.cpp 的 key 表一起看一遍。
 /// SC_DND 是 r20 那行「免打扰」：屏上叫免打扰、账上也叫 dnd，同向，所以不像
@@ -3862,6 +3879,10 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_r31_useg_unit = (h.opt == 1) ? 1 : 0;
             return;
         }
+        case HIT_MFILTER: {                   // v8·M16 模型屏工具筛选：-1 全部
+            g_r31_mfilter = h.opt;
+            return;
+        }
         case HIT_USEGROW: {                   // v5 账本行展开/收起；双击＝定位最近会话
             // 双击检测：同 key <400ms 两击 → 不翻展开，直接跳到该工具最近的一条会话
             //（2026-11-12 用户拍板：账本行双击要能定位，光展开不够）。
@@ -4029,7 +4050,7 @@ static void DoAction(const Hit& h, const ImVec2& at) {
             g_relayout = true;
             return;
         case HIT_TAB31:                         // 会话 / 用量 / 权益三个标签（opt＝目标屏）
-            g_tab = (h.opt == 6 || h.opt == 9) ? h.opt : 0;
+            g_tab = (h.opt == 6 || h.opt == 8 || h.opt == 9) ? h.opt : 0;
             GotoView(g_tab);
             return;
         case HIT_INFO31: {                      // 行上的 ⓘ：进详情，不动跳转
