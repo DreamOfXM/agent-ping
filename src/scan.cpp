@@ -8,6 +8,8 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <deque>
+#include <cmath>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
