@@ -6957,18 +6957,10 @@ static float EdgeMarkPx(const std::string& agent) {
 /// 一枚剪影：有位图按 SIZE 表画；没有的回退 11px/600 首字母（稿子 markHTML 的 fallback）。
 static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agent,
                      const std::string& initial, ImU32 ink) {
-    // codex 不走 TUI 点阵剪影：那枚 `>_` 既认不出是 OpenAI 的东西，点阵内容又只占
-    // 画布上半，画出来比别家小一圈（2026-11-13 用户实拍）。官方图标是桌面端
-    // app.icns 的蓝花云（本仓 kAgent31HexCodex31 已换成它的 64px 瓷贴）——
-    // 瓷贴满幅、带自家圆角，与其他 RGBA 瓷贴同路。
-    if (agent == "codex" && g_agent31TexCodex) {
-        const float px = EdgeMarkPx(agent);
-        dl->AddImageRounded((ImTextureID)g_agent31TexCodex,
-                            ImVec2(cx - px * 0.5f, cy - px * 0.5f),
-                            ImVec2(cx + px * 0.5f, cy + px * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
-                            IM_COL32_WHITE, px * 0.22f);
-        return;
-    }
+    // codex 的剪影 2026-11-13 重抠：OpenAI 结花（icon-chatgpt.icns 深色本体，最大连通域
+    // + 紧 bbox 方化）。用户拍板「OpenAI 是这个结花，且柱上其他几家都不是彩色的」——
+    // 蓝花瓷贴那版在这里扎眼，已撤；monochrome 剪影走回 MarkTex 主路，尺寸 16.7 对齐
+    // workbuddy（结花紧裁满幅，观感一致）。
     const ImU64 tex = MarkTex(agent);
     if (tex) {
         const float px = EdgeMarkPx(agent);
