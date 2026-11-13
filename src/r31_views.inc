@@ -2966,7 +2966,7 @@ static std::string R31ClaimNote(const ap::Claim& c, int loc) {
 static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::Claim& c, int loc,
                           double now, int idx) {
     const std::string note = R31ClaimNote(c, loc);
-    const int noteLines = std::max(1, (int)R31Wrap(note, w - 28.0f, loc, T_S10, 4).size());
+    const int noteLines = std::max(1, (int)R31Wrap(note, w - 28.0f, loc, T_S11, 4).size());
     const bool hasMetric = c.credit_known || c.streak_known;
     // 度量带 56：分隔线 1 + 线上留白 8 + 数字行框 44 + 线下留白 3。
     const float metricH = hasMetric ? 56.0f : 0.0f;
@@ -2981,7 +2981,7 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
     // 连一条读数都没有的卡不画时间轨：没有起点的轨道画出来就是「本机没有失效时刻」这句
     // 空话，而它真正的意思是「这台机器上根本没有这一家的领取读数」——那句话写在 note 里。
     const float trackH = c.known ? 30.0f : 0.0f;
-    const float ch = 53.0f + metricH + trackH + 8.0f + 15.0f * noteLines + footH + 13.0f;
+    const float ch = 53.0f + metricH + trackH + 8.0f + 17.0f * noteLines + footH + 13.0f;
     R31Glass(dl, x, y, w, ch, 13.0f);
     // 2026-10-30 用户：「双击为啥没反应呢」。这张卡原来一个命中区都没有（整屏只有表头
     // 那颗刷新可点），点哪儿都不会有反馈。挂上之后悬停要有，否则它看着就还是块说明文字。
@@ -2995,7 +2995,7 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
     {
         Brand31(dl, px, y + 14.0f, 24.0f, c.vendor, loc);
         const float nx = px + 24.0f + 9.0f;
-        R31Mid(dl, nx, y + 19.5f, R31Agent(c.vendor, loc), loc, k31Fg, T_S12B);
+        R31Mid(dl, nx, y + 20.5f, R31Agent(c.vendor, loc), loc, k31Fg, T_S13B);
         const char* st = !c.known ? T("r_claim_unknown", loc)
                      : c.ready ? T("r_claim_ready", loc)
                      : c.done ? T("r_claim_done", loc)
@@ -3012,7 +3012,7 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
             R31Mid(dl, nx, y + 38.0f,
                    RFmt(T("r_claim_seen", loc),
                         R31ClaimStamp(c.seen_at, !R31SameDay(c.seen_at, now)).c_str()),
-                   loc, k31Sec, T_S10);
+                   loc, k31Fg, T_S11);
         } else {
             // 出处那行只到文件名级别：家目录全称画在屏上，用户名就跟着进了截图。
             static const std::string home = [] {
@@ -3023,16 +3023,16 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
             if (!home.empty() && src.compare(0, home.size(), home) == 0)
                 src = "~" + src.substr(home.size());
             auto lines = R31Wrap(src, w - 100.0f, loc, T_S9, 1);
-            R31Mid(dl, nx, y + 38.0f, lines.empty() ? std::string() : lines.front(), loc, k31Muted,
-                   T_S9);
+            R31Mid(dl, nx, y + 38.0f, lines.empty() ? std::string() : lines.front(), loc, k31Sec,
+                   T_S10);
         }
         // 右侧这一行是「那家自己最后一次写盘是什么时候」。它和左边的读数时刻、页脚的
         // 扫描时刻是三件事：只有这一行能回答「我们没刷，还是那家没写」。拿不到 mtime
         // （文件不存在）就整行不画——占位会让「没有这一家」和「这一家从没写过」看着一样。
         if (c.log_mtime > 0) {
             const double age = now > c.log_mtime ? now - c.log_mtime : 0.0;
-            DrawTextRight(dl, x + w - 14.0f, TextMid(y + 38.0f, T_S9, loc),
-                          RFmt(T("r_claim_src", loc), Ago(age, loc).c_str()), loc, k31Muted, T_S9);
+            DrawTextRight(dl, x + w - 14.0f, TextMid(y + 38.0f, T_S10, loc),
+                          RFmt(T("r_claim_src", loc), Ago(age, loc).c_str()), loc, k31Sec, T_S10);
         }
     }
     float cy = y + 53.0f;
@@ -3077,13 +3077,13 @@ static float R31ClaimCard(ImDrawList* dl, float x, float y, float w, const ap::C
         R31ClaimTrack(dl, px, cy + 8.0f, w - 28.0f, c, loc, now);
         cy += 30.0f;
     }
-    R31DrawWrap(dl, note, px, cy + 2.0f, w - 28.0f, loc, T_S10, 15.0f, k31Sec, 4);
+    R31DrawWrap(dl, note, px, cy + 2.0f, w - 28.0f, loc, T_S11, 17.0f, k31Sec, 4);
     const std::string act = RFmt(T("r_claim_open_zone", loc), R31Agent(c.vendor, loc).c_str());
     if (can_open) {
         // 图标与「跳到了哪儿」那条回执用的是同一颗 I31_LAUNCH：屏上写的和回执画的是同一件事。
-        const float fy = cy + 2.0f + 15.0f * noteLines + 6.0f;
-        I31(dl, I31_LAUNCH, px, fy, 11.0f, k31Blue);
-        DrawTextRun(dl, px + 16.0f, TextMid(fy + 5.5f, T_S10, loc), act, loc, k31Blue, T_S10);
+        const float fy = cy + 2.0f + 17.0f * noteLines + 6.0f;
+        I31(dl, I31_LAUNCH, px, fy, 12.0f, k31Blue);
+        DrawTextRun(dl, px + 16.0f, TextMid(fy + 6.0f, T_S11, loc), act, loc, k31Blue, T_S11);
     }
     // 命中区登记在内容之后、卡片底部已知（ch），所以整张卡都是落点。agent_id 带的是采集器
     // id，DoAction 拿它去问平台层「这一路在本机有没有可唤的客户端」。
@@ -3111,7 +3111,7 @@ static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
     {
         cy += 17.0f;
         I31(dl, I31_CARD, L + 5.0f, cy + 2.0f, 12.0f, k31Fg);
-        R31Mid(dl, L + 5.0f + 17.0f, cy + 8.0f, T("r_claim_head", loc), loc, k31Fg, T_S13B);
+        R31Mid(dl, L + 5.0f + 17.0f, cy + 8.0f, T("r_claim_head", loc), loc, k31Fg, T_S14B);
         // 表头右侧那颗「刷新」：按下去立刻重读三家落盘的读数（DoAction 的 HIT_CLAIMREFRESH）。
         // 它拉不到任何网络上的东西——各家什么时候写盘由各家决定，这一颗只把「我们多久没读」
         // 清零，所以页脚那个时刻就是它给的唯一回执。
@@ -3129,8 +3129,8 @@ static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
                    loc, rl, 0);
         }
         cy += 21.0f;
-        cy = R31DrawWrap(dl, T("r_claim_legend", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S10,
-                         15.0f, k31Muted, 2) + 6.0f;
+        cy = R31DrawWrap(dl, T("r_claim_legend", loc), L + 5.0f, cy, listW - 10.0f, loc, T_S11,
+                         17.0f, k31Sec, 2) + 6.0f;
         // 上次弹横幅的时刻：回答「它到底有没有吵过我、什么时候」。跟上面那行「上次读到可领」
         // 不是一回事——那说的是券的出现时刻，这说的是我们的提醒动作。
         {
@@ -3139,9 +3139,9 @@ static float R31Claims(ImDrawList* dl, float x, float y, float w, int loc) {
                     ? RFmt(T("r_claim_alerted", loc),
                            Ago(now - (double)g_cfg.last_claim_at, loc).c_str())
                     : std::string(T("r_claim_never", loc));
-            I31(dl, I31_CLOCK, L + 5.0f, cy + 1.0f, 11.0f, k31Muted);
-            R31Mid(dl, L + 5.0f + 16.0f, cy + 7.0f, la, loc, k31Muted, T_S10);
-            cy += 18.0f;
+            I31(dl, I31_CLOCK, L + 5.0f, cy + 1.0f, 12.0f, k31Sec);
+            R31Mid(dl, L + 5.0f + 17.0f, cy + 8.0f, la, loc, k31Sec, T_S11);
+            cy += 20.0f;
         }
     }
     // 可领的排最前，其余按采集层的固定顺序（WorkBuddy / Qoder / ZCode）
