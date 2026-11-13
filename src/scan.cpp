@@ -2155,7 +2155,7 @@ Balance read_zcode_balance() {
             b.known = true;
             b.remaining = (double)remaining;
             b.total = (double)limit;
-            b.unit = "credits";
+            b.unit = "";   // 不标 credits：这是套餐的每日额度计数，不是 credits 池
             if (const Json* lv = data->at("level"))
                 if (lv->kind == Json::STR) b.label = lv->str;
             const long nref = num_at(data, "next_refresh_at", &gn);
