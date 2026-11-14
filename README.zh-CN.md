@@ -11,7 +11,7 @@
 
 好几个 agent 工具同时在跑，谁完成了、谁在等你授权，容易漏看。Agent Ping 读这些工具本来就会写的本地日志，把要你动手的那几条放到屏幕右缘，双击就回到那条会话。
 
-[![Agent Ping 动起来：等你队列、会话的原话提问、以及跳回会话（点图看原图）](docs/agent-ping-teaser.gif)](docs/agent-ping-teaser.gif)
+[![右缘窄柱：左边是屏幕上常驻的窄条，右边是指针移到边缘时立即展开的预览卡（点图看原图）](docs/fig-04-edge-zh.png)](docs/fig-04-edge-zh.png)
 
 ## 安装
 
@@ -77,8 +77,6 @@ brew uninstall agent-ping && brew untap DreamOfXM/agent-ping
 [![01 · 一屏看清谁在等你：左边总览，右边会话详情，圈里的编号对应图例（点图看原图）](docs/fig-01-queue-zh.png)](docs/fig-01-queue-zh.png)
 
 *本文图片由程序自己用演示数据渲染；「样例数据」标签是产品自己的。*
-
-[![04 · 右缘窄柱：左边常驻态，右边指针放上去立即展开的预览（点图看原图）](docs/fig-04-edge-zh.png)](docs/fig-04-edge-zh.png)
 
 **数字哪来的？** 每个数字都读自各家工具自己写的本地日志，不走账单接口、不换算成金额，日志里没有的那一格就空着。逐屏导览和每个数字的完整定义在[产品页](https://dreamofxm.github.io/agent-ping/)。
 

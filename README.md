@@ -14,7 +14,7 @@ which one is waiting for your approval. Agent Ping reads the local logs those
 tools already write, puts what needs you on the screen's right edge, and takes
 you back to the session on a double-click.
 
-[![Agent Ping in motion: the needs-you queue, a session's verbatim question, and the jump back (click for full size)](docs/agent-ping-teaser.gif)](docs/agent-ping-teaser.gif)
+[![The right-edge column: the resident strip on the left, and the peek card that opens the moment the pointer arrives on the right (click for full size)](docs/fig-04-edge-en.png)](docs/fig-04-edge-en.png)
 
 ## Install
 
@@ -99,8 +99,6 @@ double-click back into the session that asked.
 
 *All figures in this README are rendered by the app itself with demo data; the
 "sample data" tag is the product's own.*
-
-[![04 · Right-edge column: resident on the left, the peek card that opens the moment the pointer arrives on the right (click for full size)](docs/fig-04-edge-en.png)](docs/fig-04-edge-en.png)
 
 **Where do the numbers come from?** Every number is read off the local logs each
 tool writes itself, with no billing API and no conversion to money; a cell stays
