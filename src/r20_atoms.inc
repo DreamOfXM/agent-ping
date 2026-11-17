@@ -341,6 +341,7 @@ static void BrandUpload() {
     g_agent31TexQwenWork = RMakeTex(kAgent31N, kAgent31HexQwenWork31);
     g_agent31TexPi = RMakeTex(kAgent31N, kAgent31HexPi31);
     g_agent31TexCodex = RMakeTex(kAgent31N, kAgent31HexCodex31);
+    g_agent31TexDeepSeek = RMakeTex(kAgent31N, kAgent31HexDeepSeek31);
 }
 static void BrandMark(ImDrawList* dl, float x, float y, float s) {
     const ImU64 tex = (s > 24.0f) ? g_brandTex68 : g_brandTex36;
@@ -371,6 +372,7 @@ static void MarkUpload() {
     g_markTexClaude = RMakeMaskTex(kMarkN, kMarkHexClaude);
     g_markTexQwenWork = RMakeMaskTex(kMark2N, kMark2HexQwenWork);
     g_markTexCodex = RMakeMaskTex(kMark2N, kMark2HexCodex);
+    g_markTexDeepSeek = RMakeMaskTex(kMark2N, kMark2HexDeepSeek);
 }
 static ImU64 MarkTex(const std::string& agent) {
     return agent == "qoder" ? g_markTexQoder
@@ -378,7 +380,8 @@ static ImU64 MarkTex(const std::string& agent) {
            : agent == "zcode" ? g_markTexZCode
            : agent == "claude" ? g_markTexClaude
            : agent == "qwenworkcn" ? g_markTexQwenWork
-           : agent == "codex" ? g_markTexCodex : 0;
+           : agent == "codex" ? g_markTexCodex
+           : agent == "dsh" ? g_markTexDeepSeek : 0;
 }
 /// 一枚剪影，居中画在 (cx,cy)；没有位图的那家退回同墨的首字母，不许画成别的形状。
 static void MarkGlyph(ImDrawList* dl, float cx, float cy, const std::string& agent,
@@ -408,7 +411,8 @@ static void RAgentTile(ImDrawList* dl, float x, float y, float s, float r, ImU32
                     : (agent == "opencode") ? g_agent31TexOpenCode
                     : (agent == "qwenworkcn") ? g_agent31TexQwenWork
                     : (agent == "pi") ? g_agent31TexPi
-                    : (agent == "codex") ? g_agent31TexCodex : 0;
+                    : (agent == "codex") ? g_agent31TexCodex
+                    : (agent == "dsh") ? g_agent31TexDeepSeek : 0;
     if (tex) {
         dl->AddImageRounded((ImTextureID)tex, ImVec2(x, y), ImVec2(x + s, y + s),
                             ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, tintA), r);

@@ -2311,9 +2311,12 @@ static ImU64 g_agentTexQoder = 0, g_agentTexClaude = 0;
 /// r31 来源导轨要摆全部六路：后三路的官方像素存在 agent_icons31.h。
 static ImU64 g_agent31TexZCode = 0, g_agent31TexWorkBuddy = 0, g_agent31TexOpenCode = 0;
 static ImU64 g_agent31TexQwenWork = 0, g_agent31TexPi = 0, g_agent31TexCodex = 0;
+/// DeepSeek Harness 的瓷贴（品牌蓝底＋白鲸），与上面几路同一格式。
+static ImU64 g_agent31TexDeepSeek = 0;
 /// 右缘窄柱那几枚剪影（edge_marks.h，白底＋形状覆盖度当 alpha）：稿子的
 /// `.cv-a .g i{background-color:…;mask:url(...)}` 只有贴纹理才认，画的时候乘墨色。
 static ImU64 g_markTexQoder = 0, g_markTexWorkBuddy = 0, g_markTexZCode = 0, g_markTexClaude = 0, g_markTexQwenWork = 0, g_markTexCodex = 0;
+static ImU64 g_markTexDeepSeek = 0;
 // ── 自绘横幅：券到账时在桌面弹一块小卡（2026-10-30 用户拍板「我们自己画一块横幅窗」）──
 // 为什么不走系统横幅：那条通道先要过「系统设置→通知→Agent Ping」这道闸，本机实测档位是
 // 「被关着」，ap_notify_post 于是只返回 1（兜底出声）——人眼前什么都没有。自己画不欠授权。
@@ -7034,7 +7037,7 @@ static float EdgeMarkPx(const std::string& agent) {
          : agent == "zcode" ? 14.1f : agent == "claude" ? 16.0f
          : agent == "opencode" ? 15.0f : agent == "qwenworkcn" ? 15.0f
          : agent == "pi" ? 13.5f : agent == "codex" ? 16.7f
-         : agent == "dsh" ? 13.5f : 0.0f;
+         : agent == "dsh" ? 18.0f : 0.0f;
 }
 /// 一枚剪影：有位图按 SIZE 表画；没有的回退 11px/600 首字母（稿子 markHTML 的 fallback）。
 static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agent,
