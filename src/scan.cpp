@@ -2672,6 +2672,7 @@ Snapshot scan_all(double now_epoch) {
         snap.agents.push_back(scan_opencode("OpenCode", join(root, "opencode/opencode.db"), now, since));
     snap.agents.push_back(scan_pi("Pi", join(h, ".pi/agent/sessions"), now, since));
     snap.agents.push_back(scan_qwenwork("QwenWork", join(h, ".qwenworkcn/projects"), now, since));
+    snap.agents.push_back(scan_dsh("DeepSeek Harness", join(h, ".dsh/sessions"), now, since));
     }
 #endif
 
@@ -2897,6 +2898,170 @@ AgentSnap scan_pi(const std::string& name, const std::string& root, double now, 
             s.state = derive_envelope(last_voiced_user, stop, last_ts, now, inf, "toolUse", errored);
             s.inferred_wait = inf && s.state == ST_AWAIT;
             s.title = !title.empty() ? utf8_clip(title, 40, "…") : s.project;
+            snap.sessions.push_back(std::move(s));
+        }
+    }
+    std::sort(snap.sessions.begin(), snap.sessions.end(),
+              [](const Session& a, const Session& b) { return a.last_activity > b.last_activity; });
+    return snap;
+}
+
+// ── DeepSeek Harness：zstd 压过的 JSONL（2026-11-17 新增）────────────────────
+// ~/.dsh/sessions/<工作目录编码>/<session-uuid>/session.v<N>.jsonl.zstd
+//   首行 {"type":"session","version":N,"id":…,"createdAt":ms,"cwd":…}
+//   之后每条 {"type":"…","seq":N,"time":ms,"data":{…}}
+// 判态只看这四个成对事件，不做时间反推：
+//   approval/asked ↔ approval/decided   缺后者 ＝ 正挂着等你点（明确信号，不是我猜的）
+//   turn/start     ↔ turn/end           reason.kind: completed | error | …
+//   job/settled                         status: completed | failed（detail 里是 exit code）
+//   assistant/message                   data.usage 四档 camelCase
+// 时间戳一律 epoch 毫秒（json_date 见毫秒会自动归一）。
+AgentSnap scan_dsh(const std::string& name, const std::string& root, double now, double since) {
+    AgentSnap snap;
+    snap.id = "dsh"; snap.name = name; snap.client = "CLI";
+    FStat rs = fst(root);
+    if (!rs.ok || !rs.dir) return snap;      // 本机没装 Harness：不算「今天没活动」
+    snap.available = true;
+    const double cutoff = now - kDaysBack * 86400;
+
+    for (const std::string& proj : list_dir(root)) {
+        const std::string ppath = join(root, proj);
+        if (!fst(ppath).dir) continue;
+        for (const std::string& sid : list_dir(ppath)) {
+            const std::string sdir = join(ppath, sid);
+            if (!fst(sdir).dir) continue;
+            // 同一目录下还会有 session.lock 等伴生文件，只认 session*.jsonl[.zstd]
+            std::string file;
+            for (const std::string& f : list_dir(sdir)) {
+                if (f.compare(0, 7, "session") != 0) continue;
+                if (f.find(".jsonl") == std::string::npos) continue;
+                file = join(sdir, f);
+                break;
+            }
+            if (file.empty()) continue;
+            FStat st = fst(file);
+            if (!st.ok || st.mtime < cutoff) continue;
+
+            const bool packed = file.size() > 5 && file.compare(file.size() - 5, 5, ".zstd") == 0;
+            auto recs = packed ? tail_records_zstd(file) : tail_records(file);
+            if (recs.empty()) continue;
+
+            Session s;
+            s.id = "dsh-" + sid;
+            double last_ts = 0, first_ts = 0;
+            std::string cwd, title, last_turn_reason;
+
+            // cwd 只写在首行 {"type":"session",…,"cwd":…}，尾读够不着：单独解一次开头。
+            // 拿不到就退回「目录名」，不把编码后的那串当作项目名去展示。
+            if (packed) {
+                const std::string head = text_head_zstd(file, 4096);
+                const std::size_t nl = head.find('\n');
+                if (!head.empty()) {
+                    Json hj;
+                    const std::size_t len = nl == std::string::npos ? head.size() : nl;
+                    if (json_parse(head.data(), len, hj))
+                        if (const std::string* c = hj.str_at("cwd")) cwd = *c;
+                }
+            }
+
+            int turns = 0;
+            bool errored = false, turn_open = false;
+            std::vector<std::string> pending;          // 未决审批的 id
+            std::string ask_tool, ask_reason;
+            double ask_at = 0;
+
+            auto num_at = [](const Json* o, const char* k) -> long {
+                if (!o) return 0;
+                const Json* v = o->at(k);
+                return (v && v->kind == Json::NUM) ? (long)v->num : 0;
+            };
+
+            for (const Json& rec : recs) {
+                double d = 0;
+                if (const Json* tv = rec.at("time")) d = json_date(*tv);   // 毫秒 → 秒
+                if (d > last_ts) last_ts = d;
+                if (d > 0 && (first_ts == 0 || d < first_ts)) first_ts = d;
+
+                const std::string* ty = rec.str_at("type");
+                if (!ty) continue;
+                const std::string& T = *ty;
+                const Json* data = rec.at("data");
+
+                if (T == "session") {
+                    if (const std::string* c = rec.str_at("cwd")) cwd = *c;
+                } else if (T == "session/title") {
+                    if (data)
+                        if (const std::string* x = data->str_at("title")) title = *x;
+                } else if (T == "user/message") {
+                    if (d > 0 && d >= since) turns++;
+                } else if (T == "turn/start") {
+                    turn_open = true;
+                    last_turn_reason.clear();
+                } else if (T == "turn/end") {
+                    turn_open = false;
+                    if (data)
+                        if (const Json* r = data->at("reason"))
+                            if (const std::string* k = r->str_at("kind")) last_turn_reason = *k;
+                } else if (T == "approval/asked") {
+                    if (data)
+                        if (const std::string* id = data->str_at("id")) {
+                            pending.push_back(*id);
+                            if (const std::string* tn = data->str_at("toolName")) ask_tool = *tn;
+                            if (const std::string* why = data->str_at("reason")) ask_reason = *why;
+                            ask_at = d;
+                        }
+                } else if (T == "approval/decided") {
+                    if (data)
+                        if (const std::string* id = data->str_at("id"))
+                            for (std::size_t k = 0; k < pending.size(); k++)
+                                if (pending[k] == *id) { pending.erase(pending.begin() + (long)k); break; }
+                } else if (T == "job/settled") {
+                    if (data)
+                        if (const std::string* stt = data->str_at("status"))
+                            if (*stt != "completed") errored = true;
+                } else if (T == "request/header") {
+                    // 模型只在请求头里说，assistant/message 不带
+                    if (data)
+                        if (const Json* hd = data->at("header"))
+                            if (const Json* cfg = hd->at("config"))
+                                if (const std::string* m = cfg->str_at("model")) s.model = *m;
+                } else if (T == "assistant/message") {
+                    if (data)
+                        if (const Json* u = data->at("usage")) {
+                            if (d == 0 || d >= since) {
+                                s.usage.input += num_at(u, "inputTokens");
+                                s.usage.output += num_at(u, "outputTokens");
+                                s.usage.cache_read += num_at(u, "cacheReadTokens");
+                                s.usage.cache_write += num_at(u, "cacheWriteTokens");
+                            }
+                        }
+                }
+            }
+
+            s.last_activity = last_ts;
+            s.first_activity = (first_ts >= since) ? first_ts : 0;
+            s.cwd = cwd;
+            s.project = cwd.empty() ? proj : basename_last(cwd);
+            s.turns = turns;
+            s.tokens = s.usage.total();
+
+            // 判态优先级：挂着等你点 > 明确失败 > 回合未收 > 收尾后 20 分钟内算「该你看了」
+            const bool stale = last_ts > 0 && now - last_ts >= kNeedsUserStale;
+            if (!pending.empty()) {
+                s.state = ST_NEEDS_USER;
+                s.await_since = ask_at;
+                s.await_src = QS_LOG;
+                s.tool = ask_tool;
+                if (!ask_reason.empty()) s.question = utf8_clip(ask_reason, 120, "…");
+            } else if (errored || last_turn_reason == "error") {
+                s.state = ST_FAILED;
+            } else if (turn_open) {
+                s.state = stale ? ST_RESTING : ST_WORKING;
+            } else {
+                s.state = stale ? ST_RESTING : ST_NEEDS_USER;
+            }
+            s.title = !title.empty() ? utf8_clip(title, 40, "…")
+                                     : (!s.project.empty() ? s.project : "DeepSeek Harness");
             snap.sessions.push_back(std::move(s));
         }
     }

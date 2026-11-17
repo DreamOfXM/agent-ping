@@ -34,6 +34,17 @@ double json_date_at(const Json& rec, const char* key);
 std::vector<Json> tail_records(const std::string& path,
                                std::size_t max_bytes = 128 * 1024);
 
+/// 同上，但文件是 zstd 压过的（DeepSeek Harness 的会话就是这个形状）。
+/// zstd 不支持随机定位，所以整份先解压再只取尾部 max_bytes，避免把小文件也全量解析。
+/// 解压失败或这不是一帧合法 zstd 就返回空——调用方按「这一路没有数据」处理，不猜。
+std::vector<Json> tail_records_zstd(const std::string& path,
+                                    std::size_t max_bytes = 128 * 1024);
+
+/// 解压后的头部若干字节。dsh 的 cwd 只写在文件第一行，而那份会话可能上百 KB，
+/// 截尾读法够不着它——单独解一次开头就够了（zstd 本来也只能从头解）。
+/// 没有 zstd 支持时返回空串。
+std::string text_head_zstd(const std::string& path, std::size_t max_bytes = 8192);
+
 /// 只读头部：首条 user 正文的首行（当会话标题）+ 首条记录的 cwd。
 struct HeadFacts {
     std::string cwd;

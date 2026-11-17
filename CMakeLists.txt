@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(agent_ping_cpp VERSION 0.1.13 LANGUAGES CXX)
+project(agent_ping_cpp VERSION 0.1.14 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,25 @@ endif()
 # sqlite3 只服务 ZCode / WorkBuddy 两路；找不到就退化成「只读 JSONL」，
 # 而不是整个编译断掉 —— 采集层用 AP_HAVE_SQLITE 把这两路圈起来了。
 find_library(SQLITE3_LIB sqlite3)
+
+# zstd 只服务 DeepSeek Harness 一路（它的会话是 session.v*.jsonl.zstd）。
+# 同样是「找不到就少一路」而不是编译中断：AP_HAVE_ZSTD 圈住那一支，界面显示未接线。
+# macOS 上优先取 brew 的 .a，跟 freetype 一个道理——产物不该依赖 /opt/homebrew 里的 dylib。
+if(APPLE)
+  find_file(AP_ZSTD_A NAMES libzstd.a
+            HINTS /opt/homebrew/lib /usr/local/lib /opt/homebrew/opt/zstd/lib)
+  find_path(AP_ZSTD_INC zstd.h HINTS /opt/homebrew/include /usr/local/include
+            /opt/homebrew/opt/zstd/include)
+  if(AP_ZSTD_A AND AP_ZSTD_INC)
+    set(ZSTD_LIB ${AP_ZSTD_A})
+    set(ZSTD_INC ${AP_ZSTD_INC})
+    message(STATUS "dsh：静态链接 libzstd")
+  endif()
+endif()
+if(NOT ZSTD_LIB)
+  find_library(ZSTD_LIB zstd)
+  find_path(ZSTD_INC zstd.h)
+endif()
 
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui)
 set(IMGUI_SRC
@@ -226,6 +245,7 @@ add_executable(alert_probe
   src/scan.cpp
   ${OPEN_SRC}
   ${NOTIFY_SRC}
+  ${CREDITS_SRC}
 )
 target_include_directories(alert_probe PRIVATE src)
 target_link_libraries(alert_probe ${PLATFORM_LIBS} Threads::Threads)
@@ -242,6 +262,7 @@ add_executable(usage_probe
   src/scan.cpp
   ${OPEN_SRC}
   ${NOTIFY_SRC}
+  ${CREDITS_SRC}
 )
 target_include_directories(usage_probe PRIVATE src)
 target_link_libraries(usage_probe ${PLATFORM_LIBS} Threads::Threads)
@@ -321,4 +342,16 @@ if(UNIX AND AGENTPING_INSTALL_DESKTOP)
   install(FILES assets/desktop-icons/agent-ping-512.png
           DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps"
           RENAME agent-ping.png)
+endif()
+
+# zstd 只服务 DeepSeek Harness 这一路。三个 target 都编了 jsonl.cpp 与 scan.cpp，
+# 所以定义和库要一起给到：只给 GUI 那个，alert_probe / usage_probe 会缺符号链不上。
+if(ZSTD_LIB)
+  foreach(_t pin_imgui_shell alert_probe usage_probe)
+    target_compile_definitions(${_t} PRIVATE AP_HAVE_ZSTD=1)
+    target_include_directories(${_t} PRIVATE ${ZSTD_INC})
+    target_link_libraries(${_t} ${ZSTD_LIB})
+  endforeach()
+else()
+  message(WARNING "没找到 libzstd：DeepSeek Harness 一路不会接入（brew install zstd / apt install libzstd-dev）")
 endif()

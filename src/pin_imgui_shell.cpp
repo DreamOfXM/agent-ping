@@ -7033,7 +7033,8 @@ static float EdgeMarkPx(const std::string& agent) {
     return agent == "qoder" ? 13.8f : agent == "workbuddy" ? 16.7f
          : agent == "zcode" ? 14.1f : agent == "claude" ? 16.0f
          : agent == "opencode" ? 15.0f : agent == "qwenworkcn" ? 15.0f
-         : agent == "pi" ? 13.5f : agent == "codex" ? 16.7f : 0.0f;
+         : agent == "pi" ? 13.5f : agent == "codex" ? 16.7f
+         : agent == "dsh" ? 13.5f : 0.0f;
 }
 /// 一枚剪影：有位图按 SIZE 表画；没有的回退 11px/600 首字母（稿子 markHTML 的 fallback）。
 static void EdgeMark(ImDrawList* dl, float cx, float cy, const std::string& agent,

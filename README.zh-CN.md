@@ -116,7 +116,7 @@ Linux 上 Agent Ping 自己的路径在 `$XDG_CONFIG_HOME` 和 `$XDG_DATA_HOME` 
 - **权益卡只能事后确认。** 没领的那一期不在本机日志里，所以没有预告；读数只在各家写盘时才变。
 - **Linux 的提醒和出声还年轻。** 只在容器里验过，没上过真桌面和真硬件。缺依赖时退化成没有托盘图标的普通窗口。
 - **Linux 点横幅不跳会话。** 只能唤起 App，或打开会话的工作目录。
-- **只有六个来源，不是「所有 agent」。** Qoder CLI、Claude Code、Codex、ZCode、WorkBuddy、OpenCode。后三个要带 SQLite3 的构建。
+- **只有九个来源，不是「所有 agent」。** Qoder CLI、Claude Code、Codex、ZCode、WorkBuddy、OpenCode、Pi、千问办公、DeepSeek Harness。ZCode / WorkBuddy / OpenCode 要带 SQLite3 的构建，DeepSeek Harness 要带 zstd 的构建。
 - **没有真背景模糊；深底菜单栏上托盘图标不太显眼。** 玻璃质感是手画的，改图标意味着重画已定稿的标识。
 - **搜索框键盘焦点未实测。** ⌘/Ctrl+F 和 Esc 已接上；打字没过滤效果的话，请报 issue。
 - **设置、接线、授权三屏还是旧版面。** 其余屏已重做，这三屏会跟上。
@@ -127,12 +127,12 @@ Linux 上 Agent Ping 自己的路径在 `$XDG_CONFIG_HOME` 和 `$XDG_DATA_HOME` 
 
 硬要求：C++17、CMake ≥ 3.20、Ninja、GLFW3、FreeType 2、OpenGL 3.3 core，macOS 13+ 或带 X11 的 Linux。
 
-可选依赖缺了会怎样，CMake 都会明说：SQLite3 缺了，跳过 ZCode、WorkBuddy、OpenCode 三路；Linux 上 libdbus-1 缺了没有托盘图标，libx11 + libxext 缺了窄柱关着。命令都在仓库根目录跑。
+可选依赖缺了会怎样，CMake 都会明说：SQLite3 缺了，跳过 ZCode、WorkBuddy、OpenCode 三路；zstd 缺了，DeepSeek Harness 那一路不接入；Linux 上 libdbus-1 缺了没有托盘图标，libx11 + libxext 缺了窄柱关着。命令都在仓库根目录跑。
 
 macOS（产出 `build/AgentPing-cpp.app`）：
 
 ```sh
-brew install cmake ninja glfw freetype
+brew install cmake ninja glfw freetype zstd
 cmake -S . -B build -G Ninja && cmake --build build
 sh Tools/make_bundle.sh
 ```
@@ -141,7 +141,7 @@ Linux（Debian 12 包名）：
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
-    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
+    libsqlite3-dev libzstd-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
 cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 # 提醒层要真行为还需两个包：libnotify-bin（横幅）、sound-theme-freedesktop（出声）
 ```

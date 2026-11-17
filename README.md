@@ -159,8 +159,9 @@ Read this before filing an issue; every item has a reason:
   window without a tray icon.
 - **On Linux, clicking a banner doesn't jump to the session.** It activates the
   app or opens the session's working directory.
-- **Six sources, not "every agent".** Qoder CLI, Claude Code, Codex, ZCode,
-  WorkBuddy, OpenCode. The last three need a SQLite3 build.
+- **Nine sources, not "every agent".** Qoder CLI, Claude Code, Codex, ZCode,
+  WorkBuddy, OpenCode, Pi, QwenWork, DeepSeek Harness. ZCode, WorkBuddy and
+  OpenCode need a SQLite3 build; DeepSeek Harness needs a zstd build.
 - **No real background blur; the tray icon is subtle on dark menu bars.** The
   glass surface is hand-drawn; fixing the icon means redrawing the finalized
   logo.
@@ -178,14 +179,14 @@ Read this before filing an issue; every item has a reason:
 Hard requirements: C++17, CMake ≥ 3.20, Ninja, GLFW3, FreeType 2, OpenGL 3.3
 core, and macOS 13+ or Linux with X11.
 
-CMake says plainly what a missing optional dependency costs: without SQLite3 the ZCode, WorkBuddy and OpenCode sources are skipped; on
+CMake says plainly what a missing optional dependency costs: without SQLite3 the ZCode, WorkBuddy and OpenCode sources are skipped; without zstd the DeepSeek Harness source is skipped; on
 Linux, without libdbus-1 there is no tray icon, and without libx11 + libxext the
 edge column is off. All commands run from the repo root.
 
 macOS (produces `build/AgentPing-cpp.app`):
 
 ```sh
-brew install cmake ninja glfw freetype
+brew install cmake ninja glfw freetype zstd
 cmake -S . -B build -G Ninja && cmake --build build
 sh Tools/make_bundle.sh
 ```
@@ -194,7 +195,7 @@ Linux (Debian 12 package names):
 
 ```sh
 sudo apt-get install -y cmake ninja-build libglfw3-dev libfreetype6-dev \
-    libsqlite3-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
+    libsqlite3-dev libzstd-dev libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev
 cmake -S . -B build-linux -G Ninja && cmake --build build-linux
 # Real reminder behavior needs two more packages: libnotify-bin (banners), sound-theme-freedesktop (sound)
 ```

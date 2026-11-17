@@ -75,7 +75,9 @@ jobs:
           command -v ninja >/dev/null || brew install ninja
           # freetype 的 keg 里同时装出 .a，CMakeLists 会优先静态链接它和 glfw，
           # 这样打出来的 .app 不依赖 Homebrew 路径 —— 用户机器上没装 glfw 也能开。
-          brew install glfw freetype
+          # zstd 只有 DeepSeek Harness 那一路用（它的会话是 .jsonl.zstd），
+          # 缺它时 CMake 会退化成「少一路」而不是编译失败，所以这里必须显式装上。
+          brew install glfw freetype zstd
 
       - name: Build
         run: |
@@ -143,7 +145,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build build-essential pkg-config \
-            libglfw3-dev libfreetype6-dev libsqlite3-dev \
+            libglfw3-dev libfreetype6-dev libsqlite3-dev libzstd-dev \
             libgl1-mesa-dev libdbus-1-dev libx11-dev libxext-dev libxtst-dev \
             libxrandr-dev desktop-file-utils xvfb
 

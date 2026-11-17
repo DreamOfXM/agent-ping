@@ -3,6 +3,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(AP_HAVE_ZSTD)
+#include <zstd.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
@@ -313,6 +316,81 @@ std::vector<Json> tail_records(const std::string& path, std::size_t max_bytes) {
         if (json_parse(l, n, j) && j.kind == Json::OBJ) out.push_back(std::move(j));
     });
     return out;
+}
+
+std::vector<Json> tail_records_zstd(const std::string& path, std::size_t max_bytes) {
+    std::vector<Json> out;
+#if !defined(AP_HAVE_ZSTD)
+    // 这台机器构建时没有 libzstd：这一路直接当「读不到」，不假装解压过。
+    (void)path; (void)max_bytes;
+    return out;
+#else
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return out;
+    off_t size = file_size(fd);
+    if (size <= 0) { close(fd); return out; }
+    std::vector<char> raw((std::size_t)size);
+    ssize_t got = pread(fd, raw.data(), (std::size_t)size, 0);
+    close(fd);
+    if (got <= 0) return out;
+
+    // 整份解压再截尾：zstd 帧没有索引，给不出「第 N 字节在哪」，想省内存只能自己
+    // 边解边丢已读的块。会话文件实测几十 KB 到几 MB，直接攒全量更简单也更少出错。
+    std::string plain;
+    ZSTD_DStream* ds = ZSTD_createDStream();
+    if (!ds) return out;
+    ZSTD_initDStream(ds);
+    ZSTD_inBuffer in{raw.data(), (std::size_t)got, 0};
+    std::vector<char> chunk(ZSTD_DStreamOutSize());
+    while (in.pos < in.size) {
+        ZSTD_outBuffer ob{chunk.data(), chunk.size(), 0};
+        const size_t rc = ZSTD_decompressStream(ds, &ob, &in);
+        if (ZSTD_isError(rc)) { ZSTD_freeDStream(ds); return out; }
+        if (ob.pos) plain.append(chunk.data(), ob.pos);
+    }
+    ZSTD_freeDStream(ds);
+    if (plain.empty()) return out;
+
+    const std::size_t start = plain.size() > max_bytes ? plain.size() - max_bytes : 0;
+    each_line(&plain[start], plain.size() - start, start > 0, [&](char* l, std::size_t n) {
+        Json j;
+        if (json_parse(l, n, j) && j.kind == Json::OBJ) out.push_back(std::move(j));
+    });
+    return out;
+#endif
+}
+
+std::string text_head_zstd(const std::string& path, std::size_t max_bytes) {
+    std::string out;
+#if !defined(AP_HAVE_ZSTD)
+    (void)path; (void)max_bytes;
+    return out;
+#else
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return out;
+    off_t size = file_size(fd);
+    if (size <= 0) { close(fd); return out; }
+    std::vector<char> raw((std::size_t)size);
+    ssize_t got = pread(fd, raw.data(), (std::size_t)size, 0);
+    close(fd);
+    if (got <= 0) return out;
+
+    ZSTD_DStream* ds = ZSTD_createDStream();
+    if (!ds) return out;
+    ZSTD_initDStream(ds);
+    ZSTD_inBuffer in{raw.data(), (std::size_t)got, 0};
+    std::vector<char> chunk(ZSTD_DStreamOutSize());
+    while (in.pos < in.size && out.size() < max_bytes) {
+        ZSTD_outBuffer ob{chunk.data(), chunk.size(), 0};
+        const size_t rc = ZSTD_decompressStream(ds, &ob, &in);
+        if (ZSTD_isError(rc)) { ZSTD_freeDStream(ds); return out; }
+        if (ob.pos) out.append(chunk.data(), ob.pos);
+        if (rc == 0) break;              // 帧结束
+    }
+    ZSTD_freeDStream(ds);
+    if (out.size() > max_bytes) out.resize(max_bytes);
+    return out;
+#endif
 }
 
 HeadFacts head_facts(const std::string& path, std::size_t max_bytes) {

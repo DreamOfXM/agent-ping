@@ -267,6 +267,10 @@ void apply_hook_signals(Snapshot& snap, double now);
 AgentSnap scan_pi(const std::string& name, const std::string& root, double now, double since);
 AgentSnap scan_qwenwork(const std::string& name, const std::string& root, double now, double since);
 
+/// DeepSeek Harness（~/.dsh/sessions/<工作目录>/<会话id>/session.v*.jsonl.zstd）：
+/// zstd 压过的 JSONL。判态只认 approval/asked↔decided、turn/start↔end、job/settled。
+AgentSnap scan_dsh(const std::string& name, const std::string& root, double now, double since);
+
 /// N7 进程哨兵：回合未收尾但这一路 CLI 已无同名进程（只读 comm/pid）→ Session.proc_dead。
 /// 只对 comm 可辨的路判（本轮 codex）；只标不响。
 void apply_proc_sentinel(Snapshot& snap);
