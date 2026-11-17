@@ -1,5 +1,5 @@
 cask "agent-ping" do
-  version "0.1.14"
+  version "0.1.15"
 
   # URL 刻意带版本号，而不是 releases/latest/download 那种固定路径：Homebrew 的下载缓存以
   # URL 为键，URL 不变就永远命中第一次下的那份包，新版本发布后装到的还是旧版（sha256 根本没机会起作用）。
@@ -9,11 +9,11 @@ cask "agent-ping" do
   # staple → 替换同名附件，所以下面这两个 sha256 必须是**钉票之后**那一份的哈希。
   # staple 会改写字节：钉票前后的两个哈希别混用，抄错了 brew 100% 校验失败。
   on_arm do
-    sha256 "f54ad36d00558cc22eb7cece27b00c51ac274525ecf51962d528757f4a28e81f"
+    sha256 "6c304475dd04e5a544c0fe5ef269508c2d7af694f754c78118f9f95a94aabc97"
     url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-arm64.zip"
   end
   on_intel do
-    sha256 "29874e549cd1b980c794d565d558909c7af67186c9c40c24291ad358d7ff2891"
+    sha256 "45ba24bd6c5299a6b60bb893cc05f0c5a076579a7e452efcd56342ffa6375d4c"
     url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-x86_64.zip"
   end
 
