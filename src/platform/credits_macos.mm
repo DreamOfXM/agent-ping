@@ -11,8 +11,19 @@
 namespace {
 
 /// 深度优先收 AXStaticText 的 value；上限一扇窗 400 条、最多 3 扇窗，防大树拖死扫描。
-void WalkTexts(AXUIElementRef el, NSMutableArray<NSString*>* texts, int* budget) {
-    if (*budget <= 0 || !el) return;
+///
+/// 三道闸必须分开，不能只留文本预算：0.1.12 及以前只有「命中 AXStaticText 才递减」的
+/// 文本预算，一旦整棵树里一个静态文本都没有（积分菜单没开、页面还没长好），预算永不
+/// 耗尽，递归就一路走到底，把扫描子线程那 512KB 栈撑爆——信号带走整个进程，用户看到
+/// 的就是 app 无声退出（崩溃报告 SIGBUS / KERN_PROTECTION_FAILURE at Stack）。
+/// 深度闸同时挡住 AX 树里的父子环引用，节点闸挡住异常宽的扇出。
+constexpr int kMaxDepth = 48;    // 正常窗口的树远浅于此，超了就是环或病态树
+constexpr int kMaxNodes = 4096;  // 单次扫描总节点数上限
+
+void WalkTexts(AXUIElementRef el, NSMutableArray<NSString*>* texts, int* texts_left,
+               int* nodes_left, int depth) {
+    if (!el || *texts_left <= 0 || *nodes_left <= 0 || depth > kMaxDepth) return;
+    (*nodes_left)--;
     CFTypeRef role = nullptr;
     if (AXUIElementCopyAttributeValue(el, kAXRoleAttribute, (CFTypeRef*)&role) == kAXErrorSuccess) {
         NSString* roleNs = (__bridge NSString*)role;
@@ -24,7 +35,7 @@ void WalkTexts(AXUIElementRef el, NSMutableArray<NSString*>* texts, int* budget)
                 if (val) CFRelease(val);
             }
             if (role) CFRelease(role);
-            (*budget)--;
+            (*texts_left)--;
             return;   // 静态文本没有子节点
         }
         if (role) CFRelease(role);
@@ -33,8 +44,8 @@ void WalkTexts(AXUIElementRef el, NSMutableArray<NSString*>* texts, int* budget)
     if (AXUIElementCopyAttributeValue(el, kAXChildrenAttribute, (CFTypeRef*)&kids) == kAXErrorSuccess) {
         NSArray* arr = (__bridge NSArray*)kids;
         for (id k in arr) {
-            if (*budget <= 0) break;
-            WalkTexts((__bridge AXUIElementRef)k, texts, budget);
+            if (*texts_left <= 0 || *nodes_left <= 0) break;
+            WalkTexts((__bridge AXUIElementRef)k, texts, texts_left, nodes_left, depth + 1);
         }
         if (kids) CFRelease(kids);
     }
@@ -62,10 +73,11 @@ bool ap_ax_texts(const char* proc_name, const char* bundle_id, char* out, int ou
     if (AXUIElementCopyAttributeValue(ax, kAXWindowsAttribute, (CFTypeRef*)&wins) == kAXErrorSuccess) {
         NSMutableArray<NSString*>* texts = [NSMutableArray array];
         int budget = max_texts > 0 && max_texts <= 512 ? max_texts : 512;
+        int nodes_left = kMaxNodes;
         int windows = 0;
         for (id w in (__bridge NSArray*)wins) {
-            if (windows >= 3) break;
-            WalkTexts((__bridge AXUIElementRef)w, texts, &budget);
+            if (windows >= 3 || budget <= 0 || nodes_left <= 0) break;
+            WalkTexts((__bridge AXUIElementRef)w, texts, &budget, &nodes_left, 0);
             windows++;
         }
         NSMutableString* joined = [NSMutableString string];
