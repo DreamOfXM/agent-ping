@@ -1349,6 +1349,10 @@ static float R31SubList(ImDrawList* dl, float x, float y, float w, const UIRow& 
 }
 /// 一整行：状态色轨 / 品牌 / 工具·客户端·状态 / 项目·等多久 / 请求原文 / 用量 / 等待条 / ⓘ / 跳转。
 /// 行高 106（.question 单行钳制，app.css 11.5/17）。
+// ── 额度胶囊（定义在下方，待处理行先用到）────────────────────────────────────
+static float R31QuotaPill(ImDrawList* dl, float rightX, float cy, const UIRow& r, int loc,
+                          double now, float limitL);
+
 static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& r, int idx,
                         double maxAge, int loc) {
     const float h = 106.0f;
@@ -1398,14 +1402,21 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
         DrawTextRun(dl, mx, TextTop(y + 50.0f, 17.0f, T_S115, loc),
                     ClipToWidth(r.question, mainR - mx, loc, T_S115), loc, k31Sec, T_S115);
     // row-usage：y+71..+85。稿子 r.tokens!=null 才有这一行 —— 没有 token 明细整行不画。
+    float usageR = mx;
     if (r.has_tokens) {
-        float ux = R31Mid(dl, mx, y + 78.0f, R31Compact((double)r.tokens) + " tokens", loc,
-                          k31Muted, T_S9);
+        usageR = R31Mid(dl, mx, y + 78.0f, R31Compact((double)r.tokens) + " tokens", loc,
+                        k31Muted, T_S9);
         if (r.has_credits) {
-            dl->AddRectFilled(ImVec2(ux + 3.0f, y + 74.0f), ImVec2(ux + 4.0f, y + 82.0f), k31Line);
-            R31Mid(dl, ux + 7.0f, y + 78.0f, R31Num(r.credits) + " Credits", loc, k31Muted, T_S9);
+            dl->AddRectFilled(ImVec2(usageR + 3.0f, y + 74.0f),
+                              ImVec2(usageR + 4.0f, y + 82.0f), k31Line);
+            usageR = R31Mid(dl, usageR + 7.0f, y + 78.0f, R31Num(r.credits) + " Credits", loc,
+                            k31Muted, T_S9);
         }
     }
+    // 待处理的行也要带额度胶囊。ZCode 这类常常只以「待查看」落在这里，
+    // 只在运行中的卡上有胶囊的话，最该看的那两个窗口反而找不到。
+    R31QuotaPill(dl, mainR, y + 78.0f, r, loc,
+                 g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr), usageR + 8.0f);
     // wait-meter：y+91..+93
     {
         dl->AddRectFilled(ImVec2(mx, y + 91.0f), ImVec2(mainR, y + 93.0f), k31Line, 1.0f);
