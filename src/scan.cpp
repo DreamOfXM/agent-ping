@@ -1210,7 +1210,9 @@ void local_day_before(double now, int i, long& key, double& d0, double& d1) {
 // Encryption」，账户=凭证路径指纹）——辅助脚本解开它发一次只读 GET。这是元数据接口，
 // 不是模型调用，不耗额度。脚本自缓存 120 秒；失败打印 {} 且不写缓存，卡面如实。
 namespace {
-const char kZQuotaPy[] = R"PY(import json, os, time, base64, subprocess, sys, urllib.request
+const char kZQuotaPy[] = R"PY(# agentping zcode quota v2
+import json, os, time, base64, subprocess, sys, urllib.request
+
 CACHE = '/tmp/agentping-zquota.json'
 now = time.time()
 try:
@@ -1221,38 +1223,147 @@ try:
         sys.exit(0)
 except Exception:
     pass
-try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-except Exception:
-    print('{}')
-    sys.exit(0)
-CRED = os.path.expanduser('~/.zcode/v2/credentials.json')
-ACCT = '07b75b561f6227d31d5fc0980b10d60b4c54c32de50e7bc0deb7e1934a4e8be1'
-def kc():
-    r = subprocess.run(['security', 'find-generic-password', '-s',
-                        'ZCode Credential Encryption', '-a', ACCT, '-w'],
-                       capture_output=True, text=True, timeout=10)
-    if r.returncode != 0:
-        raise RuntimeError('keychain')
-    sec = r.stdout.strip()
-    return base64.urlsafe_b64decode(sec + '=' * (-len(sec) % 4))
-def dec(val, key):
+
+def dec(s):
+    return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
+
+def unseal(key, val):
     body = val[len('enc:v2:os:'):]
     fp, rest = body.split(':', 1)
     nb, tb, cb = rest.split('.')
-    dec1 = lambda x: base64.urlsafe_b64decode(x + '=' * (-len(x) % 4))
-    return AESGCM(key).decrypt(dec1(nb), dec1(cb) + dec1(tb), None).decode('utf8')
-d = json.load(open(CRED))
-aks = [k for k in d if 'api-key' in k]
-if not aks:
+    return _gcm(key, dec(nb), dec(cb), dec(tb)).decode('utf8')
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    def _gcm(key, nonce, ct, tag):
+        return AESGCM(key).decrypt(nonce, ct + tag, None)
+except Exception:
+    _SBOX = bytearray(256)
+    _RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
+
+    def _init():
+        p = q = 1
+        while True:
+            p = (p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)) & 0xFF
+            q ^= (q << 1) & 0xFF
+            q ^= (q << 2) & 0xFF
+            q ^= (q << 4) & 0xFF
+            if q & 0x80:
+                q ^= 0x09
+            x = q ^ (((q << 1) | (q >> 7)) & 0xFF) ^ (((q << 2) | (q >> 6)) & 0xFF) \
+                ^ (((q << 3) | (q >> 5)) & 0xFF) ^ (((q << 4) | (q >> 4)) & 0xFF)
+            _SBOX[p] = x ^ 0x63
+            if p == 1:
+                break
+        _SBOX[0] = 0x63
+    _init()
+
+    def _xt(a):
+        a <<= 1
+        return (a ^ 0x1B) & 0xFF if a & 0x100 else a
+
+    def _expand(key):
+        nk = len(key) // 4
+        nr = nk + 6
+        w = [list(key[4 * i:4 * i + 4]) for i in range(nk)]
+        for i in range(nk, 4 * (nr + 1)):
+            t = list(w[i - 1])
+            if i % nk == 0:
+                t = [_SBOX[b] for b in t[1:] + t[:1]]
+                t[0] ^= _RCON[i // nk - 1]
+            elif nk > 6 and i % nk == 4:
+                t = [_SBOX[b] for b in t]
+            w.append([w[i - nk][j] ^ t[j] for j in range(4)])
+        return w, nr
+
+    def _block(w, nr, blk):
+        s = [blk[i] ^ w[i // 4][i % 4] for i in range(16)]
+        for r in range(1, nr + 1):
+            s = [_SBOX[b] for b in s]
+            s = [s[0], s[5], s[10], s[15], s[4], s[9], s[14], s[3],
+                 s[8], s[13], s[2], s[7], s[12], s[1], s[6], s[11]]
+            if r != nr:
+                t = []
+                for c in range(4):
+                    a = s[4 * c:4 * c + 4]
+                    t += [_xt(a[0]) ^ (_xt(a[1]) ^ a[1]) ^ a[2] ^ a[3],
+                          a[0] ^ _xt(a[1]) ^ (_xt(a[2]) ^ a[2]) ^ a[3],
+                          a[0] ^ a[1] ^ _xt(a[2]) ^ (_xt(a[3]) ^ a[3]),
+                          (_xt(a[0]) ^ a[0]) ^ a[1] ^ a[2] ^ _xt(a[3])]
+                s = t
+            k = []
+            for c in range(4):
+                k += w[4 * r + c]
+            s = [s[i] ^ k[i] for i in range(16)]
+        return bytes(s)
+
+    def _mul(x, y):
+        z = 0
+        v = y
+        for i in range(127, -1, -1):
+            if (x >> i) & 1:
+                z ^= v
+            v = (v >> 1) ^ (0xE1 << 120) if v & 1 else v >> 1
+        return z
+
+    def _ghash(h, data):
+        y = 0
+        for i in range(0, len(data), 16):
+            y = _mul(y ^ int.from_bytes(data[i:i + 16].ljust(16, b'\0'), 'big'), h)
+        return y
+
+    def _gcm(key, nonce, ct, tag):
+        w, nr = _expand(key)
+        h = int.from_bytes(_block(w, nr, b'\0' * 16), 'big')
+        j0 = nonce + b'\0\0\0\1'
+        out = bytearray()
+        ctr = int.from_bytes(j0, 'big')
+        for i in range(0, len(ct), 16):
+            ctr = (ctr & ~0xFFFFFFFF) | ((ctr + 1) & 0xFFFFFFFF)
+            ks = _block(w, nr, ctr.to_bytes(16, 'big'))
+            out += bytes(a ^ b for a, b in zip(ct[i:i + 16], ks))
+        auth = _ghash(h, ct + b'\0' * ((16 - len(ct) % 16) % 16)
+                      + (0).to_bytes(8, 'big') + (len(ct) * 8).to_bytes(8, 'big'))
+        want = (auth ^ int.from_bytes(_block(w, nr, j0), 'big')).to_bytes(16, 'big')
+        if want != tag:
+            raise ValueError('tag')
+        return bytes(out)
+
+try:
+    d = json.load(open(os.path.expanduser('~/.zcode/v2/credentials.json')))
+except Exception as e:
+    sys.stderr.write('read credentials: %r\n' % (e,))
     print('{}')
     sys.exit(0)
-key = kc()
-ak = dec(d[aks[0]], key)
-req = urllib.request.Request('https://open.bigmodel.cn/api/monitor/usage/quota/limit',
-                             headers={'Authorization': 'Bearer ' + ak,
-                                      'Accept': 'application/json'})
-j = json.loads(urllib.request.urlopen(req, timeout=12).read().decode('utf8'))
+aks = [k for k in d if 'api-key' in k]
+if not aks:
+    sys.stderr.write('no api-key entry in credentials.json\n')
+    print('{}')
+    sys.exit(0)
+try:
+    r = subprocess.run(['security', 'find-generic-password', '-s',
+                        'ZCode Credential Encryption', '-w'],
+                       capture_output=True, text=True, timeout=10)
+    sec = r.stdout.strip()
+    if r.returncode != 0 or not sec:
+        sys.stderr.write('keychain entry unreadable (rc=%s)\n' % r.returncode)
+        print('{}')
+        sys.exit(0)
+    key = dec(sec)
+    ak = unseal(key, d[aks[0]])
+except Exception as e:
+    sys.stderr.write('unseal api-key: %r\n' % (e,))
+    print('{}')
+    sys.exit(0)
+try:
+    req = urllib.request.Request('https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+                                 headers={'Authorization': 'Bearer ' + ak,
+                                          'Accept': 'application/json'})
+    j = json.loads(urllib.request.urlopen(req, timeout=12).read().decode('utf8'))
+except Exception as e:
+    sys.stderr.write('quota/limit request: %r\n' % (e,))
+    print('{}')
+    sys.exit(0)
 out = {}
 for lim in (j.get('data') or {}).get('limits') or []:
     t, u, n = lim.get('type'), lim.get('unit'), lim.get('number')
@@ -1263,6 +1374,7 @@ for lim in (j.get('data') or {}).get('limits') or []:
         out['week'] = {'pct': lim.get('percentage'),
                        'resets': (lim.get('nextResetTime') or 0) // 1000}
 if not out:
+    sys.stderr.write('quota/limit response had no 5h/week windows\n')
     print('{}')
     sys.exit(0)
 out['ts'] = now
@@ -1271,13 +1383,16 @@ out.pop('ts')
 print(json.dumps(out))
 )PY";
 /// 脚本缺了/内容不同就重写（装到 /tmp：无持久副作用；失败轮重试成本低）。
+/// 探针比首行的版本标记：改脚本内容就得改标记，否则旧文件会被当成最新留着。
 void ensure_zquota_script() {
     const char* path = "/tmp/agentping-zquota.py";
+    const char* mark = "# agentping zcode quota v2";
+    const std::size_t mlen = strlen(mark);
     FILE* f = fopen(path, "rb");
-    char probe[16] = {0};
+    char probe[64] = {0};
     size_t got = f ? fread(probe, 1, sizeof probe - 1, f) : 0;
     if (f) fclose(f);
-    if (got >= 15 && strncmp(probe, "import json, os", 15) == 0) return;
+    if (got >= mlen && strncmp(probe, mark, mlen) == 0) return;
     f = fopen(path, "w");
     if (!f) return;
     fputs(kZQuotaPy, f);
@@ -1594,31 +1709,46 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
     // 5 小时/周双窗（v8 补）：App 面板的这两窗走额度接口，RPC 响应不落盘——
     // 这里用 credentials.json 里加密的 api-key（钥匙串密钥解开）发只读 GET。
     // 读不到就不动 five/week，卡面上这两格如实不出现。
+    //
+    // 解释器必须写死 /usr/bin/python3：从 Finder 双击启动时 PATH 只剩系统那几个目录，
+    // 裸 `python3` 落到 /usr/bin/python3（3.9，没装 cryptography）。脚本现已自带
+    // 纯 Python 的 AES-GCM，因此系统解释器也解得开——2026-11-18 之前它依赖第三方包，
+    // 从桌面启动时那条链路整个失效，5 小时/周两窗就此消失（看起来像"额度不准了"）。
+    // 结果在进程内留 120 秒，避免每次扫描都 fork 一个解释器。
     ensure_zquota_script();
     {
-        FILE* qp = popen("python3 /tmp/agentping-zquota.py 2>/dev/null", "r");
-        if (qp) {
-            char qb[512] = {0};
-            size_t qn = fread(qb, 1, sizeof qb - 1, qp);
-            pclose(qp);
-            Json qj;
-            if (qn > 0 && json_parse(qb, (int)qn, qj)) {
-                auto fill = [&](const char* key, QuotaWindow& w, int wmin) {
-                    const Json* p = qj.at(key);
-                    if (!p) return;
-                    const Json* pct = p->at("pct");
-                    const Json* rs = p->at("resets");
-                    if (!pct || pct->kind != Json::NUM || !rs || rs->kind != Json::NUM) return;
-                    w.known = true;
-                    w.used = std::fmax(0.0, std::fmin(1.0, (100.0 - pct->num) / 100.0));
-                    w.resets_at = rs->num;
-                    w.window_min = wmin;
-                    w.seen_at = now;
-                };
-                fill("five", snap.quota.five, 300);
-                fill("week", snap.quota.week, 7 * 1440);
+        static double q_at = 0;
+        static Json q_keep;
+        const bool stale = now - q_at > 120;
+        if (stale) {
+            const char* py = access("/usr/bin/python3", X_OK) == 0 ? "/usr/bin/python3" : "python3";
+            char cmd[256];
+            std::snprintf(cmd, sizeof cmd, "%s /tmp/agentping-zquota.py 2>/tmp/agentping-zquota.err", py);
+            FILE* qp = popen(cmd, "r");
+            if (qp) {
+                char qb[512] = {0};
+                size_t qn = fread(qb, 1, sizeof qb - 1, qp);
+                pclose(qp);
+                Json qj;
+                q_keep = Json{};
+                if (qn > 0 && json_parse(qb, (int)qn, qj)) q_keep = qj;
+                q_at = now;    // 失败也记时刻：下一轮 120 秒后再试，别每帧都拉
             }
         }
+        auto fill = [&](const char* key, QuotaWindow& w, int wmin) {
+            const Json* p = q_keep.at(key);
+            if (!p) return;
+            const Json* pct = p->at("pct");
+            const Json* rs = p->at("resets");
+            if (!pct || pct->kind != Json::NUM || !rs || rs->kind != Json::NUM) return;
+            w.known = true;
+            w.used = std::fmax(0.0, std::fmin(1.0, (100.0 - pct->num) / 100.0));
+            w.resets_at = rs->num;
+            w.window_min = wmin;
+            w.seen_at = q_at;    // 读数产生的时刻，不是这轮扫描的时刻
+        };
+        fill("five", snap.quota.five, 300);
+        fill("week", snap.quota.week, 7 * 1440);
     }
 #endif
 
@@ -2332,45 +2462,15 @@ Balance read_zcode_balance() {
     std::vector<std::string> names = list_dir(dir);
     std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& c) { return a > c; });
     const double now = (double)std::time(nullptr);
-    // ① 官方 MCP 额度（zcode.z.ai/api/v1/mcp/usage 的落日志响应）＝当前订阅的真额度：
-    //    total_usage used/limit/remaining，日刷新（next_refresh_at）。billing/balances
-    //    那路是「领的卡」清单——卡过期后该接口返回空清单，继续往旧日志捞只会捞到
-    //    过期快照（11-13 用户实拍：显示了已过期卡的 1.7亿/3亿）。MCP 有数就以它为准。
-    for (std::size_t i = 0; i < names.size() && i < 2; i++) {
-        const std::string mp = dir + "/" + names[i];
-        for (const std::string& ln : tail_lines(mp, "官方 MCP 额度响应", 3, 4ull << 20)) {
-            const std::size_t brace = ln.find('{');
-            if (brace == std::string::npos) continue;
-            Json rec;
-            if (!json_parse(ln.c_str() + brace, ln.size() - brace, rec)) continue;
-            const Json* body = rec.at("body");
-            if (!body || body->kind != Json::STR) continue;   // 响应体是二次编码的字符串
-            Json inner;
-            if (!json_parse(body->str.c_str(), body->str.size(), inner)) continue;
-            const Json* data = inner.at("data");
-            const Json* usage = data ? data->at("total_usage") : nullptr;
-            if (!usage || usage->kind != Json::OBJ) continue;
-            bool gr = false, gl = false, gn = false;
-            const long remaining = num_at(usage, "remaining", &gr);
-            const long limit = num_at(usage, "limit", &gl);
-            if (!gr || remaining < 0 || !gl || limit <= 0) continue;
-            b.known = true;
-            b.remaining = (double)remaining;
-            b.total = (double)limit;
-            b.unit = "";   // 不标 credits：这是套餐的每日额度计数，不是 credits 池
-            if (const Json* lv = data->at("level"))
-                if (lv->kind == Json::STR) b.label = "MCP 日额度 · " + lv->str;
-                else b.label = "MCP 日额度";   // 这窗是预置插件的每日合计，不是套餐余额
-            const long nref = num_at(data, "next_refresh_at", &gn);
-            if (gn && nref > 0) b.period_end = (double)nref;
-            b.seen_at = parse_bracket_local(ln);
-            b.exceeded = remaining <= 0;
-            b.source = mp;
-            return b;
-        }
-    }
-    // ② 领的卡（billing/balances）兜底：过期的卡不再顶数——到期时刻已过就整行作废，
-    //    继续往更旧的日志找也是同一张卡的更旧快照，直接两份日志都不认。
+    // 领的卡（payload.data.balances[]）：过期的卡不再顶数——到期时刻已过就整行作废，
+    // 继续往更旧的日志找也是同一张卡的更旧快照，直接两份日志都不认。
+    //
+    // 这里**不读** mcp/usage 那条响应。它记的是「官方 MCP 日额度」——预置 MCP 服务器
+    // 每天能调多少次，2026-11-18 实测 used=5 / limit=1000，同一天模型请求 405 次：
+    // 两个数是两回事，它既不是 token 余额也不随套餐用量动。早先把它当余额，界面上
+    // 就成了「剩余额度 99% · 995/1000」，而当天真烧掉 1.9 亿 token，读数与事实相反。
+    // 拿不到 balances 时宁可这条返回 unknown，界面走「本机没有它的额度读数」，
+    // 也不拿一个无关计数去顶。
     for (std::size_t i = 0; i < names.size() && i < 2; i++) {
         const std::string p = dir + "/" + names[i];
         const FStat st = fst(p);
@@ -2660,7 +2760,8 @@ Snapshot scan_all(double now_epoch) {
     {
         AgentSnap zc = scan_zcode("ZCode", join(h, ".zcode/cli/db/db.sqlite"), now, since);
         zc.quota.balance = read_zcode_balance();
-        if (zc.quota.balance.known) zc.quota.known = true;
+        // 5 小时/周双窗也是额度读数：只有它们到、余额读不到时，卡面照样该显示这两窗。
+        if (zc.quota.balance.known || zc.quota.five.known || zc.quota.week.known) zc.quota.known = true;
         snap.agents.push_back(std::move(zc));
     }
     snap.agents.push_back(scan_workbuddy("WorkBuddy", join(h, ".workbuddy/workbuddy.db"),
