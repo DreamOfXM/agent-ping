@@ -33,7 +33,7 @@ struct Target {
 
 // 键＝采集器 id（与 scan.cpp 里 snap.id 同一套：qoder/claude/codex/zcode/workbuddy/opencode）
 const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "opencode", "pi",
-                       "qwenworkcn"};
+                       "qwenworkcn", "dsh"};
 // cli_fmt：纯 CLI 的会话级 resume 命令。只有旗标在本机核实过的才写
 //（claude --resume 实测、pi --session 实测；codex 的 resume 旗标没核实，不猜，落 ③）。
 const Target kTargets[] = {
@@ -47,6 +47,13 @@ const Target kTargets[] = {
     {"/Applications/OpenCode.app",  ".local/share/opencode", "", "opencode --session %s"},
     {"",                            ".pi/agent/sessions", "", "pi --session %s"},
     {"/Applications/QwenWorkCN.app", ".qwenworkcn/projects", "", ""},
+    // DeepSeek Harness：桌面端在，但它对外只认 `dsh://open` 一条（app.asar 里只匹配
+    // 这个整串，其余一律忽略），那是「把主窗口提到前面」，不是「开到这条会话」。
+    // 所以 deep_prefix 留空——填了就会拼出 dsh://opensession-xxx，LaunchServices 照样
+    // 转交成功，面板却会照着回一句「已开到这条对话」，那就是假回执。
+    // 会话活在 dsh 自己的桌面端里，也没有可核实的 resume 旗标（`dsh desktop` 明确拒绝
+    // 由外部启动），cli_fmt 同样留空。
+    {"/Applications/DeepSeek Harness.app", ".dsh/sessions", "", ""},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 

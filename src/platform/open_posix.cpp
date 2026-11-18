@@ -21,7 +21,7 @@ extern char** environ;
 namespace {
 
 struct Target { const char* log_rel; const char* deep_prefix; int has_client; };
-const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy"};
+const char* kIds[] = {"qoder", "claude", "codex", "zcode", "workbuddy", "dsh"};
 // has_client 与 macOS 那张表同判据：这几路是桌面客户端（Linux 上是否有包未实机核），
 // claude/codex 两边都是纯 CLI，本机根本没有可跳的 App，只能落到记录目录。
 const Target kTargets[] = {
@@ -30,6 +30,9 @@ const Target kTargets[] = {
     {".codex/sessions", "", 0},
     {".zcode/cli/db", "", 1},
     {".workbuddy/projects", "workbuddy://chat/", 1},
+    // DeepSeek Harness：Linux 上只有采集器读得到的会话目录，桌面端没有 Linux 包，
+    // 所以这一路只落到记录目录（has_client=0，面板据此不承诺「唤起」）。
+    {".dsh/sessions", "", 0},
 };
 const int kN = (int)(sizeof kTargets / sizeof kTargets[0]);
 
