@@ -926,6 +926,8 @@ static const Key kStr[] = {
                         "5時間残り", "5시간 남음"}},
     {"r_week",         {"周余额", "Weekly remaining", "Wochenrest", "Settimana rimanente",
                         "週間残り", "주간 남음"}},
+    // 胶囊里的周窗短标签：会话卡右上角只有 ~200pt，全称加进去会把 5 小时窗挤掉。
+    {"r_week_short",   {"本周", "wk", "Woche", "sett.", "週間", "주간"}},
     {"r_after_reset",  {"%s 后重置", "%s to reset", "Reset in %s", "Reset tra %s",
                         "リセットまで %s", "%s 후 재설정"}},
     {"r_last_reading", {"上次读数 · 尚未刷新", "Last reading · not refreshed",

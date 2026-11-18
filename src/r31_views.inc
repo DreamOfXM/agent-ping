@@ -880,7 +880,6 @@ static std::string R31LimitStamp(double t) {
     snprintf(sb, sizeof sb, "%02d-%02d %02d:%02d", a.tm_mon + 1, a.tm_mday, a.tm_hour, a.tm_min);
     return sb;
 }
-static bool R31HasUsage(const Tool& t) { return t.usage.total() > 0 || t.has_credits; }
 static int R31RemainPct(const ap::QuotaWindow& w) {
     double rem = (1.0 - w.used) * 100.0;
     if (rem < 0) rem = 0;
@@ -1431,6 +1430,69 @@ static float R31WaitRow(ImDrawList* dl, float x, float y, float w, const UIRow& 
     return y + h;
 }
 
+// ── 会话卡上的额度胶囊 ──────────────────────────────────────────────────────
+/// 一张卡就说清「这个 agent 此刻剩多少」：5 小时窗 + 周窗；没有窗口读数就念积分余额。
+/// 会话卡会随处理完消失，所以这里给的是「现在还能跑多久」；完整口径留在「用量与额度」页。
+/// 右缘 rightX、竖向居中 cy；两窗放不下就只念 5 小时窗，再放不下就不画（返回 0）。
+static float R31QuotaPill(ImDrawList* dl, float rightX, float cy, const UIRow& r, int loc,
+                          double now, float limitL) {
+    const Tool* t = R31ToolOf(r.agent_id);
+    if (!t || !t->present()) return 0.0f;
+    // 一段＝一个读数：标签压一档颜色，数值提亮加粗，扫一眼先抓到数字。
+    struct Seg { std::string lab, val; };
+    std::vector<Seg> segs;
+    bool stale = false;
+    const ap::QuotaWindow& five = t->quota.five;
+    const ap::QuotaWindow& week = t->quota.week;
+    if (five.known) {
+        segs.push_back({T("r_5h", loc), std::to_string(R31RemainPct(five)) + "%"});
+        stale = stale || R31QuotaStale(five, now);
+    }
+    if (week.known) {
+        segs.push_back({T("r_week_short", loc), std::to_string(R31RemainPct(week)) + "%"});
+        stale = stale || R31QuotaStale(week, now);
+    }
+    if (segs.empty()) {
+        const ap::Balance b = R31BalanceOf(*t);
+        if (!b.known) return 0.0f;
+        std::string s = R31Compact(b.remaining);
+        if (b.total > 0) s += " / " + R31Compact(b.total);
+        if (!b.unit.empty()) s += " " + b.unit;
+        segs.push_back({"", s});
+        stale = R31BalanceStale(b, now);
+    }
+    const std::string dot = "·";
+    const float dotW = TextWidth(dot, loc, T_S9) + 8.0f;
+    auto segW = [&](const Seg& g) {
+        return (g.lab.empty() ? 0.0f : TextWidth(g.lab, loc, T_S9) + 3.0f) +
+               TextWidth(g.val, loc, T_S10B);
+    };
+    // 先把两窗都摆出来；挤到工具名上就只念 5 小时窗，还挤就不画。
+    for (size_t n = segs.size(); n > 0; n--) {
+        float tw = 0.0f;
+        for (size_t i = 0; i < n; i++) tw += segW(segs[i]) + (i ? dotW : 0.0f);
+        const float pw = tw + 16.0f;
+        const float px = rightX - pw;
+        if (px < limitL) continue;
+        dl->AddRectFilled(ImVec2(px, cy - 9.0f), ImVec2(px + pw, cy + 9.0f),
+                          WithA(k31Blue, stale ? 12 : 24), 9.0f);
+        dl->AddRect(ImVec2(px, cy - 9.0f), ImVec2(px + pw, cy + 9.0f),
+                    WithA(k31Blue, stale ? 26 : 58), 9.0f, 0, 1.0f);
+        float cx = px + 8.0f;
+        for (size_t i = 0; i < n; i++) {
+            if (i) cx = R31Mid(dl, cx + 4.0f, cy, dot, loc, WithA(k31Muted, 150), T_S9) + 4.0f;
+            if (!segs[i].lab.empty())
+                cx = R31Mid(dl, cx, cy, segs[i].lab, loc, WithA(k31Blue, stale ? 160 : 215),
+                            T_S9) + 3.0f;
+            cx = R31Mid(dl, cx, cy, segs[i].val, loc, stale ? k31Muted : k31Fg, T_S10B);
+        }
+        AddHit(g_hits, px, cy - 9.0f, px + pw, cy + 9.0f, HIT_TAB31, 1104, 6, loc,
+               T("r_account_limits", loc), 0);
+        return pw;
+    }
+    return 0.0f;
+}
+
 // ── 在跑卡 ──────────────────────────────────────────────────────────────────
 static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& r, int idx,
                         int maxTurns, int loc, double tn) {
@@ -1465,6 +1527,10 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
     nx += tw2 + (tw2 > 0.0f ? 6.0f : 0.0f);
     {
         const float ibx = x + 354.0f;   // 370..392
+        // 额度胶囊贴着「刚刚」左侧：卡上就能读出这个 agent 还剩多少，点它去「用量与额度」。
+        const float justW = TextWidth(T("just_now", loc), loc, T_S10);
+        R31QuotaPill(dl, ibx - 6.0f - justW - 8.0f, y + 22.0f, r, loc,
+                     g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr), nx);
         DrawTextRight(dl, ibx - 6.0f, TextMid(y + 22.0f, T_S10, loc), T("just_now", loc), loc,
                       k31Muted, T_S10);
         const float ihov = TxPeekNew(Zid(loc, 700 + idx, HIT_INFO31, 0), 0.0f);
@@ -1559,100 +1625,6 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
     if (beyond) {
         cy += 8.0f;
         cy = R31DrawWrap(dl, T("r_beyond", loc), bodyL, cy, inR - bodyL, loc, T_S11, 17.6f, k31Sec, 1);
-    }
-    return y + h;
-}
-
-// ── 账户额度预览（总览正文里）────────────────────────────────────────────────
-/// 单路：一行 44「今日用量 · X tokens · Y Credits · 明细 →」。tokens 列仅当 total>0。
-static float R31PeekSingle(ImDrawList* dl, float x, float y, float w, const Tool& t, int loc) {
-    const float h = 44.0f;
-    R31Glass(dl, x, y, w, h, 12.0f);
-    const float cy = y + h * 0.5f;
-    float cx = x + 12.0f;
-    I31(dl, I31_CHART, cx, cy - 6.0f, 12.0f, k31Muted);
-    cx += 12.0f + 5.0f;
-    cx = R31Mid(dl, cx, cy, T("r_today_usage", loc), loc, k31Muted, T_S10) + 8.0f;
-    if (t.usage.total() > 0) {
-        cx = R31Mid(dl, cx, cy, R31Compact((double)t.usage.total()), loc, k31Fg, T_S14B);
-        cx = R31Mid(dl, cx + 3.0f, cy, "tokens", loc, k31Muted, T_S9) + 8.0f;
-    }
-    if (t.has_credits)
-        R31Mid(dl, cx, cy, R31Num(t.credits) + " Credits", loc, k31Sec, T_S10);
-    {
-        const std::string det = T("r_details", loc);
-        const float dw = TextWidth(det, loc, T_S10);
-        const float rx = x + w - 12.0f;
-        DrawTextRun(dl, rx - 12.0f - 6.0f - dw, TextMid(cy, T_S10, loc), det, loc, k31Muted, T_S10);
-        I31(dl, I31_RIGHT, rx - 12.0f, cy - 6.0f, 12.0f, k31Faint);
-        AddHit(g_hits, x, y, x + w, y + h, HIT_ACCOUNT31, 1100, 0, loc, t.name, 0);
-        g_hits.back().key = t.id;
-    }
-    return y + h;
-}
-/// 全部：标题条 32 + 两列 33 高的格（pad 0 10 10，列间 1pt 竖线）。
-static float R31PeekAll(ImDrawList* dl, float x, float y, float w, int loc, double now) {
-    std::vector<const Tool*> qs;
-    for (const Tool& t : g_pd.tools) {
-        if (!t.present() || !R31QuotaAny(t)) continue;
-        // 只摆读数新鲜的：额度是 Codex 这类工具「跑的时候」才写的，闲置几小时后必陈旧，
-        // 常驻一颗红「待更新」在首页只是噪音。陈旧的退到用量屏，那里有上次读数的完整口径。
-        const bool winFresh = (t.quota.five.known || t.quota.week.known) &&
-                              !(R31QuotaStale(t.quota.five, now) || R31QuotaStale(t.quota.week, now));
-        const ap::Balance b = R31BalanceOf(t);
-        const bool balFresh = b.known && R31BalancePct(b) >= 0 && !R31BalanceStale(b, now);
-        if (winFresh || balFresh) qs.push_back(&t);
-    }
-    if (qs.empty()) return 0.0f;
-    const float headH = 32.0f;    // geom 实测 32（CSS 声明 30，冲突以实测为准）
-    const int rows = (int)((qs.size() + 1) / 2);
-    const float h = headH + (float)rows * 33.0f + (float)(rows - 1) * 10.0f + 10.0f;
-    R31Glass(dl, x, y, w, h, 12.0f);
-    {
-        const float hy = y + headH * 0.5f;
-        float hx = x + 10.0f;
-        I31(dl, I31_CHART, hx, hy - 6.0f, 12.0f, k31Muted);
-        hx += 12.0f + 5.0f;
-        R31Mid(dl, hx, hy, T("r_account_limits", loc), loc, k31Muted, T_S9);
-        double sum = g_pd.has_today_tokens ? (double)g_pd.today_tokens : 0.0;
-        if (!g_pd.has_today_tokens)
-            for (const Tool& t : g_pd.tools)
-                if (t.present()) sum += (double)t.usage.total();
-        const std::string right = std::string(T("r_today", loc)) + " " + R31Compact(sum) + " tokens";
-        const float rw = TextWidth(right, loc, T_S9);
-        const float rx = x + w - 10.0f - 12.0f;
-        DrawTextRun(dl, rx - 6.0f - rw, TextMid(hy, T_S9, loc), right, loc, k31Muted, T_S9);
-        I31(dl, I31_RIGHT, rx, hy - 6.0f, 12.0f, k31Faint);
-        AddHit(g_hits, x, y, x + w, y + headH, HIT_TAB31, 1102, 6, loc,
-               T("r_account_limits", loc), 0);
-    }
-    const float gx0 = x + 10.0f;
-    const float half = (w - 20.0f - 10.0f) / 2.0f;      // 177
-    dl->AddRectFilled(ImVec2(gx0 + half + 4.5f, y + headH), ImVec2(gx0 + half + 5.5f, y + h - 10.0f),
-                      k31Line);
-    for (size_t i = 0; i < qs.size(); i++) {
-        const Tool& t = *qs[i];
-        const int col = (int)i % 2, row = (int)i / 2;
-        const float cxx = gx0 + (float)col * (half + 10.0f);
-        const float cyy = y + headH + (float)row * (33.0f + 10.0f);
-        Brand31(dl, cxx, cyy + 5.5f, 22.0f, t.id, loc);
-        const float tx = cxx + 22.0f + 6.0f;
-        R31Mid(dl, tx, cyy + 11.0f, R31Short(t.id), loc, k31Fg, T_S11B);
-        // 有新鲜窗口就念窗口；只有余额（ZCode / Qoder）就念这一期还剩多少。
-        const bool winFresh = (t.quota.five.known || t.quota.week.known) &&
-                              !(R31QuotaStale(t.quota.five, now) || R31QuotaStale(t.quota.week, now));
-        const char* labKey = winFresh ? (t.quota.five.known ? "r_5h" : "r_week") : "r_remaining";
-        const int pct = winFresh ? R31RemainPct(t.quota.five.known ? t.quota.five : t.quota.week)
-                                 : R31BalancePct(R31BalanceOf(t));
-        R31Mid(dl, tx, cyy + 24.0f, T(labKey, loc), loc, k31Muted, T_S9);
-        const std::string val = std::to_string(pct) + "%";
-        const int vtier = T_N23;
-        const float vw = TextWidth(val, loc, vtier);
-        DrawTextRun(dl, cxx + half - 2.0f - vw, TextMid(cyy + 16.5f, vtier, loc), val, loc,
-                    k31Fg, vtier, -1.0f);
-        AddHit(g_hits, cxx - 2.0f, cyy, cxx + half + 2.0f, cyy + 33.0f, HIT_ACCOUNT31,
-               1103 + (int)i, 0, loc, t.name, 0);
-        g_hits.back().key = t.id;
     }
     return y + h;
 }
@@ -1832,21 +1804,8 @@ static float R31OverviewFixed(ImDrawList* dl, float x, float y, float w, int loc
             cy = R31SubList(dl, x + 46.0f, cy + 2.0f, w - 62.0f, row, 1840 + (int)i, loc);
         cy += 10.0f;
     }
-    // 额度预览（g_r31_query 非空时不画，与稿子一致）；读数陈旧的工具不进 peek
-    if (g_r31_query.empty()) {
-        if (g_r31_src != "all") {
-            const Tool* t = R31ToolOf(g_r31_src);
-            const double now = g_pd.now > 0 ? g_pd.now : (double)std::time(nullptr);
-            const bool stale = t &&
-                ((t->quota.five.known && R31QuotaStale(t->quota.five, now)) ||
-                 (t->quota.week.known && R31QuotaStale(t->quota.week, now)));
-            if (t && t->present() && R31HasUsage(*t) && !stale)
-                cy = R31PeekSingle(dl, x + 16.0f, cy, w - 32.0f, *t, loc) + 13.0f;
-        } else {
-            const float ph = R31PeekAll(dl, x + 16.0f, cy, w - 32.0f, loc, g_pd.now);
-            if (ph > cy) cy = ph + 13.0f;
-        }
-    }
+    // 额度不再在会话页单独列一块：每张卡的身份行右侧自带胶囊，
+    // 完整清单在「用量与额度」页（会话处理完消失后仍查得到）。
     // 「等你」标题：满宽 pad 0 21 9，高 26
     {
         const float hy = cy;
