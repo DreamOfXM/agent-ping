@@ -9,7 +9,7 @@ cask "agent-ping" do
   # staple → 替换同名附件，所以下面这两个 sha256 必须是**钉票之后**那一份的哈希。
   # staple 会改写字节：钉票前后的两个哈希别混用，抄错了 brew 100% 校验失败。
   on_arm do
-    sha256 "da27165544c1cc07a061b53c9c3db4095ec2321f2162ab7f18338560c68b4146"
+    sha256 "9d5d806ca9bda44f9e5b3e6dd27041d0ae8aba7ff238a776061e4b6e2c5e46ae"
     url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-arm64.zip"
   end
   on_intel do
