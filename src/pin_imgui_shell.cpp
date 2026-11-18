@@ -3486,6 +3486,11 @@ static Landing JumpTo(const Hit& h) {
         // 托盘那一菜单是 AXPress 点中的，不占键盘，面板留不留都不挡路。
         rc = ap_qoder_tray(h.title.c_str(), key, (int)sizeof key);
         tried = rc != 4;
+    } else if (h.agent_id == "dsh" && titled) {
+        // DeepSeek 桌面端没有会话级 URL，能落到某一条的只有它自己的侧栏：
+        // 平台侧读它界面树、按标题点中那一行（不在侧栏里的走它那颗搜索框筛一次）。
+        rc = ap_dsh_navigate(h.title.c_str(), h.cwd.c_str(), key, (int)sizeof key);
+        tried = rc != 4;
     }
     if (tried && rc == 0) {
         out.level = L_SESS;
@@ -3513,7 +3518,8 @@ static Landing JumpTo(const Hit& h) {
     }
     else if (tried && rc == 6) lvl = L_NEWRUN;   // 这条比 ZCode 本次启动晚，它这次的列表里没它
     else if (tried && rc == 1)
-        lvl = h.agent_id == "zcode" ? L_MISS : L_TRAY;   // 试过了，那一条不在客户端露出来的名单里
+        lvl = (h.agent_id == "zcode" || h.agent_id == "dsh") ? L_MISS : L_TRAY;
+        // 试过了，那一条不在客户端露出来的名单里（这两路的名单都在它们自己的界面里）
 
     // 缺授权时顺手发起系统那次问询（弹窗里带「打开系统设置」），并把那一格真开到屏上：
     // 回执第二行写的是「系统设置里那一格已经打开」，不真开就是谎话（10-29 逐张读实拍读出来的）。

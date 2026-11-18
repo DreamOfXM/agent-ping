@@ -2916,6 +2916,24 @@ AgentSnap scan_pi(const std::string& name, const std::string& root, double now, 
 //   job/settled                         status: completed | failed（detail 里是 exit code）
 //   assistant/message                   data.usage 四档 camelCase
 // 时间戳一律 epoch 毫秒（json_date 见毫秒会自动归一）。
+//
+// 标题：JSONL 里没有「会话叫什么」这一条事件（本机 27 个会话逐个看过，一条 session/title
+// 都没有），名字是桌面端自己起、写在自己的缓存里：
+//   ~/.dsh/storages/session_projcache/sessions/<session-uuid>.json → record.rows.title.val
+// 只读这一处，读不到就退回项目名，绝不拿首条消息去编一个像标题的东西。
+std::string dsh_cached_title(const std::string& cache_dir, const std::string& sid) {
+    if (cache_dir.empty()) return "";
+    const std::string body = slurp(join(cache_dir, sid + ".json"), 256 * 1024);
+    if (body.empty()) return "";
+    Json j;
+    if (!json_parse(body.data(), body.size(), j)) return "";
+    const Json* rec = j.at("record");
+    const Json* rows = rec ? rec->at("rows") : nullptr;
+    const Json* t = rows ? rows->at("title") : nullptr;
+    const std::string* v = t ? t->str_at("val") : nullptr;
+    return v ? *v : "";
+}
+
 AgentSnap scan_dsh(const std::string& name, const std::string& root, double now, double since) {
     AgentSnap snap;
     snap.id = "dsh"; snap.name = name; snap.client = "CLI";
@@ -2923,6 +2941,16 @@ AgentSnap scan_dsh(const std::string& name, const std::string& root, double now,
     if (!rs.ok || !rs.dir) return snap;      // 本机没装 Harness：不算「今天没活动」
     snap.available = true;
     const double cutoff = now - kDaysBack * 86400;
+
+    // <home>/.dsh/sessions → <home>/.dsh/storages/session_projcache/sessions
+    std::string title_cache;
+    {
+        const std::string tail = "/sessions";
+        if (root.size() > tail.size() &&
+            root.compare(root.size() - tail.size(), tail.size(), tail) == 0)
+            title_cache = root.substr(0, root.size() - tail.size()) +
+                          "/storages/session_projcache/sessions";
+    }
 
     for (const std::string& proj : list_dir(root)) {
         const std::string ppath = join(root, proj);
@@ -3060,6 +3088,7 @@ AgentSnap scan_dsh(const std::string& name, const std::string& root, double now,
             } else {
                 s.state = stale ? ST_RESTING : ST_NEEDS_USER;
             }
+            if (title.empty()) title = dsh_cached_title(title_cache, sid);
             s.title = !title.empty() ? utf8_clip(title, 40, "…")
                                      : (!s.project.empty() ? s.project : "DeepSeek Harness");
             snap.sessions.push_back(std::move(s));

@@ -777,6 +777,227 @@ extern "C" int ap_zcode_navigate(const char* title, const char* cwd, double crea
     return rc;
 }
 
+// ── DeepSeek Harness 会话级落点：读它侧栏那一列，按标题点中那一行 ────────────
+// 2026-11-18 在本机 DeepSeek Harness 上实测（探针 /tmp/dshx/nav.mm、search.mm，只读＋定点 press）：
+//   · 桌面端对外只有 `dsh://open` 与 `dsh://open/` 一条（app.asar 里逐字核过），动作是
+//     focusPrimaryWindow——把主窗口抬起来；`second-instance` 也只是 focusOwner，连 argv 都不看
+//     （lib/types/single-instance.js）。所以「用 URL 开到某条会话」这条路根本不存在。
+//   · 它自己的界面里，侧栏是 AXOutline，一行一个 AXRow/AXOutlineRow；AXTitle 是拼出来的：
+//     平常「状态 标题 相对时间」，搜过之后「标题 工作区名」——所以匹配只能按前缀/包含判，
+//     不许拿整串去比。
+//   · Electron 默认不建无障碍树：置 AXManualAccessibility=YES 之后才长出 AXWebArea，
+//     而且一次置不够，要连置几轮（每轮 500ms，实测 2 秒内到位）。
+//   · 头顶 AXLandmarkBanner 里第一段 AXStaticText＝当前开着哪一条，拿它当裁判：
+//     实测 press 之后 0.5 秒内就换成这一条。
+//   · 侧栏只列当前工作区的会话（本机实测 5 行＝1 个组头＋2 条会话＋2 个空组头）。
+//     别的工作区那几条不在这一列里，但它侧栏顶上那颗「搜索会话名称」能搜出来：
+//     直接 AXSetValue 就会被它收下并筛出结果（实测搜「UI还原」→ 1 行），
+//     所以没匹配上时走搜索这一档，收尾一律把输入框清回空串，别把他的侧栏留在筛选状态。
+static pid_t DshPid() {
+    for (NSRunningApplication* r in [NSWorkspace sharedWorkspace].runningApplications)
+        if ([r.bundleIdentifier isEqualToString:@"com.deepseek.dsh"]) return r.processIdentifier;
+    return -1;
+}
+
+/// 侧栏的行与标题。行元素带引用返回，调用方逐个 CFRelease；
+/// 标题取 AXTitle（拿不到才回退去读行里最内层那段文字）。
+static void DshRows(AXUIElementRef web, std::vector<AXUIElementRef>& rows,
+                    NSMutableArray<NSString*>* titles) {
+    std::vector<AXUIElementRef> found;
+    AxFind(web, true, @"AXOutlineRow", 0, found, 400);
+    for (auto r : found) {
+        if (!AxHasPress(r)) continue;
+        NSString* t = AxStr(r, CFSTR("AXTitle")) ?: AxFirstText(r, 0);
+        rows.push_back((AXUIElementRef)CFRetain(r));
+        [titles addObject:t ?: @""];
+    }
+    AxRelease(found);
+}
+
+/// 当前开着哪一条：头顶那条横幅里第一段文字。这是整条链路的裁判。
+static NSString* DshOpenTitle(AXUIElementRef web) {
+    std::vector<AXUIElementRef> bans;
+    AxFind(web, true, @"AXLandmarkBanner", 0, bans, 6);
+    NSString* out = nil;
+    for (auto b : bans) {
+        std::vector<AXUIElementRef> navs;
+        AxFind(b, true, @"AXLandmarkNavigation", 0, navs, 3);
+        for (auto n : navs) {
+            std::vector<AXUIElementRef> ts;
+            AxFind(n, false, @"AXStaticText", 0, ts, 4);
+            for (auto t : ts) {
+                NSString* v = AxStr(t, CFSTR("AXValue")) ?: AxStr(t, CFSTR("AXTitle"));
+                if (v.length) { out = v; break; }
+            }
+            AxRelease(ts);
+            if (out) break;
+        }
+        AxRelease(navs);
+        if (out) break;
+    }
+    AxRelease(bans);
+    return out;
+}
+
+/// 侧栏顶上那颗「搜索会话名称」。按占位文字认，不按位置认。
+static AXUIElementRef DshSearchField(AXUIElementRef web) {
+    std::vector<AXUIElementRef> fs;
+    AxFind(web, false, @"AXTextField", 0, fs, 8);
+    AXUIElementRef out = nil;
+    for (auto f : fs) {
+        NSString* ph = AxStr(f, CFSTR("AXPlaceholderValue"));
+        if (ph && [ph isEqualToString:@"搜索会话名称"]) { out = (AXUIElementRef)CFRetain(f); break; }
+    }
+    AxRelease(fs);
+    return out;
+}
+
+/// 行标题里带着状态与时间，所以只认「整串相等 / 前缀 / 包含」三档。
+static int DshScore(NSString* needle, NSString* row) {
+    NSString* a = NormForMatch(needle), *b = NormForMatch(row);
+    if (!a.length || !b.length) return 0;
+    if ([a isEqualToString:b]) return 100;
+    if ([b hasPrefix:a]) return 90;
+    if ([b containsString:a]) return 70;
+    return 0;
+}
+
+static int DshBest(NSString* needle, NSArray<NSString*>* titles) {
+    int best = -1, bs = 0;
+    for (NSUInteger i = 0; i < titles.count; i++) {
+        const int s = DshScore(needle, titles[i]);
+        if (s > bs) { bs = s; best = (int)i; }
+    }
+    return bs >= 70 ? best : -1;
+}
+
+extern "C" int ap_dsh_navigate(const char* title, const char* cwd, char* reason, int out_len) {
+    (void)cwd;   // 侧栏分组靠标题就够，cwd 只在「同名的两条」这种情形才有用，先不参与
+    if (!title || !*title) { Say(reason, out_len, @"DeepSeek 这一跳缺标题，退回普通落点"); return 1; }
+    {   // 防抖：连点多轮时每一轮都是整段「唤起＋建树＋读＋点」，别叠着敲
+        static double lastNavAt = 0;
+        const double now = [NSProcessInfo processInfo].systemUptime;
+        if (now - lastNavAt < 4.0) {
+            Say(reason, out_len, @"DeepSeek 这一跳 4 秒内重复触发，忽略本轮");
+            return 1;
+        }
+        lastNavAt = now;
+    }
+    if (!AXIsProcessTrusted()) {
+        Say(reason, out_len, @"未授权辅助功能，点不到 DeepSeek 侧栏里的会话");
+        return 2;
+    }
+    const pid_t pid = DshPid();
+    if (pid < 0) {
+        Say(reason, out_len, @"DeepSeek Harness 没在跑，先把它唤起来；再点一次就能落到这一条");
+        return 3;
+    }
+    if (!ActivateOrOpen(@"/Applications/DeepSeek Harness.app")) {
+        Say(reason, out_len, @"DeepSeek Harness 没唤起来，侧栏那一步放弃");
+        return 1;
+    }
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    BOOL woke = NO;
+    if (ZcodeWindowCount(app) == 0) {   // 没有窗口：发一次 reopen（与点 Dock 图标同一件事）
+        woke = [[NSWorkspace sharedWorkspace]
+            openURL:[NSURL fileURLWithPath:@"/Applications/DeepSeek Harness.app"]] ? YES : NO;
+    }
+    std::vector<AXUIElementRef> webs;
+    const int rounds = woke ? 6 : 4;
+    for (int i = 0; i < rounds && webs.empty(); i++) {
+        // 每轮都重置一次：Electron 是收到这个才肯把渲染进程的无障碍树交出来。
+        AXUIElementSetAttributeValue(app, CFSTR("AXManualAccessibility"), kCFBooleanTrue);
+        AxFind(app, false, @"AXWebArea", 0, webs, 1);
+        if (webs.empty()) usleep(500 * 1000);
+    }
+    if (webs.empty()) {
+        CFRelease(app);
+        if (woke) {
+            Say(reason, out_len, @"DeepSeek Harness 的窗口正在打开（界面还没长出来），过几秒再点一次就能落到这一条");
+            return 5;
+        }
+        Say(reason, out_len, @"DeepSeek Harness 的窗口在，但没把界面树交出来（它自己的无障碍还没就绪）");
+        return 1;
+    }
+    AXUIElementRef web = webs[0];
+
+    std::vector<AXUIElementRef> rows;
+    NSMutableArray<NSString*>* titles = [NSMutableArray array];
+    DshRows(web, rows, titles);
+    int best = DshBest(@(title), titles);
+
+    // 侧栏这一列只列当前工作区的会话，别的工作区那几条要搜：它那颗「搜索会话名称」
+    // 是全局的（实测搜「Reply」能搜出三个工作区里的会话），所以没匹配上就走这一档。
+    // 先拿整条标题搜；还空就退到前 12 个字——搜索是子串匹配，长标题偶尔因为标点
+    // 或换行拼不齐，砍短反而更容易中。两次都空才算「它这儿没有这一条」。
+    AXUIElementRef field = nil;
+    bool searched = false;
+    NSString* usedNeedle = nil;
+    if (best < 0 && (field = DshSearchField(web))) {
+        NSString* full = @(title);
+        NSMutableArray<NSString*>* needles = [NSMutableArray arrayWithObject:full];
+        if (full.length > 12) [needles addObject:[full substringToIndex:12]];
+        for (NSString* nd in needles) {
+            usedNeedle = nd;
+            searched = true;
+            AXUIElementSetAttributeValue(field, kAXFocusedAttribute, kCFBooleanTrue);
+            AXUIElementSetAttributeValue(field, kAXValueAttribute, (__bridge CFTypeRef)nd);
+            // 筛出来要点时间：最多读三轮，读到就停。
+            for (int i = 0; i < 3 && best < 0; i++) {
+                usleep(400 * 1000);
+                for (auto r : rows) CFRelease(r);
+                rows.clear(); [titles removeAllObjects];
+                DshRows(web, rows, titles);
+                best = DshBest(@(title), titles);
+            }
+            if (best >= 0) break;
+        }
+    }
+
+    int rc = 1;
+    if (best < 0) {
+        Say(reason, out_len, searched
+            ? [NSString stringWithFormat:@"DeepSeek 搜了「%@」，侧栏里没有这一条", usedNeedle ?: @""]
+            : @"DeepSeek 侧栏这一列没有这一条，它也没有可用的搜索框");
+    } else {
+        NSString* hit = titles[(NSUInteger)best];
+        const AXError e = AXUIElementPerformAction(rows[(NSUInteger)best], kAXPressAction);
+        if (e != kAXErrorSuccess) {
+            Say(reason, out_len, [NSString stringWithFormat:@"侧栏里找到了「%@」但按下去没应答（AX %d）",
+                                  hit, (int)e]);
+        } else {
+            bool landed = false;
+            for (int i = 0; i < 8; i++) {
+                usleep(400 * 1000);
+                NSString* head = DshOpenTitle(web);
+                if (head.length && DshScore(@(title), head) >= 70) { landed = true; break; }
+            }
+            if (landed) {
+                Say(reason, out_len, [NSString stringWithFormat:@"已在 DeepSeek 侧栏点中「%@」", hit]);
+                rc = 0;
+            } else {
+                Say(reason, out_len, [NSString stringWithFormat:
+                                      @"点中了 DeepSeek 侧栏「%@」，但主区没换成这一条", hit]);
+            }
+        }
+    }
+
+    // 收尾：搜索框一旦用过就必须清回空串，别把他的侧栏留在筛选状态。
+    if (searched && field) {
+        AXUIElementSetAttributeValue(field, kAXValueAttribute, (__bridge CFTypeRef)@"");
+        usleep(300 * 1000);
+    }
+    if (field) CFRelease(field);
+    for (auto r : rows) CFRelease(r);
+    CFRelease(web);
+    CFRelease(app);
+    fprintf(stderr, "[落点·DeepSeek] 侧栏 %lu 行%s → %s｜%s\n",
+            (unsigned long)titles.count, searched ? "（走的是搜索）" : "",
+            rc == 0 ? "命中" : "未落到", reason ?: "");
+    fflush(stderr);
+    return rc;
+}
+
 // ── 辅助功能授权：面板要能回答「这一档现在有没有」，并一步跳到系统设置那页 ──────
 // prompt!=0 时未授权就发起系统那次问询（macOS 会弹「XXX 想控制这台电脑」并把本 App
 // 列进辅助功能表），只发起一次，不循环骚扰。

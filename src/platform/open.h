@@ -96,6 +96,20 @@ int ap_locate_cli_session(const char* agent_id, const char* session_id, const ch
    非 0 时 reason 写明挡在哪一层，调用方按那一层决定退不退 ap_open3。 */
 int ap_zcode_navigate(const char* title, const char* cwd, double created, char* reason, int out_len);
 
+/* DeepSeek Harness 专用：会话级落点。桌面端对外只有 dsh://open 一条（动作是把主窗口
+   提到前面），second-instance 也不看参数，外部没有「开到某条会话」的入口；能落到那条
+   会话的只有它自己的侧栏：
+   ① 置 AXManualAccessibility 让它把界面树交出来（Electron 默认不建，要连置几轮），
+      读 AXOutline 里的行，按标题匹配后 AXPress，再用头顶横幅那段文字当裁判验收；
+   ② 侧栏只列当前工作区的会话，没匹配上就把它顶上那颗「搜索会话名称」写成这条标题
+      再筛一次（实测直接 AXSetValue 就会被它收下），收尾一律清回空串；
+   ③ 「一个窗口都没有」时发一次 LaunchServices 的 reopen 要回窗口，这一跳不等界面长出来。
+   返回：0 已点中且主区换成这一条 / 1 没成（唤不起、侧栏与搜索都没有这一条、按了主区没换）/
+   2 未授权辅助功能 / 3 没在跑 / 4 本平台没有这一档 /
+   5 窗口正在重开、界面还没长出来（调用方写「过几秒再点一次」）。
+   非 0 时 reason 写明挡在哪一层。 */
+int ap_dsh_navigate(const char* title, const char* cwd, char* reason, int out_len);
+
 /* Qoder 专用：读它客户端托盘里的会话条目（「会话标题，工作区名」），按名字点中那一条。
    qoder:// 没有会话级路由（2026-10-29 在 app.asar 里逐条核过），托盘是唯一能落到
    「那一条对话」的入口，因此需要辅助功能授权。

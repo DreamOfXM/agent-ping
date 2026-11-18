@@ -155,6 +155,16 @@ extern "C" int ap_zcode_navigate(const char* title, const char* cwd, double crea
     return 4;
 }
 
+// DeepSeek Harness 的会话级落点在 macOS 上是读它侧栏的行按标题点中（AX，见 open_macos.mm）。
+// 本平台没有读另一个 App 界面树并点某一行的通道，而 dsh 桌面端本身也没有会话级 URL。
+// 与 ZCode 那档同一个契约：返回 4（本平台不适用），调用方退回落点阶梯，
+// 不静默、不谎称跳到了，也不许报成「侧栏里没这一条」——那根本没读过它的树。
+extern "C" int ap_dsh_navigate(const char* title, const char* cwd, char* reason, int out_len) {
+    (void)title; (void)cwd;
+    Say(reason, out_len, "本平台没有读界面树点侧栏行的能力，落点退回唤起或打开记录目录");
+    return 4;
+}
+
 // Qoder 的会话级落点在 macOS 上是点它自己托盘里的会话条目（AX，见 open_macos.mm）。
 // Linux 侧没有等价能力：桌面环境不提供「读另一个 App 的菜单并点某一项」的通用通道，
 // 而 qoder:// 本身没有会话级路由。返回 4（这一档在本平台不适用）并写清挡在哪一层，
