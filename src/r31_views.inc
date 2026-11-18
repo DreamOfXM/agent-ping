@@ -638,11 +638,14 @@ static std::string R31Client(const std::string& id) {
     if (const Tool* t = R31ToolOf(id)) return t->client;
     return ClientTagOf(id, false);
 }
-/// 品牌标：有官方像素的五路贴图；Codex 没有独立 logo，稿子给的就是通用终端块。
+/// 品牌标：有官方像素的各家贴图；Codex 没有独立 logo，稿子给的就是通用终端块。
+/// 名单要和 RAgentTile 里的贴图分支一一对上——漏一家就会掉回「圆角块＋首字母」，
+/// dsh 就漏过一轮（2026-11-18 用户看到列表里是个 D）。
 static void Brand31(ImDrawList* dl, float x, float y, float s, const std::string& id, int loc) {
     const bool textured = (id == "qoder" || id == "claude" || id == "zcode" ||
                            id == "workbuddy" || id == "opencode" ||
-                           id == "qwenworkcn" || id == "pi" || id == "codex");
+                           id == "qwenworkcn" || id == "pi" || id == "codex" ||
+                           id == "dsh");
     if (textured) {
         const Tool* t = R31ToolOf(id);
         const ImU32 hue = t ? t->hue : IM_COL32(160, 170, 185, 255);
