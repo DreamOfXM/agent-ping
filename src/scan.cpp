@@ -1742,7 +1742,10 @@ AgentSnap scan_zcode(const std::string& name, const std::string& db_path, double
             const Json* rs = p->at("resets");
             if (!pct || pct->kind != Json::NUM || !rs || rs->kind != Json::NUM) return;
             w.known = true;
-            w.used = std::fmax(0.0, std::fmin(1.0, (100.0 - pct->num) / 100.0));
+            // 接口的 percentage 是**已用**百分比，不是剩余：2026-11-18 实测 5 小时窗口
+            // usage=12000 / currentValue=4270（＝35%）/ remaining=7729，三者对得上 currentValue。
+            // 之前按「剩余」换算，卡面把用了 35% 写成「剩 32%」，方向整个反了。
+            w.used = std::fmax(0.0, std::fmin(1.0, pct->num / 100.0));
             w.resets_at = rs->num;
             w.window_min = wmin;
             w.seen_at = q_at;    // 读数产生的时刻，不是这轮扫描的时刻
