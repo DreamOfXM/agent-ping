@@ -13,12 +13,8 @@ cask "agent-ping" do
     url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-arm64.zip"
   end
   on_intel do
-    # intel 包仍是 CI 那份（runner 上 ad-hoc 签的），没走重签+公证，直接给出去会被
-    # Gatekeeper 拒。本机也没有 x86_64 的 glfw/freetype，交叉编译不了，所以先钉在
-    # 0.1.18 的公证包上：差的是 ZCode 读数与额度胶囊两处界面改动。等 intel 包
-    # 公证完再把这两行换回 v#{version}。
-    sha256 "763ec8834ebe1234737e3e61153b0a7a3465c0014704fff0b9aefb9d1f877947"
-    url "https://github.com/DreamOfXM/agent-ping/releases/download/v0.1.18/Agent-Ping-macos-x86_64.zip"
+    sha256 "08cba2ad8f78c40b64bf1d5a695c99531130c7f3aa0bdf9286d881b3143a5ce4"
+    url "https://github.com/DreamOfXM/agent-ping/releases/download/v#{version}/Agent-Ping-macos-x86_64.zip"
   end
 
   name "Agent Ping"
