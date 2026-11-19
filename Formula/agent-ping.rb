@@ -1,11 +1,11 @@
 class AgentPing < Formula
   desc "Menu-bar panel showing which AI coding agent is running, waiting, or stuck"
   homepage "https://github.com/DreamOfXM/agent-ping"
-  version "0.1.22"
+  version "0.1.23"
   # URL 里的标签名跟着 version 走：0.1.7 那次 version/url/sha256 三行各写各的，
   # 版本号一挪就有人只改其中一行，装出来的是上一版的源码。
   url "https://github.com/DreamOfXM/agent-ping/archive/refs/tags/v#{version}.tar.gz"
-  sha256 "c8403dcb6fc94063e006e4839e2731af7b1488fee17d7ae28b65cef8c41972c0"
+  sha256 "97a3b3e36558d64a17a1151bd8f00ffc296e92e9c940741e2f5bf0d18e42b4e5"
   license "Apache-2.0"
 
   depends_on macos: :ventura
