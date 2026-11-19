@@ -1521,7 +1521,6 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
     const bool beyond = (maxTurns > 0 && r.turns > maxTurns);
     float h = 10.0f + 24.0f + 36.0f + (maxTurns > 0 ? 4.0f : 0.0f) + 7.0f + 15.0f;
     if (!r.children.empty()) h += 4.0f + 15.0f;      // 「⌄ N 条子对话」芯片那一行
-    if (hasUsage) h += 8.0f + 15.0f;
     if (g_r31_explain) h += 8.0f + (float)explainLines * 17.6f;
     if (beyond) h += 8.0f + 17.6f;
     h += 11.0f;
@@ -1592,12 +1591,13 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
             dl->PopClipRect();
         }
     }
-    // run-labels：y+(81)。左 第 N 轮；右「今日最长 M 轮」按钮（整段文字下 1pt 点线）
+    // run-labels：y+(81)。一行放完：左「第 N 轮 · 3.18M tokens」，右「今日最长 M 轮」
+    // （整段文字下 1pt 点线）。两行并一行是为了卡高：130 → 107。
     {
         const float ly = y + 70.0f + (maxTurns > 0 ? 4.0f : 0.0f) + 7.0f;
         const float cy = ly + 7.5f;
-        R31FmtN(dl, bodyL, TextMid(cy, T_S10, loc), T("r_turn", loc), (long)r.turns, loc, T_S10,
-                k31Muted, k31Sec, T_S10B);
+        // 右侧按钮先摆：左侧用量要按它的左缘收口，不然德语长文案会顶上去。
+        float leftLimit = inR;
         if (maxTurns > 0) {
             const std::string lab = RFmt(T("r_longest", loc), maxTurns);
             const float lw = TextWidth(lab, loc, T_S10);
@@ -1606,28 +1606,30 @@ static float R31RunCard(ImDrawList* dl, float x, float y, float w, const UIRow& 
             dl->AddLine(ImVec2(bx, ly + 15.0f), ImVec2(inR, ly + 15.0f), WithA(k31Faint, 140), 1.0f);
             AddHit(g_hits, bx - 3.0f, ly - 2.0f, inR + 3.0f, ly + 17.0f, HIT_EXPLAIN, 701, 0, loc,
                    lab, g_r31_explain ? 1 : 0);
+            leftLimit = bx - 12.0f;
+        }
+        float cx = bodyL + R31FmtN(dl, bodyL, TextMid(cy, T_S10, loc), T("r_turn", loc),
+                                   (long)r.turns, loc, T_S10, k31Muted, k31Sec, T_S10B);
+        if (hasUsage) {
+            // 用量接在轮次后面，同一条基线：中间一颗「·」隔开，读起来是一句。
+            float ux = R31Mid(dl, cx + 6.0f, cy, "·", loc, WithA(k31Muted, 140), T_S10) + 6.0f;
+            std::string u;
+            if (r.has_tokens) u = R31Compact((double)r.tokens) + " tokens";
+            if (r.has_credits) {
+                if (!u.empty()) u += " · ";
+                u += R31Num(r.credits) + " Credits";
+            }
+            DrawTextRun(dl, ux, TextMid(cy, T_S10, loc),
+                        ClipToWidth(u, leftLimit - ux, loc, T_S10), loc, k31Sec, T_S10);
         }
     }
     // 「⌄ N 条子对话」芯片行：紧接 run-labels
     if (!r.children.empty())
         R31SubChip(dl, bodyL, y + 70.0f + (maxTurns > 0 ? 4.0f : 0.0f) + 7.0f + 15.0f + 11.5f, r,
                    1840 + idx, loc);
-    // run-usage：y+(104..119)
+    // run-usage 并入上一行（0.1.22）：用量与轮次同一条基线，不再单独占一行。
     float cy = y + 70.0f + (maxTurns > 0 ? 4.0f : 0.0f) + 7.0f + 15.0f +
                (r.children.empty() ? 0.0f : 19.0f);
-    if (hasUsage) {
-        cy += 8.0f;
-        const float ucy = cy + 7.5f;
-        float ux = bodyL;
-        if (r.has_tokens)
-            ux = R31Mid(dl, ux, ucy, R31Compact((double)r.tokens) + " tokens", loc, k31Sec, T_S10);
-        if (r.has_credits) {
-            if (r.has_tokens) ux += 8.0f;
-            R31Mid(dl, ux, ucy, R31Num(r.credits) + " Credits", loc, k31Sec, T_S10);
-        }
-        DrawTextRight(dl, inR, TextMid(ucy, T_S9, loc), T("r_session_total", loc), loc, k31Muted, T_S9);
-        cy += 15.0f;
-    }
     if (g_r31_explain) {
         cy += 8.0f;
         cy = R31DrawWrap(dl, T("r_turn_explain", loc), bodyL, cy, inR - bodyL, loc, T_S11, 17.6f,
