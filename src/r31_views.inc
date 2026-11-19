@@ -1466,9 +1466,23 @@ static float R31QuotaPill(ImDrawList* dl, float rightX, float cy, const UIRow& r
     if (segs.empty()) {
         const ap::Balance b = R31BalanceOf(*t);
         if (!b.known) return 0.0f;
-        std::string s = R31Compact(b.remaining);
-        if (b.total > 0) s += " / " + R31Compact(b.total);
-        if (!b.unit.empty()) s += " " + b.unit;
+        // 余额是账，不是估算：能写完整就写完整（3,960 比 3.96K 好读）。
+        // token 数天生七八位，仍走紧凑档；完整写法挤到左边栏时也退回紧凑。
+        const bool counted = (b.unit == "tokens");
+        // 三位数以上的余额，小数位没有意义（3,963.65 积分 → 3,964 积分）；一元以下才留小数。
+        const auto norm = [](double v) { return v >= 100.0 ? std::round(v) : v; };
+        auto spell = [&](bool full) {
+            const auto f = [&](double v) {
+                const double n = norm(v);
+                return (full || counted) ? R31Num(n) : R31Compact(n);
+            };
+            std::string s = f(b.remaining);
+            if (b.total > 0) s += " / " + f(b.total);
+            if (!b.unit.empty()) s += " " + b.unit;
+            return s;
+        };
+        std::string s = spell(true);
+        if (rightX - (TextWidth(s, loc, T_S10B) + 16.0f) < limitL) s = spell(false);
         segs.push_back({"", s});
         stale = R31BalanceStale(b, now);
     }
@@ -1953,11 +1967,16 @@ static float R31BalanceCell(ImDrawList* dl, float x, float y, float w, const ap:
                             int loc, double now) {
     const bool stale = R31BalanceStale(b, now);
     const int pct = R31BalancePct(b);
+    // 余额是账：能写完整就写完整；token 数太长，仍走紧凑档。三位数以上不留小数。
+    auto amt = [&](double v) {
+        const double n = v >= 100.0 ? std::round(v) : v;
+        return b.unit == "tokens" ? R31Compact(n) : R31Num(n);
+    };
     std::string lab = T("r_remaining", loc);
     if (!b.label.empty()) lab += " · " + b.label;
     R31Mid(dl, x, y + 7.0f, ClipToWidth(lab, w * 0.5f, loc, T_S10), loc, k31Sec, T_S10);
     if (pct >= 0) {
-        std::string abs = R31Compact(b.remaining) + " / " + R31Compact(b.total);
+        std::string abs = amt(b.remaining) + " / " + amt(b.total);
         if (!b.unit.empty()) abs += " " + b.unit;
         DrawTextRight(dl, x + w, TextMid(y + 7.0f, T_S9, loc),
                       ClipToWidth(abs, w * 0.48f, loc, T_S9), loc, k31Muted, T_S9);
@@ -1971,7 +1990,11 @@ static float R31BalanceCell(ImDrawList* dl, float x, float y, float w, const ap:
         DrawTextRun(dl, x + nw + 2.0f, TextMid(y + 23.0f, T_S13B, loc), "%", loc, k31Muted,
                     T_S13B);
     } else {
-        const std::string big = R31Compact(b.remaining);
+        // 大数字占半格宽：完整写法放不下时退一位紧凑档，别让它压到右边那格。
+        std::string big = amt(b.remaining);
+        const float unitW = b.unit.empty() ? 0.0f : TextWidth(b.unit, loc, T_S13B) + 5.0f;
+        if (TextWidth(big, loc, T_N28, -0.6f) + unitW > w - 4.0f)
+            big = R31Compact(b.remaining);
         DrawTextRun(dl, x, TextMid(y + 20.0f, T_N28, loc), big, loc, stale ? k31Muted : k31Fg,
                     T_N28, -0.6f);
         if (!b.unit.empty())
@@ -2600,9 +2623,12 @@ static float R31QuotaCard(ImDrawList* dl, float x, float y, float w, const Tool&
             if (!note.empty()) note += " · ";
             note += RFmt(T("r_ends_at", loc), R31LimitStamp(balance.period_end).c_str());
         }
-        std::string value = balance.unit == "tokens" ? R31Compact(balance.remaining) : R31Num(balance.remaining);
-        if (balance.total > 0)
-            value += " / " + (balance.unit == "tokens" ? R31Compact(balance.total) : R31Num(balance.total));
+        const auto balAmt = [&](double v) {
+            const double n = v >= 100.0 ? std::round(v) : v;
+            return balance.unit == "tokens" ? R31Compact(n) : R31Num(n);
+        };
+        std::string value = balAmt(balance.remaining);
+        if (balance.total > 0) value += " / " + balAmt(balance.total);
         std::string label = T("r_remaining", loc);
         if (!balance.label.empty()) label += " · " + balance.label;
         readings.push_back({label, value, balance.unit, note, R31BalancePct(balance), stale});
